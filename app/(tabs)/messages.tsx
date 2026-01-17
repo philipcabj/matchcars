@@ -4,7 +4,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -82,7 +82,7 @@ export default function MessagesTab() {
 
     const fetchProfiles = async () => {
       const newProfiles = new Map<string, any>();
-      const { doc, getDoc } = require("firebase/firestore");
+      // const { doc, getDoc } = require("firebase/firestore");
 
       await Promise.all(
         uniqueMissing.map(async (uid) => {

@@ -9,7 +9,6 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Dimensions,
     FlatList,
     ScrollView,
@@ -156,6 +155,7 @@ export default function CarDetailsScreen() {
     router.push("/(tabs)");
   };
 
+/*
   const handleContact = async () => {
     if (!user || !vehicle) return;
     
@@ -170,6 +170,7 @@ export default function CarDetailsScreen() {
         Alert.alert("Error", "No se puede contactar a este usuario.");
     }
   };
+*/
 
   if (loading) {
     return (

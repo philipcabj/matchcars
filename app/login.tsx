@@ -6,6 +6,7 @@ import { getAuthErrorMessage } from "@/utils/firebaseErrors";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  Alert,
   Platform,
   StyleSheet,
   Text,
@@ -18,14 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
-let GoogleSignin: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const googleSigninModule = require('@react-native-google-signin/google-signin');
-  GoogleSignin = googleSigninModule.GoogleSignin;
-} catch (e) {
-  console.log("GoogleSignin native module not found (running in Expo Go?)");
-}
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
@@ -33,7 +27,6 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
 } from "firebase/auth";
-import { Alert } from "react-native";
 
 // Necesario para completar el flujo en Expo Go
 WebBrowser.maybeCompleteAuthSession();
@@ -63,7 +56,7 @@ export default function LoginScreen() {
   const { theme } = useTheme();
   const styles = createStyles(theme);
   const router = useRouter();
-  const { loginWithEmail, loginWithFacebook, loginWithApple, resetPassword } = useAuth();
+  const { loginWithEmail, loginWithApple, resetPassword } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -89,32 +82,6 @@ export default function LoginScreen() {
         });
     }
   }, []);
-
-  const signInWithGoogle = async () => {
-    if (!GoogleSignin) return;
-    try {
-      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-
-      const userInfo: any = await GoogleSignin.signIn();
-
-      const idToken = userInfo.idToken;
-      if (!idToken) {
-        console.log("No idToken returned");
-        return;
-      }
-
-      const credential = GoogleAuthProvider.credential(idToken);
-
-      const userCredential = await signInWithCredential(auth, credential);
-
-      console.log("Usuario logueado:", userCredential.user);
-
-      return userCredential.user;
-
-    } catch (error) {
-      console.log("Error en Google Sign-In:", error);
-    }
-  };
 
   // 🔑 Login email/password
   const handleEmailLogin = async () => {
