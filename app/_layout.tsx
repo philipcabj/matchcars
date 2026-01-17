@@ -1,24 +1,71 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+// app/_layout.tsx
+import { Stack, usePathname, Redirect } from "expo-router";
+import React, { useEffect } from "react";
+import { ActivityIndicator, Text, View, Platform } from "react-native";
+import * as NavigationBar from 'expo-navigation-bar';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+function RootStack() {
+  const { theme } = useTheme();
+  const { user, profile, initializing } = useAuth();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setVisibilityAsync('hidden');
+      NavigationBar.setBehaviorAsync('overlay-swipe');
+    }
+  }, []);
+
+  // Solo spinner mientras Firebase inicializa la sesión
+  if (initializing) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.background,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <ActivityIndicator color={theme.accent} />
+        <Text
+          style={{
+            color: theme.text,
+            marginTop: 12,
+          }}
+        >
+          Cargando sesión...
+        </Text>
+      </View>
+    );
+  }
+
+  // Redirigir a Términos si el usuario no los aceptó aún (evitar bucle si ya estamos en /terms)
+  if (user && profile && profile.acceptedTerms !== true && pathname !== "/terms") {
+    return <Redirect href="/terms" />;
+  }
+
+  // Siempre tenemos las tabs; login/register son pantallas aparte
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="register" options={{ headerShown: false }} />
+      <Stack.Screen name="terms" options={{ headerShown: false }} />
+      {/* acá podés agregar screens como add-car si no están dentro de tabs */}
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
+    <ThemeProvider>
+      <AuthProvider>
+        <RootStack />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

@@ -1,10 +1,12 @@
-import { useTheme } from "@/contexts/ThemeContext";
-import { Ionicons } from "@expo/vector-icons";
+// app/(tabs)/_layout.tsx
 import { Tabs } from "expo-router";
-import React from "react";
+import { Ionicons } from "@expo/vector-icons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useTheme } from "@/contexts/ThemeContext";
+
 
 export default function TabsLayout() {
-  const { theme } = useTheme();
+const { theme } = useTheme();
 
   return (
     <Tabs
@@ -12,10 +14,6 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textMuted,
-        tabBarLabelStyle: {
-          fontSize: 9,
-          marginBottom: 4,
-        },
         tabBarStyle: {
           backgroundColor: theme.tabBackground,
           borderTopColor: "#00000033",
@@ -27,7 +25,12 @@ export default function TabsLayout() {
         options={{
           title: "Autos",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"car-sport-outline" as any} size={size ?? 24} color={color} />
+               <Ionicons
+              // 👇 casteamos para que TS no joda
+              name={"car-sport-outline" as any}
+              size={size ?? 24}
+              color={color}
+            />
           ),
         }}
       />
@@ -36,16 +39,11 @@ export default function TabsLayout() {
         options={{
           title: "Favoritos",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"heart-outline" as any} size={size ?? 24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="matches"
-        options={{
-          title: "Matches",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"heart" as any} size={size ?? 24} color={color} />
+              <Ionicons
+              name={"heart-outline" as any}
+              size={size ?? 24}
+              color={color}
+            />
           ),
         }}
       />
@@ -54,16 +52,16 @@ export default function TabsLayout() {
         options={{
           title: "Interesados",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"people-outline" as any} size={size ?? 24} color={color} />
+            <MaterialIcons name="group" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="messages"
+        name="matches"
         options={{
-          title: "Mensajes",
+          title: "Matches",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"chatbubbles-outline" as any} size={size ?? 24} color={color} />
+            <MaterialIcons name="favorite-border" size={size} color={color} />
           ),
         }}
       />
@@ -72,7 +70,11 @@ export default function TabsLayout() {
         options={{
           title: "Mis autos",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name={"albums-outline" as any} size={size ?? 24} color={color} />
+             <Ionicons
+              name={"albums-outline" as any}
+              size={size ?? 24}
+              color={color}
+            />
           ),
         }}
       />

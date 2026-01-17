@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "313901436661",
+    "project_id": "match-cars-f895d",
+    "storage_bucket": "match-cars-f895d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:313901436661:android:d929bcd9b6d9de9cbfffbc",
+        "android_client_info": {
+          "package_name": "com.matchcars.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "313901436661-i6bavhae57ddjbqkiibfprv32bigggko.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.matchcars.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "313901436661-q27lagqcb4c9u7n4cbotavftfob45dra.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2fiMg1hlghL7E_bSsp16H3czFbPi0_ZQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "313901436661-q27lagqcb4c9u7n4cbotavftfob45dra.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "313901436661-0rf9tgt5a1dhh0dq9i6rfjrcq8a68m24.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "match-cars.com"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

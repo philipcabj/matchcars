@@ -7,14 +7,10 @@
     "icon": "./assets/images/icono.png",
     "scheme": "matchcars",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.matchcars.app",
-      "googleServicesFile": "./GoogleService-Info.plist",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+      "bundleIdentifier": "com.matchcars.app"
     },
     "android": {
       "package": "com.matchcars.app",
@@ -25,8 +21,7 @@
         "monochromeImage": "./assets/images/icono.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "googleServicesFile": "./google-services.json"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
@@ -47,31 +42,11 @@
         }
       ],
       "expo-web-browser",
-      "expo-font",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "windowSoftInputMode": "adjustResize"
-          },
-          "ios": {
-            "useFrameworks": "static"
-          }
-        }
-      ],
-      "@react-native-google-signin/google-signin",
-      "./plugins/with-ios-fix"
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "64f57206-4719-4eff-afdc-1754a37344bd"
-      }
-    },
-    "owner": "fguarino"
+    }
   }
 }
