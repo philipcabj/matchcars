@@ -10,9 +10,18 @@
     "preview": {
       "distribution": "internal"
     },
-    "production": {}
+    "production": {
+      "distribution": "store"
+    }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6757968664",
+        "ascApiKeyPath": "./keys/AuthKey_923HLR29A3.p8",
+        "ascApiKeyId": "923HLR29A3",
+        "ascApiKeyIssuerId": "b76cfc78-0e3a-4719-b69e-6ca7166cd3b6"
+      }
+    }
   }
 }

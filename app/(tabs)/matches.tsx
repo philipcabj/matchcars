@@ -1,21 +1,30 @@
 import { Header } from "@/components/Header";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNotifications } from "@/contexts/NotificationContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
-import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function MatchesTab() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { markMatchesAsSeen } = useNotifications();
   const router = useRouter();
+
+  useFocusEffect(
+    useCallback(() => {
+        markMatchesAsSeen();
+    }, [])
+  );
   const [loading, setLoading] = useState(true);
   const [likersOfMine, setLikersOfMine] = useState<Map<string, Set<string>>>(new Map());
   const [ownersILiked, setOwnersILiked] = useState<Map<string, Set<string>>>(new Map());
-  const [profiles, setProfiles] = useState<Map<string, { name: string; initials: string; avatarColor: string }>>(new Map());
+  const [profiles, setProfiles] = useState<Map<string, { name: string; initials: string; avatarColor: string; photoUrl?: string | null }>>(new Map());
   const [myVehicles, setMyVehicles] = useState<Map<string, any>>(new Map());
   const [otherVehicles, setOtherVehicles] = useState<Map<string, any>>(new Map());
 
@@ -124,15 +133,16 @@ export default function MatchesTab() {
           initials = em ? String(em).slice(0, 2).toUpperCase() : "MC";
         }
         const avatarColor = data?.avatarColor || theme.accent;
-        setProfiles((prev) => new Map(prev).set(uid, { name, initials, avatarColor }));
+        const photoUrl = data?.photoURL || data?.avatar || null;
+        setProfiles((prev) => new Map(prev).set(uid, { name, initials, avatarColor, photoUrl }));
       } catch {
-        setProfiles((prev) => new Map(prev).set(uid, { name: uid, initials: String(uid).slice(0, 2).toUpperCase(), avatarColor: theme.accent }));
+        setProfiles((prev) => new Map(prev).set(uid, { name: uid, initials: String(uid).slice(0, 2).toUpperCase(), avatarColor: theme.accent, photoUrl: null }));
       }
     })).catch(() => {});
   }, [likersOfMine, ownersILiked, profiles, theme.accent]);
 
   const matchesList = useMemo(() => {
-    const arr: { userId: string; mineCount: number; theirCount: number; name: string; initials: string; avatarColor: string }[] = [];
+    const arr: { userId: string; mineCount: number; theirCount: number; name: string; initials: string; avatarColor: string; photoUrl?: string | null }[] = [];
     const candidateUids = new Set<string>();
     likersOfMine.forEach((_, uid) => candidateUids.add(uid));
     ownersILiked.forEach((_, uid) => candidateUids.add(uid));
@@ -146,14 +156,15 @@ export default function MatchesTab() {
       const name = prof?.name || uid;
       const initials = prof?.initials || String(uid).slice(0, 2).toUpperCase();
       const avatarColor = prof?.avatarColor || theme.accent;
-      arr.push({ userId: uid, mineCount: mine.size, theirCount: theirs.size, name, initials, avatarColor });
+      const photoUrl = prof?.photoUrl;
+      arr.push({ userId: uid, mineCount: mine.size, theirCount: theirs.size, name, initials, avatarColor, photoUrl });
     });
     arr.sort((a, b) => (b.mineCount + b.theirCount) - (a.mineCount + a.theirCount));
     return arr;
   }, [likersOfMine, ownersILiked, profiles, theme.accent, user]);
 
   const matchPairs = useMemo(() => {
-    const arr: { userId: string; myVehicle?: any; theirVehicle?: any; name: string; initials: string; avatarColor: string }[] = [];
+    const arr: { userId: string; myVehicle?: any; theirVehicle?: any; name: string; initials: string; avatarColor: string; photoUrl?: string | null }[] = [];
     const candidateUids = new Set<string>();
     likersOfMine.forEach((_, uid) => candidateUids.add(uid));
     ownersILiked.forEach((_, uid) => candidateUids.add(uid));
@@ -167,10 +178,11 @@ export default function MatchesTab() {
       const myVehicle = myVehicles.get(myId);
       const theirVehicle = otherVehicles.get(theirId);
       const prof = profiles.get(uid);
-      const name = prof?.name || uid;
+      const name = prof?.name || "Usuario";
       const initials = prof?.initials || String(uid).slice(0, 2).toUpperCase();
       const avatarColor = prof?.avatarColor || theme.accent;
-      arr.push({ userId: uid, myVehicle, theirVehicle, name, initials, avatarColor });
+      const photoUrl = prof?.photoUrl;
+      arr.push({ userId: uid, myVehicle, theirVehicle, name, initials, avatarColor, photoUrl });
     });
     return arr;
   }, [likersOfMine, ownersILiked, profiles, myVehicles, otherVehicles, user, theme.accent]);
@@ -227,10 +239,26 @@ export default function MatchesTab() {
                       {item.myVehicle?.price != null && item.myVehicle?.currency ? `${item.myVehicle.currency} ${Number(item.myVehicle.price).toLocaleString()}` : "Consultar"}
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={() => router.push({ pathname: "/(screens)/chat/[uid]", params: { uid: item.userId } })} style={{ width: 60, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 }}>
-                    <Text style={{ color: theme.accent, fontWeight: "800", textAlign: "center", fontSize: 14 }}>Match!</Text>
+                  <TouchableOpacity onPress={() => {
+                      const params: any = { uid: item.userId, name: item.name };
+                      if (item.theirVehicle) {
+                          params.vehicleId = item.theirVehicle.id;
+                          params.vehicleData = JSON.stringify({
+                              id: item.theirVehicle.id,
+                              brand: item.theirVehicle.brand,
+                              model: item.theirVehicle.model,
+                              year: item.theirVehicle.year,
+                              price: item.theirVehicle.price,
+                              currency: item.theirVehicle.currency,
+                              cover: item.theirVehicle.coverImage
+                          });
+                      }
+                      router.push({ pathname: "/(screens)/chat/[uid]", params });
+                  }} style={{ width: 60, alignItems: "center", justifyContent: "center", gap: 4 }}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={24} color={theme.accent} />
+                    <Text style={{ color: theme.accent, fontWeight: "700", textAlign: "center", fontSize: 12 }}>Chat</Text>
                   </TouchableOpacity>
-                  <View style={{ width: 120 }}>
+                  <TouchableOpacity onPress={() => item.theirVehicle?.id && router.push(`/car/${item.theirVehicle.id}`)} style={{ width: 120 }}>
                     <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: "center", marginBottom: 4 }} numberOfLines={1} ellipsizeMode="tail">{item.name}</Text>
                     {item.theirVehicle?.coverImage ? (
                       <Image source={{ uri: item.theirVehicle.coverImage }} style={{ width: 120, height: 90, borderRadius: 8 }} />
@@ -243,7 +271,7 @@ export default function MatchesTab() {
                     <Text style={{ color: theme.price, fontSize: 12, fontWeight: "700" }}>
                       {item.theirVehicle?.price != null && item.theirVehicle?.currency ? `${item.theirVehicle.currency} ${Number(item.theirVehicle.price).toLocaleString()}` : "Consultar"}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
               </View>
             )}

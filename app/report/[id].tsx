@@ -1,18 +1,18 @@
+import { CustomAlert } from "@/components/CustomAlert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, increment, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  ScrollView
+    ActivityIndicator,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -25,6 +25,22 @@ export default function ReportScreen() {
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [loading, setLoading] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({ 
+    visible: false, 
+    title: "", 
+    message: "", 
+    type: "info" as "success" | "error" | "info" | "warning",
+    onClose: () => {}
+  });
+
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info", onClose = () => {}) => {
+    setAlertConfig({ visible: true, title, message, type, onClose });
+  };
+
+  const closeAlert = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+    if (alertConfig.onClose) alertConfig.onClose();
+  };
 
   const REASONS = [
     "Contenido inapropiado",
@@ -36,7 +52,7 @@ export default function ReportScreen() {
 
   const handleSubmit = async () => {
     if (!reason) {
-      Alert.alert("Error", "Seleccioná un motivo.");
+      showAlert("Error", "Seleccioná un motivo.", "error");
       return;
     }
     if (!user) return;
@@ -52,12 +68,27 @@ export default function ReportScreen() {
         createdAt: serverTimestamp(),
         status: "pending"
       });
+
+      if (type === "user") {
+        // Bloquear al usuario automáticamente
+        const userRef = doc(db, "users", user.uid, "blocked", id as string);
+        await setDoc(userRef, {
+            blockedAt: serverTimestamp(),
+            reason,
+        });
+
+        // Incrementar flags del usuario reportado
+        try {
+            const reportedUserRef = doc(db, "users", id as string);
+            await updateDoc(reportedUserRef, { flags: increment(1) });
+        } catch (e) {
+            console.log("Error incrementing flags:", e);
+        }
+      }
       
-      Alert.alert("Reporte enviado", "Gracias por ayudarnos a mantener segura la comunidad.", [
-        { text: "OK", onPress: () => router.back() }
-      ]);
-    } catch (e) {
-      Alert.alert("Error", "No se pudo enviar el reporte.");
+      showAlert("Reporte enviado", "Gracias por ayudarnos a mantener segura la comunidad. Se ha bloqueado la comunicación con este usuario.", "success", () => router.back());
+    } catch {
+      showAlert("Error", "No se pudo enviar el reporte.", "error");
     } finally {
       setLoading(false);
     }
@@ -158,6 +189,14 @@ export default function ReportScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
+
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={closeAlert}
+      />
     </SafeAreaView>
   );
 }

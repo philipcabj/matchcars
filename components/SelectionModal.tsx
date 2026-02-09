@@ -34,7 +34,8 @@ export function SelectionModal({
   searchable = true,
   placeholder = "Buscar...",
   variant = "modal",
-}: SelectionModalProps) {
+  allowAdd = false,
+}: SelectionModalProps & { allowAdd?: boolean }) {
   const { theme } = useTheme();
   const [query, setQuery] = useState("");
 
@@ -45,9 +46,11 @@ export function SelectionModal({
     );
   }, [options, query]);
 
+  const showAddOption = allowAdd && query.trim().length > 0 && !options.some(opt => opt.toLowerCase() === query.toLowerCase());
+
   if (!visible && variant === "modal") return null;
 
-  const Content = () => (
+  const renderContent = () => (
     <View style={{ flex: 1, backgroundColor: variant === "inline" ? "transparent" : theme.card, borderRadius: variant === "modal" ? 16 : 0, overflow: "hidden" }}>
       {variant === "modal" && (
         <View style={[styles.header, { borderBottomColor: theme.badgeBorder }]}>
@@ -97,12 +100,35 @@ export function SelectionModal({
         </View>
       )}
 
+      {showAddOption && (
+        <TouchableOpacity
+          onPress={() => {
+            onSelect(query.trim());
+            setQuery("");
+            onClose();
+          }}
+          style={[
+            styles.optionItem,
+            {
+              borderBottomColor: theme.likeBoxBackground,
+            },
+          ]}
+        >
+           <Ionicons name="add-circle-outline" size={22} color={theme.accent} style={{ marginRight: 8 }} />
+           <Text style={[styles.optionText, { color: theme.accent, fontWeight: "600" }]}>
+             Agregar "{query}"
+           </Text>
+        </TouchableOpacity>
+      )}
+
       {filteredOptions.length === 0 ? (
+        !showAddOption && (
         <View style={styles.emptyContainer}>
           <Text style={[styles.emptyText, { color: theme.textMuted }]}>
             No se encontraron resultados
           </Text>
         </View>
+        )
       ) : variant === "inline" ? (
         <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -207,7 +233,7 @@ export function SelectionModal({
     if (!visible) return null; // Or keep it visible if inline logic differs, but user code toggles visibility.
     return (
       <View style={{ marginTop: 8, borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 10, overflow: 'hidden', backgroundColor: theme.card }}>
-        <Content />
+        {renderContent()}
       </View>
     );
   }
@@ -221,7 +247,7 @@ export function SelectionModal({
     >
       <View style={styles.modalOverlay}>
         <View style={[styles.modalContent, { backgroundColor: theme.card, borderColor: theme.badgeBorder }]}>
-            <Content />
+            {renderContent()}
         </View>
       </View>
     </Modal>

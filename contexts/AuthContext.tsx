@@ -24,25 +24,15 @@ import {
 } from "firebase/auth";
 
 import { auth, db } from "@/lib/firebase";
+import { TrustLevel } from "@/types/commerce";
+import { SubscriptionPlan, UserProfile, UserRole } from "@/types/user";
 import * as AppleAuthentication from "expo-apple-authentication";
-import { collection, deleteDoc, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { Timestamp, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { Platform } from "react-native";
 
 WebBrowser.maybeCompleteAuthSession(); // Cierra bien el flujo OAuth
 
-type Role = "user" | "moderator" | "admin";
-
-export interface UserProfile {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role: Role;
-  initials: string;
-  avatarColor: string;
-  createdAt?: any;
-  acceptedTerms?: boolean;
-}
+export { SubscriptionPlan, UserProfile, UserRole };
 
 interface AuthContextValue {
   user: User | null;
@@ -56,13 +46,18 @@ interface AuthContextValue {
     acceptedTerms?: boolean;
   }) => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: (idToken: string) => Promise<void>;   // ✔️ CORREGIDO
+  loginWithGoogle: (idToken: string) => Promise<void>;
   loginWithFacebook: () => Promise<void>;
   loginWithApple: () => Promise<void>;
   acceptTerms: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
+  updatePlan: (plan: SubscriptionPlan, billingCycle?: "monthly" | "annual", customExpirationDate?: Date) => Promise<void>; // Deprecated: Use RevenueCat logic
+  cancelSubscription: () => Promise<void>; // Deprecated: Use RevenueCat logic
+  refreshTrustLevel: () => Promise<void>;
+  blockUser: (userIdToBlock: string) => Promise<void>;
+  unblockUser: (userIdToUnblock: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -109,41 +104,98 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Escuchar cambios de sesión (Firebase Auth)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+    let unsubProfile: (() => void) | undefined;
+
+    const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
-      setInitializing(false);
-      try {
-        if (firebaseUser) {
-          const ref = doc(db, "users", firebaseUser.uid);
-          const snap = await getDoc(ref);
+      
+      // Clean up previous profile listener if any
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = undefined;
+      }
+
+      if (firebaseUser) {
+        const ref = doc(db, "users", firebaseUser.uid);
+        
+        // Update login count logic
+        getDoc(ref).then((snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                const lastLogin = data.lastLoginAt?.toDate ? data.lastLoginAt.toDate() : (data.lastLoginAt ? new Date(data.lastLoginAt) : new Date(0));
+                const now = new Date();
+                const hoursDiff = (now.getTime() - lastLogin.getTime()) / (1000 * 3600);
+                
+                if (hoursDiff > 1) {
+                    updateDoc(ref, { 
+                        loginCount: increment(1),
+                        lastLoginAt: serverTimestamp()
+                    }).catch(err => console.error("Error updating login stats", err));
+                }
+            }
+        });
+
+        // Escuchar cambios en el perfil en tiempo real
+        unsubProfile = onSnapshot(ref, (snap) => {
           if (snap.exists()) {
-            const data = snap.data() as UserProfile;
-            setProfile({ ...data, id: firebaseUser.uid });
+            const data = snap.data() as any;
+            setProfile({ 
+              ...data, 
+              id: firebaseUser.uid,
+              plan: data.plan || (data.isPro ? "pro_monthly" : "free") // Migración segura
+            });
           } else {
+            // Fallback para usuarios sin documento en firestore (edge case)
             const email = (firebaseUser.email ?? "").trim().toLowerCase();
-            const fallbackInitials =
-              email.length >= 2 ? email.slice(0, 2).toUpperCase() : "MC";
-            const minimalProfile: UserProfile = {
+            const fallbackInitials = email.length >= 2 ? email.slice(0, 2).toUpperCase() : "MC";
+            setProfile({
               id: firebaseUser.uid,
               firstName: "",
               lastName: "",
               email,
               role: "user",
+              plan: "free",
               initials: fallbackInitials,
               avatarColor: getAvatarColorFromEmail(email),
               acceptedTerms: false,
-            };
-            setProfile(minimalProfile);
+              trustLevel: "new",
+              salesCount: 0,
+              loginCount: 1,
+            });
           }
-        } else {
-          setProfile(null);
-        }
-      } catch (e) {
+          setInitializing(false);
+        }, (error) => {
+            console.error("Profile snapshot error:", error);
+            setInitializing(false);
+        });
+      } else {
         setProfile(null);
+        setInitializing(false);
       }
     });
-    return () => unsub();
+
+    return () => {
+      unsubAuth();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
+
+  // Check for subscription expiration
+  useEffect(() => {
+    const checkSubscriptionStatus = async () => {
+      if (!user || !profile || !profile.nextBillingDate || !profile.cancelAtPeriodEnd) return;
+
+      const now = new Date();
+      const nextBill = profile.nextBillingDate.toDate ? profile.nextBillingDate.toDate() : new Date(profile.nextBillingDate);
+
+      if (now > nextBill) {
+        console.log("Subscription expired, downgrading to free...");
+        await updatePlan("free");
+      }
+    };
+
+    checkSubscriptionStatus();
+  }, [user, profile]);
 
   // Registro con email
   const registerWithEmail = async ({
@@ -179,9 +231,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       lastName,
       email: cleanEmail,
       role: "user",
+      plan: "free",
       initials,
       avatarColor,
       acceptedTerms: acceptedTerms === true,
+      trustLevel: "new",
+      salesCount: 0,
+      loginCount: 1,
     };
 
     await setDoc(doc(db, "users", uid), {
@@ -254,8 +310,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (snap.exists()) {
         // Usuario ya registrado
-        const data = snap.data() as UserProfile;
-        setProfile({ ...data, id: fbUser.uid });
+        const data = snap.data() as any;
+        setProfile({ 
+          ...data, 
+          id: fbUser.uid,
+          plan: data.plan || (data.isPro ? "pro_monthly" : "free")
+        });
       } else {
         // Primer login Google
         const email = (fbUser.email ?? "").trim().toLowerCase();
@@ -279,6 +339,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastName,
           email,
           role: "user",
+          plan: "free",
           initials,
           avatarColor,
           acceptedTerms: false,
@@ -328,6 +389,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastName,
           email,
           role: "user",
+          plan: "free",
           initials,
           avatarColor,
           acceptedTerms: false,
@@ -340,8 +402,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setProfile(userProfile);
       } else {
-        const data = snap.data() as UserProfile;
-        setProfile({ ...data, id: fbUser.uid });
+        const data = snap.data() as any;
+        setProfile({ 
+          ...data, 
+          id: fbUser.uid,
+          plan: data.plan || (data.isPro ? "pro_monthly" : "free")
+        });
       }
     } catch (error) {
       console.error("Error en login con Facebook:", error);
@@ -387,6 +453,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastName,
           email,
           role: "user",
+          plan: "free",
           initials,
           avatarColor,
           acceptedTerms: false,
@@ -399,8 +466,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setProfile(userProfile);
       } else {
-        const data = snap.data() as UserProfile;
-        setProfile({ ...data, id: aUser.uid });
+        const data = snap.data() as any;
+        setProfile({ 
+          ...data, 
+          id: aUser.uid,
+          plan: data.plan || (data.isPro ? "pro_monthly" : "free")
+        });
       }
     } catch (error) {
       console.error("Error en login con Apple:", error);
@@ -464,23 +535,198 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updatePlan = async (plan: SubscriptionPlan, billingCycle: "monthly" | "annual" = "monthly", customExpirationDate?: Date) => {
+    if (!user || !profile) return;
+    try {
+      const batch = writeBatch(db);
+
+      // Calcular fechas
+      let subDate = null;
+      let nextBill = null;
+      
+      if (plan !== "free") {
+        const now = new Date();
+        subDate = Timestamp.fromDate(now);
+        
+        if (customExpirationDate) {
+          nextBill = Timestamp.fromDate(customExpirationDate);
+        } else {
+          const next = new Date(now);
+          if (billingCycle === "monthly") {
+            next.setDate(next.getDate() + 30);
+          } else {
+            next.setDate(next.getDate() + 365);
+          }
+          nextBill = Timestamp.fromDate(next);
+        }
+      }
+
+      // 1. Actualizar perfil de usuario
+      const userRef = doc(db, "users", user.uid);
+      const updatePayload: any = { 
+        plan, 
+        isPro: plan !== "free",
+        cancelAtPeriodEnd: false // Resetear cancelación al cambiar de plan
+      };
+      
+      if (plan !== "free") {
+        updatePayload.subscriptionDate = subDate;
+        updatePayload.nextBillingDate = nextBill;
+      } else {
+        // Si es free, limpiamos fechas (o las dejamos como histórico, pero para lógica activa mejor limpiar)
+        updatePayload.subscriptionDate = null;
+        updatePayload.nextBillingDate = null;
+      }
+
+      batch.set(userRef, updatePayload, { merge: true });
+
+      // 2. Actualizar vehículos
+      const q = query(collection(db, "vehicles"), where("userId", "==", user.uid));
+      const querySnapshot = await getDocs(q);
+      
+      const shouldFeatureAll = plan === "pro_dealer";
+      const shouldUnfeatureAll = plan === "free";
+      
+      querySnapshot.forEach((doc) => {
+        const updateData: any = { userPlan: plan };
+        
+        if (shouldFeatureAll) {
+          updateData.isFeatured = true;
+          updateData.featuredAt = serverTimestamp();
+        } else if (shouldUnfeatureAll) {
+          updateData.isFeatured = false;
+        }
+        
+        batch.update(doc.ref, updateData);
+      });
+
+      await batch.commit();
+
+      // Actualizar estado local
+      setProfile({ 
+        ...profile, 
+        plan, 
+        subscriptionDate: subDate,
+        nextBillingDate: nextBill,
+        cancelAtPeriodEnd: false
+      });
+    } catch (error) {
+      console.error("Error al actualizar plan:", error);
+      throw error;
+    }
+  };
+
+  const cancelSubscription = async () => {
+    if (!user || !profile) return;
+    try {
+      // No bajamos a free inmediatamente, solo marcamos el flag
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, { cancelAtPeriodEnd: true });
+      setProfile({ ...profile, cancelAtPeriodEnd: true });
+    } catch (error) {
+      console.error("Error al cancelar suscripción:", error);
+      throw error;
+    }
+  };
+
+  const refreshTrustLevel = async () => {
+    if (!user || !profile) return;
+    try {
+        const vehiclesRef = collection(db, "vehicles");
+        const q = query(vehiclesRef, where("userId", "==", user.uid));
+        const snap = await getDocs(q);
+        const publishedCount = snap.size;
+
+        const createdAt = profile.createdAt?.toDate ? profile.createdAt.toDate() : (profile.createdAt ? new Date(profile.createdAt) : new Date());
+        const daysSinceRegistration = (new Date().getTime() - createdAt.getTime()) / (1000 * 3600 * 24);
+
+        let newLevel: TrustLevel = "new";
+
+        // Logic: Active (Frecuente)
+        // Registered > 7 days, Logins > 5, (Published >= 1 OR Has Photo)
+        const hasPhoto = !!profile.photoURL;
+        if (daysSinceRegistration >= 7 && (profile.loginCount || 0) >= 5 && (publishedCount >= 1 || hasPhoto)) {
+            newLevel = "active";
+        }
+
+        // Logic: Verified
+        // PRO Plan OR Sales >= 3
+        if (profile.plan !== 'free') {
+            newLevel = "verified";
+        } else if ((profile.salesCount || 0) >= 3) {
+            newLevel = "verified";
+        }
+
+        if (newLevel !== profile.trustLevel) {
+            await updateDoc(doc(db, "users", user.uid), { trustLevel: newLevel });
+        }
+    } catch (e) {
+        console.error("Error refreshing trust level:", e);
+    }
+  };
+
+  const blockUser = async (userIdToBlock: string) => {
+    if (!user) return;
+    try {
+        const userRef = doc(db, "users", user.uid);
+        // Usamos arrayUnion para agregar el ID a la lista sin duplicados
+        await updateDoc(userRef, {
+            blockedUsers: arrayUnion(userIdToBlock)
+        });
+        // Actualizamos estado local optimista
+        if (profile) {
+            setProfile({
+                ...profile,
+                blockedUsers: [...(profile.blockedUsers || []), userIdToBlock]
+            });
+        }
+    } catch (e) {
+        console.error("Error blocking user:", e);
+        throw e;
+    }
+  };
+
+  const unblockUser = async (userIdToUnblock: string) => {
+    if (!user) return;
+    try {
+        const userRef = doc(db, "users", user.uid);
+        await updateDoc(userRef, {
+            blockedUsers: arrayRemove(userIdToUnblock)
+        });
+        if (profile) {
+            setProfile({
+                ...profile,
+                blockedUsers: (profile.blockedUsers || []).filter(id => id !== userIdToUnblock)
+            });
+        }
+    } catch (e) {
+        console.error("Error unblocking user:", e);
+        throw e;
+    }
+  };
+
+  const value = {
+    user,
+    profile,
+    initializing,
+    registerWithEmail,
+    loginWithEmail,
+    loginWithGoogle,
+    loginWithFacebook,
+    loginWithApple,
+    acceptTerms,
+    resetPassword,
+    logout,
+    deleteAccount,
+    updatePlan,
+    cancelSubscription,
+    refreshTrustLevel,
+    blockUser,
+    unblockUser,
+  };
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        initializing,
-        registerWithEmail,
-        loginWithEmail,
-        loginWithGoogle,
-        loginWithFacebook,
-        loginWithApple,
-        acceptTerms,
-        resetPassword,
-        logout,
-        deleteAccount,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

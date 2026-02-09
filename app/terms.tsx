@@ -1,11 +1,11 @@
 // app/terms.tsx
+import { CustomAlert } from "@/components/CustomAlert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     ScrollView,
     Text,
     TouchableOpacity,
@@ -17,14 +17,31 @@ export default function TermsScreen() {
   const { user, acceptTerms } = useAuth();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({ 
+    visible: false, 
+    title: "", 
+    message: "", 
+    type: "info" as "success" | "error" | "info" | "warning",
+    onClose: () => {}
+  });
+
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info", onClose = () => {}) => {
+    setAlertConfig({ visible: true, title, message, type, onClose });
+  };
+
+  const closeAlert = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+    if (alertConfig.onClose) alertConfig.onClose();
+  };
 
   const handleAccept = async () => {
     if (!user) {
-      Alert.alert(
+      showAlert(
         "Sesión requerida",
-        "Necesitás iniciar sesión para aceptar los términos."
+        "Necesitás iniciar sesión para aceptar los términos.",
+        "info",
+        () => router.replace("/login")
       );
-      router.replace("/login");
       return;
     }
 
@@ -37,9 +54,10 @@ export default function TermsScreen() {
       router.replace("/(tabs)");
     } catch (err) {
       console.error("Error guardando aceptación de términos:", err);
-      Alert.alert(
+      showAlert(
         "Error",
-        "No se pudo guardar la aceptación de los términos. Intentalo de nuevo."
+        "No se pudo guardar la aceptación de los términos. Intentalo de nuevo.",
+        "error"
       );
     } finally {
       setSaving(false);
@@ -108,7 +126,14 @@ export default function TermsScreen() {
           documentación y verificación de vehículo.
         </Text>
         <Text style={{ color: theme.text, fontSize: 14, marginBottom: 12 }}>
-          5. MatchCars podrá actualizar estos términos en el futuro. Te
+          5. MatchCars tiene una política de TOLERANCIA CERO respecto al contenido
+          objetable o usuarios abusivos. Nos reservamos el derecho de eliminar
+          cualquier contenido que se considere ofensivo, ilegal o inapropiado,
+          así como de bloquear y expulsar a los usuarios que generen dicho
+          contenido, dentro de las 24 horas de haber sido reportados.
+        </Text>
+        <Text style={{ color: theme.text, fontSize: 14, marginBottom: 12 }}>
+          6. MatchCars podrá actualizar estos términos en el futuro. Te
           avisaremos dentro de la app cuando haya cambios relevantes.
         </Text>
       </ScrollView>
@@ -137,6 +162,14 @@ export default function TermsScreen() {
           </Text>
         )}
       </TouchableOpacity>
+
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={closeAlert}
+      />
     </View>
   );
 }

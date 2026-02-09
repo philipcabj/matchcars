@@ -3,19 +3,26 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+interface AlertOption {
+  text: string;
+  onPress?: () => void;
+  style?: "default" | "cancel" | "destructive";
+}
+
 interface CustomAlertProps {
   visible: boolean;
   title: string;
   message: string;
   onClose: () => void;
-  type?: "error" | "success" | "info";
+  type?: "error" | "success" | "info" | "warning";
   showCancel?: boolean;
   onCancel?: () => void;
   confirmText?: string;
   cancelText?: string;
+  options?: AlertOption[];
 }
 
-export function CustomAlert({ visible, title, message, onClose, type = "error", showCancel = false, onCancel, confirmText = "Entendido", cancelText = "Cancelar" }: CustomAlertProps) {
+export function CustomAlert({ visible, title, message, onClose, type = "error", showCancel = false, onCancel, confirmText = "Entendido", cancelText = "Cancelar", options }: CustomAlertProps) {
   const { theme } = useTheme();
 
   if (!visible) return null;
@@ -34,16 +41,48 @@ export function CustomAlert({ visible, title, message, onClose, type = "error", 
           <Text style={[styles.title, { color: theme.title }]}>{title}</Text>
           <Text style={[styles.message, { color: theme.textMuted }]}>{message}</Text>
           
-          <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
-            {showCancel && (
-              <TouchableOpacity onPress={onCancel || onClose} style={[styles.button, { backgroundColor: theme.badgeBackground, flex: 1 }]}>
-                <Text style={[styles.buttonText, { color: theme.text }]}>{cancelText}</Text>
+          {options ? (
+            <View style={{ flexDirection: "column", gap: 8, width: "100%" }}>
+              {options.map((option, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  onPress={() => {
+                    if (option.onPress) option.onPress();
+                    // We don't automatically close here because the parent usually handles it, 
+                    // but for Alert replacement it might be expected. 
+                    // However, our usage pattern in profile.tsx will be to pass a wrapper that closes it.
+                  }} 
+                  style={[
+                    styles.button, 
+                    { 
+                      backgroundColor: option.style === "cancel" ? theme.badgeBackground : theme.buttonBackground,
+                      opacity: option.style === "cancel" ? 0.8 : 1
+                    }
+                  ]}
+                >
+                  <Text style={[
+                    styles.buttonText, 
+                    { 
+                      color: option.style === "cancel" ? theme.text : theme.buttonText 
+                    }
+                  ]}>
+                    {option.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+              {showCancel && (
+                <TouchableOpacity onPress={onCancel || onClose} style={[styles.button, { backgroundColor: theme.badgeBackground, flex: 1 }]}>
+                  <Text style={[styles.buttonText, { color: theme.text }]}>{cancelText}</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} style={[styles.button, { backgroundColor: theme.buttonBackground, flex: 1 }]}>
+                <Text style={[styles.buttonText, { color: theme.buttonText }]}>{confirmText}</Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={onClose} style={[styles.button, { backgroundColor: theme.buttonBackground, flex: 1 }]}>
-              <Text style={[styles.buttonText, { color: theme.buttonText }]}>{confirmText}</Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          )}
         </View>
       </View>
     </Modal>

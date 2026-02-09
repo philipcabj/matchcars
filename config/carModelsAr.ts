@@ -2,10 +2,10 @@ export const CAR_MODELS_AR = [
   // ==========================
   // VOLKSWAGEN
   // ==========================
-  { make: "Volkswagen", model: "Gol" },
+  { make: "Volkswagen", model: "Gol", versions: ["Power 1.6", "Trend 1.6", "GL 1.6", "GLD 1.9"] },
   { make: "Volkswagen", model: "Gol Trend", versions: ["Trendline 1.6", "Comfortline 1.6", "Highline 1.6", "Pack I", "Pack II", "Pack III"] },
-  { make: "Volkswagen", model: "Fox" },
-  { make: "Volkswagen", model: "Up!" },
+  { make: "Volkswagen", model: "Fox", versions: ["Comfortline 1.6", "Trendline 1.6", "Highline 1.6", "CrossFox"] },
+  { make: "Volkswagen", model: "Up!", versions: ["Take Up!", "Move Up!", "High Up!", "Pepper Up!"] },
   { make: "Volkswagen", model: "Polo" },
   { make: "Volkswagen", model: "Virtus" },
   { make: "Volkswagen", model: "Vento" },
@@ -22,10 +22,10 @@ export const CAR_MODELS_AR = [
   // ==========================
   // TOYOTA
   // ==========================
-  { make: "Toyota", model: "Etios" },
-  { make: "Toyota", model: "Yaris" },
-  { make: "Toyota", model: "Corolla" },
-  { make: "Toyota", model: "Corolla Cross" },
+  { make: "Toyota", model: "Etios", versions: ["X 1.5", "XS 1.5", "XLS 1.5", "Platinum"] },
+  { make: "Toyota", model: "Yaris", versions: ["XS 1.5", "XLS 1.5", "S 1.5"] },
+  { make: "Toyota", model: "Corolla", versions: ["XLI 1.8", "XEI 1.8", "XEI 2.0", "SEG 1.8", "SEG 2.0", "GR-Sport"] },
+  { make: "Toyota", model: "Corolla Cross", versions: ["XLI 2.0", "XEI 2.0", "SEG 2.0", "XEI HEV", "SEG HEV"] },
   { make: "Toyota", model: "Camry" },
   { make: "Toyota", model: "Prius" },
   { make: "Toyota", model: "Hilux", versions: ["DX 2.4 TDI 4x2", "DX 2.4 TDI 4x4", "SR 2.4 TDI 4x2", "SRV 2.8 TDI 4x2", "SRV 2.8 TDI 4x4", "SRX 2.8 TDI 4x4", "GR-Sport"] },
@@ -71,9 +71,9 @@ export const CAR_MODELS_AR = [
   // ==========================
   // FORD
   // ==========================
-  { make: "Ford", model: "Ka" },
-  { make: "Ford", model: "Fiesta" },
-  { make: "Ford", model: "Focus" },
+  { make: "Ford", model: "Ka", versions: ["S 1.5", "SE 1.5", "SEL 1.5", "Freestyle"] },
+  { make: "Ford", model: "Fiesta", versions: ["S", "S Plus", "SE", "SE Plus", "Titanium"] },
+  { make: "Ford", model: "Focus", versions: ["S 1.6", "SE 2.0", "SE Plus 2.0", "Titanium 2.0"] },
   { make: "Ford", model: "Focus Sedan" },
   { make: "Ford", model: "Mondeo" },
   { make: "Ford", model: "Ecosport" },

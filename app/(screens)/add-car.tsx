@@ -10,24 +10,21 @@ import * as FileSystemLegacy from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, doc, getCountFromServer, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardTypeOptions } from "react-native";
 import {
-  Button,
   Image,
-  InputAccessoryView,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { CAR_MODELS_AR } from "../../config/carModelsAr";
 type InputProps = {
   label: string;
@@ -35,6 +32,8 @@ type InputProps = {
   onChangeText: (text: string) => void;
   keyboardType?: KeyboardTypeOptions;
   placeholder?: string;
+  error?: string;
+  onBlur?: () => void;
 };
 
 const Input = ({
@@ -43,6 +42,8 @@ const Input = ({
   onChangeText,
   keyboardType = "default",
   placeholder,
+  error,
+  onBlur,
 }: InputProps) => {
   const { theme } = useTheme();
   const inputRef = useRef<TextInput>(null);
@@ -58,6 +59,7 @@ const Input = ({
           onChangeText(text);
         }}
         onFocus={() => {}}
+        onBlur={onBlur}
         keyboardType={keyboardType}
         placeholder={placeholder}
         placeholderTextColor={theme.textMuted}
@@ -67,26 +69,49 @@ const Input = ({
         autoCorrect={false}
         autoCapitalize="none"
         style={{
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: theme.likeBoxBackground,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-          color: theme.inputText,
-          backgroundColor: theme.inputBackground,
-        }}
-      />
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: error ? theme.error || "#EF4444" : theme.likeBoxBackground,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  color: theme.inputText,
+                  backgroundColor: theme.inputBackground,
+                }}
+              />
+              {error && (
+                <Text style={{ color: theme.error || "#EF4444", fontSize: 12, marginTop: 4 }}>
+                  {error}
+                </Text>
+              )}
     </View>
   );
 };
 
+const DEFAULT_MODELS_BY_MAKE: Record<string, string[]> = {
+  Toyota: ["Corolla", "Hilux", "Yaris", "Etios"],
+  Volkswagen: ["Gol", "Polo", "Virtus", "T-Cross"],
+  Ford: ["Fiesta", "Focus", "Ka", "Ranger"],
+  Chevrolet: ["Onix", "Cruze", "S10", "Tracker"],
+  Peugeot: ["208", "308", "2008", "Partner"],
+  Renault: ["Sandero", "Logan", "Kwid", "Duster"],
+  Fiat: ["Argo", "Cronos", "Uno", "Toro"],
+  Honda: ["Civic", "Fit", "HR-V", "City"],
+  Hyundai: ["HB20", "i20", "Creta", "Tucson"],
+  Nissan: ["Versa", "March", "Sentra", "Frontier"],
+};
+
+import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
+
 export default function AddCarScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile, refreshTrustLevel } = useAuth();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const userId = user?.uid || "anon";
-  const userName = user?.displayName || user?.email || "usuario";
+  const userName = (profile?.firstName && profile?.lastName) 
+    ? `${profile.firstName} ${profile.lastName}`
+    : user?.displayName || user?.email || "Usuario";
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
@@ -96,6 +121,9 @@ export default function AddCarScreen() {
   const [currency, setCurrency] = useState<"ARS" | "USD">("ARS");
   const [km, setKm] = useState("");
   const [province, setProvince] = useState("");
+  const [city, setCity] = useState("");
+  const [cityOpen, setCityOpen] = useState(false);
+  const [citiesList, setCitiesList] = useState<string[]>([]);
 
   const [coverImage, setCoverImage] = useState("");
   const [coverLocalUri, setCoverLocalUri] = useState<string>("");
@@ -120,8 +148,59 @@ export default function AddCarScreen() {
   const [acceptsFinancing, setAcceptsFinancing] = useState(false);
   const [finRate, setFinRate] = useState("");
   const [finMonths, setFinMonths] = useState("");
+  const [finInitialPercent, setFinInitialPercent] = useState("");
+  
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateField = (field: string, value: string) => {
+    let error = "";
+    switch (field) {
+      case "price":
+        if (!value) error = "El precio es obligatorio.";
+        else if (isNaN(Number(value)) || Number(value) <= 0) error = "Precio inválido.";
+        break;
+      case "km":
+        if (value && (isNaN(Number(value)) || Number(value) < 0)) error = "Kilometraje inválido.";
+        break;
+      case "finRate":
+         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Tasa inválida.";
+         break;
+      case "finMonths":
+         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Plazo inválido.";
+         break;
+      case "finInitialPercent":
+         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Porcentaje inválido.";
+         break;
+    }
+    
+    setErrors(prev => {
+        const next = { ...prev };
+        if (error) next[field] = error;
+        else delete next[field];
+        return next;
+    });
+    return !error;
+  };
+  
+  // History fields
+  const [singleOwner, setSingleOwner] = useState(false);
+  const [serviceRecords, setServiceRecords] = useState(false);
+  const [vtvValid, setVtvValid] = useState(false);
+  const [papersUpToDate, setPapersUpToDate] = useState(false);
+  const [warranty, setWarranty] = useState(false);
+
   const [details, setDetails] = useState("");
-  const MODELS_AR: CarArItem[] = Array.isArray(CAR_MODELS_AR) ? CAR_MODELS_AR : [];
+  
+  // New fields
+  const [sellingReason, setSellingReason] = useState("");
+  const [sellingReasonOpen, setSellingReasonOpen] = useState(false);
+  const [negotiablePrice, setNegotiablePrice] = useState(false);
+  const [immediateDelivery, setImmediateDelivery] = useState(false);
+  const [acceptsTradeIn, setAcceptsTradeIn] = useState(true); // Default true based on previous logic
+  const priceSuggestion = usePriceSuggestion(brand, model, year, currency);
+
+  const priceRef = useRef<TextInput>(null);
+  const MODELS_AR: CarArItem[] = useMemo(() => Array.isArray(CAR_MODELS_AR) ? CAR_MODELS_AR : [], []);
 
   const [alertConfig, setAlertConfig] = useState<{ 
     visible: boolean; 
@@ -134,6 +213,94 @@ export default function AddCarScreen() {
     cancelText?: string;
   }>({ visible: false, title: "", message: "", type: "info" });
   const [successAction, setSuccessAction] = useState<(() => void) | null>(null);
+
+  // Levenshtein distance for fuzzy matching
+  const levenshteinDistance = (a: string, b: string): number => {
+    const m = a.length;
+    const n = b.length;
+    const dp: number[][] = [];
+
+    for (let i = 0; i <= m; i++) dp[i] = [i];
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1];
+        } else {
+          dp[i][j] = Math.min(
+            dp[i - 1][j - 1] + 1, // substitution
+            dp[i][j - 1] + 1,     // insertion
+            dp[i - 1][j] + 1      // deletion
+          );
+        }
+      }
+    }
+    return dp[m][n];
+  };
+
+  const checkSimilarity = (input: string, existingList: string[]): string | null => {
+    const normalizedInput = input.trim().toLowerCase();
+    
+    // Exact match check
+    if (existingList.some(item => item.toLowerCase() === normalizedInput)) {
+      return null; 
+    }
+
+    let bestMatch: string | null = null;
+    let minDistance = Infinity;
+
+    for (const item of existingList) {
+      const normalizedItem = item.toLowerCase();
+      const dist = levenshteinDistance(normalizedInput, normalizedItem);
+      
+      // Similarity rules:
+      // If length > 3 and <= 6, distance <= 1
+      // If length > 6, distance <= 2
+      const isSimilar = (normalizedInput.length > 3 && normalizedInput.length <= 6 && dist <= 1) ||
+                        (normalizedInput.length > 6 && dist <= 2);
+
+      if (isSimilar && dist < minDistance) {
+        minDistance = dist;
+        bestMatch = item;
+      }
+    }
+    return bestMatch;
+  };
+
+  const handleSelectionWithValidation = (
+    value: string, 
+    existingOptions: string[], 
+    onConfirm: (val: string) => void,
+    label: string
+  ) => {
+    // Exact match check (case insensitive)
+    const exactMatch = existingOptions.find(opt => opt.toLowerCase() === value.toLowerCase());
+    if (exactMatch) {
+      onConfirm(exactMatch);
+      return;
+    }
+
+    // Similarity check
+    const similar = checkSimilarity(value, existingOptions);
+    if (similar) {
+      showAlert(
+        "Posible duplicado",
+        `"${value}" es muy similar a "${similar}". ¿Quisiste decir "${similar}"?`,
+        "info",
+        () => onConfirm(similar), // User accepts suggestion
+        {
+          showCancel: true,
+          confirmText: `Usar ${similar}`,
+          cancelText: `No, es nuevo`,
+          onCancel: () => onConfirm(value) // User insists on new value
+        }
+      );
+    } else {
+      // New value
+      onConfirm(value);
+    }
+  };
 
   const showAlert = (
     title: string, 
@@ -168,11 +335,64 @@ export default function AddCarScreen() {
 
   useEffect(() => {
     if (brand && model) {
-      loadVersions(brand, model);
+      (async () => {
+        try {
+          const docRef = doc(db, "catalog", "default", "makes", brand, "models", model);
+          const snap = await getDoc(docRef);
+          
+          if (snap.exists()) {
+            const item = snap.data() as any;
+            if (item?.versions && Array.isArray(item.versions) && item.versions.length > 0) {
+              console.log("Remote item found:", item);
+              setVersionsRemote(item.versions);
+              return;
+            }
+          }
+          
+          // Fallback to local if remote not found or empty
+          const item = MODELS_AR.find((x) => x.make === brand && x.model === model);
+          setVersionsRemote(item?.versions || []);
+        } catch (e) {
+          console.error("Error loading versions:", e);
+          const item = MODELS_AR.find((x) => x.make === brand && x.model === model);
+          setVersionsRemote(item?.versions || []);
+        }
+      })();
     } else {
       setVersionsRemote([]);
     }
-  }, [brand, model]);
+  }, [brand, model, MODELS_AR]);
+
+  useEffect(() => {
+    const fetchCities = async () => {
+      if (!province) {
+        setCitiesList([]);
+        return;
+      }
+
+      // 1. Defaults
+      const defaults = CITY_OPTIONS_BY_PROVINCE[province] || [];
+
+      // 2. Firestore
+      try {
+        const docRef = doc(db, "catalog", "default", "provinces", province);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const remoteCities: string[] = Array.isArray(data.cities) ? data.cities : [];
+          // Merge
+          const combined = Array.from(new Set([...defaults, ...remoteCities])).sort();
+          setCitiesList(combined);
+        } else {
+          setCitiesList(defaults.sort());
+        }
+      } catch (e) {
+        console.log("Error fetching cities for province:", province, e);
+        setCitiesList(defaults.sort());
+      }
+    };
+    fetchCities();
+  }, [province]);
 
   const DEFAULT_MAKES: string[] = [
     "Toyota",
@@ -186,28 +406,28 @@ export default function AddCarScreen() {
     "Hyundai",
     "Nissan",
   ];
-  const DEFAULT_MODELS_BY_MAKE: Record<string, string[]> = {
-    Toyota: ["Corolla", "Hilux", "Yaris", "Etios"],
-    Volkswagen: ["Gol", "Polo", "Virtus", "T-Cross"],
-    Ford: ["Fiesta", "Focus", "Ka", "Ranger"],
-    Chevrolet: ["Onix", "Cruze", "S10", "Tracker"],
-    Peugeot: ["208", "308", "2008", "Partner"],
-    Renault: ["Sandero", "Logan", "Kwid", "Duster"],
-    Fiat: ["Argo", "Cronos", "Uno", "Toro"],
-    Honda: ["Civic", "Fit", "HR-V", "City"],
-    Hyundai: ["HB20", "i20", "Creta", "Tucson"],
-    Nissan: ["Versa", "March", "Sentra", "Frontier"],
-  };
+
   const makes: string[] = MODELS_AR.length
     ? Array.from(new Set(MODELS_AR.map((x) => x.make))).sort()
     : DEFAULT_MAKES;
-  const modelsByMake: Record<string, string[]> = MODELS_AR.length ? MODELS_AR.reduce((acc, item) => {
+
+  const brandOptions = useMemo(() => {
+    const combined = new Set([...makes, ...makesRemote]);
+    return Array.from(combined).sort();
+  }, [makes, makesRemote]);
+
+  const modelsByMake: Record<string, string[]> = useMemo(() => MODELS_AR.length ? MODELS_AR.reduce((acc, item) => {
     const list = acc[item.make] || [];
     if (!list.includes(item.model)) list.push(item.model);
     acc[item.make] = list;
     return acc;
-  }, {} as Record<string, string[]>) : DEFAULT_MODELS_BY_MAKE;
-  const modelOptions = modelsRemote.length > 0 ? modelsRemote : (modelsByMake[brand] || []);
+  }, {} as Record<string, string[]>) : DEFAULT_MODELS_BY_MAKE, [MODELS_AR]);
+
+  const modelOptions = useMemo(() => {
+    const local = modelsByMake[brand] || [];
+    const combined = new Set([...local, ...modelsRemote]);
+    return Array.from(combined).sort();
+  }, [brand, modelsByMake, modelsRemote]);
   const CURRENT_YEAR = new Date().getFullYear();
   const yearOptions = Array.from({ length: 40 }, (_, i) => String(CURRENT_YEAR - i));
   const PROVINCES: string[] = [
@@ -236,6 +456,19 @@ export default function AddCarScreen() {
     "Tierra del Fuego",
     "Tucumán",
   ];
+
+  const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
+    "Buenos Aires": ["La Plata", "Mar del Plata", "Bahía Blanca", "Quilmes", "Morón", "Tandil", "San Isidro", "Pilar", "Tigre", "Vicente López"],
+    "CABA": ["Palermo", "Recoleta", "Belgrano", "Caballito", "Flores", "Mataderos", "Villa Urquiza", "Devoto"],
+    "Córdoba": ["Córdoba", "Villa Carlos Paz", "Río Cuarto", "Alta Gracia", "Villa María"],
+    "Santa Fe": ["Rosario", "Santa Fe", "Rafaela", "Venado Tuerto"],
+    "Mendoza": ["Mendoza", "Godoy Cruz", "Guaymallén", "San Rafael"],
+    "Tucumán": ["San Miguel de Tucumán", "Yerba Buena", "Tafí Viejo"],
+    "Salta": ["Salta", "San Lorenzo", "Tartagal"],
+    "Neuquén": ["Neuquén", "Plottier", "Centenario"],
+    "Río Negro": ["Bariloche", "General Roca", "Cipolletti"],
+    "Chubut": ["Comodoro Rivadavia", "Trelew", "Puerto Madryn"],
+  };
 
   
 
@@ -269,30 +502,7 @@ export default function AddCarScreen() {
     }
   }
 
-  async function loadVersions(make: string, model: string) {
-    console.log("loadVersions called for:", make, model);
-    try {
-      const docRef = doc(db, "catalog", "default", "makes", make, "models", model);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data?.versions && Array.isArray(data.versions) && data.versions.length > 0) {
-          console.log("Remote versions found:", data.versions);
-          setVersionsRemote(data.versions);
-          return;
-        }
-      }
-      // Fallback local if remote not found
-      console.log("Fallback to local versions");
-      const item = MODELS_AR.find((x) => x.make === make && x.model === model);
-      console.log("Local item found:", item);
-      setVersionsRemote(item?.versions || []);
-    } catch (e) {
-      // console.error("Error loading versions:", e);
-      const item = MODELS_AR.find((x) => x.make === make && x.model === model);
-      setVersionsRemote(item?.versions || []);
-    }
-  }
+
 
   async function uploadCatalogToFirestore() {
     const makesList: string[] = Array.from(new Set(MODELS_AR.map((x) => x.make)));
@@ -371,6 +581,7 @@ export default function AddCarScreen() {
       const isExpoGo = Constants.appOwnership === "expo";
       if (!isExpoGo && Platform.OS !== "web") {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           const rnStorage = require("@react-native-firebase/storage").default;
           if (rnStorage && storagePath) {
             const nativeRef = rnStorage().ref(storagePath);
@@ -421,7 +632,7 @@ export default function AddCarScreen() {
       return;
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
+      mediaTypes: ['images'],
       quality: 1,
       allowsMultipleSelection: type === "gallery",
       selectionLimit: type === "gallery" ? Math.max(1, 8 - gallery.length) : 1,
@@ -433,8 +644,9 @@ export default function AddCarScreen() {
 
     for (const asset of assets) {
       if (!asset?.uri) continue;
-      const manipulated = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1200 } }], {
-        compress: 0.8,
+      // Optimization: Resize to max 1024px and compress to 0.7
+      const manipulated = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1024 } }], {
+        compress: 0.7,
         format: ImageManipulator.SaveFormat.JPEG,
       });
       let uri = manipulated.uri;
@@ -455,7 +667,7 @@ export default function AddCarScreen() {
         });
         // Explicit cast for TS
         blob = blob as Blob;
-      } catch (e) {
+      } catch {
         showAlert("Error", "No se pudo procesar la imagen.", "error");
         continue;
       }
@@ -567,21 +779,70 @@ export default function AddCarScreen() {
         setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, progress: p } : g)));
       }, path);
       setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, url, uploading: false, progress: 100 } : g)));
-    } catch (e) {
+    } catch {
       setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, uploading: false, progress: 0 } : g)));
       showAlert("Error", "No se pudo reintentar la subida.", "error");
     }
   }
+
+  const removeCoverImage = () => {
+    setCoverImage("");
+    setCoverLocalUri("");
+    setCoverProgress(0);
+  };
+
+  const removeGalleryImage = (index: number) => {
+    setGallery((prev) => prev.filter((_, i) => i !== index));
+  };
 
   async function handleSubmit() {
     if (!user) {
       showAlert("Sesión requerida", "Iniciá sesión para publicar.", "info");
       return;
     }
+
+    // Verificar límite para usuarios GRATUITOS
+    if (profile?.plan === 'free') {
+      try {
+        const q = query(collection(db, "vehicles"), where("userId", "==", userId));
+        const snapshot = await getCountFromServer(q);
+        const count = snapshot.data().count;
+        if (count >= 2) {
+          showAlert(
+            "Límite alcanzado", 
+            "Tu plan gratuito solo permite 2 autos. Pasate a PRO para ilimitados.", 
+            "info",
+            () => router.push("/(screens)/subscribe")
+          );
+          return;
+        }
+      } catch (e) {
+        console.error("Error checking limit", e);
+        // Fail open (allow posting if check fails)
+      }
+    }
+
     if (!brand || !model || !year || !price) {
       showAlert("Faltan datos", "Marca, modelo, año y precio son obligatorios.", "info");
       return;
     }
+
+    // Validar campos con errores
+    const pValid = validateField('price', price);
+    const kValid = validateField('km', km);
+    let fValid = true;
+    if (acceptsFinancing) {
+        const f1 = validateField('finRate', finRate);
+        const f2 = validateField('finMonths', finMonths);
+        const f3 = validateField('finInitialPercent', finInitialPercent);
+        fValid = f1 && f2 && f3;
+    }
+
+    if (!pValid || !kValid || !fValid) {
+        showAlert("Datos inválidos", "Por favor, revisá los campos en rojo.", "error");
+        return;
+    }
+
     if (!coverImage || coverUploading || gallery.some((g) => g.uploading)) {
       showAlert("Carga en proceso", "Esperá a que terminen de subir las fotos.", "info");
       return;
@@ -591,17 +852,14 @@ export default function AddCarScreen() {
     const priceNum = Number(price);
     const kmNum = km ? Number(km) : 0;
 
-    if (isNaN(yearNum) || isNaN(priceNum)) {
-      showAlert("Datos inválidos", "Año y precio deben ser numéricos.", "error");
-      return;
-    }
-
     try {
       setLoading(true);
 
       await addDoc(collection(db, "vehicles"), {
         userId,
         userName,
+        userPlan: profile?.plan || 'free',
+        sellerTrustLevel: profile?.trustLevel || "new", // Added Trust Level Denormalization
         brand,
         model,
         version: version || null,
@@ -613,30 +871,89 @@ export default function AddCarScreen() {
         gearbox: gearbox || null,
         doors: null,
         description: details || null,
+        
+        // Historial
+        singleOwner,
+        serviceRecords,
+        vtvValid,
+        papersUpToDate,
+        warranty,
+
         location: {
           province: province || null,
+          city: city || null,
         },
         images: {
           cover: coverImage || "https://placehold.co/800x600?text=Auto",
           gallery: gallery.map((g) => g.url).filter(Boolean),
         },
         acceptsFinancing,
+        negotiablePrice,
+        immediateDelivery,
+        sellingReason: sellingReason || null,
+        originalPrice: priceNum, // Inicialmente igual al precio actual
+        updatedAt: serverTimestamp(),
         financing: acceptsFinancing
           ? {
               rate: finRate ? Number(finRate) : 25,
               months: finMonths ? Number(finMonths) : 24,
+              initialPercent: finInitialPercent ? Number(finInitialPercent) : 0,
             }
           : null,
-        published: true,
+        published: false,
+        status: "pending", // Moderation queue
         likedBy: [],
+        isFeatured: profile?.plan === 'pro_dealer',
+        featuredAt: profile?.plan === 'pro_dealer' ? serverTimestamp() : null,
+        views: 0,
+        likesCount: 0,
         flags: {
           forSale: true,
-          tradeIn: true, // permuta
+          tradeIn: acceptsTradeIn,
         },
         createdAt: serverTimestamp(),
       });
 
-      showAlert("Éxito", "El auto se publicó correctamente.", "success", () => router.push("/(tabs)/mycars"));
+      // Update catalog with new values if they don't exist
+      try {
+        console.log("Updating catalog with:", { brand, model, version });
+        
+        // 1. Ensure Make exists
+        const brandRef = doc(db, "catalog", "default", "makes", brand);
+        await setDoc(brandRef, { name: brand }, { merge: true });
+
+        // 2. Ensure Model exists under Make
+        const modelRef = doc(db, "catalog", "default", "makes", brand, "models", model);
+        await setDoc(modelRef, { name: model }, { merge: true });
+
+        // 3. Add Version to Model's versions array
+        if (version) {
+             await setDoc(modelRef, { versions: arrayUnion(version) }, { merge: true });
+        }
+
+        // 4. Update Province/City
+        if (province && city) {
+          try {
+             const provRef = doc(db, "catalog", "default", "provinces", province);
+             await setDoc(provRef, { 
+                name: province,
+                cities: arrayUnion(city) 
+             }, { merge: true });
+          } catch (e: any) {
+             if (e.code !== 'permission-denied') {
+                 console.error("Error updating province cities:", e);
+             }
+          }
+        }
+        console.log("Catalog updated successfully");
+      } catch (e) {
+        console.error("Error updating catalog:", e);
+      }
+
+      // Actualizar nivel de confianza del usuario (por si pasa de Nuevo a Activo)
+      await refreshTrustLevel();
+
+      showAlert("Publicación Pendiente", "Tu auto ha sido enviado a moderación. Te avisaremos cuando sea aprobado.", "success", () => router.push("/(tabs)/mycars"));
     } catch (e: any) {
       // console.error(e);
       showAlert("Error", e.message ?? "No se pudo publicar el auto.", "error");
@@ -649,14 +966,15 @@ export default function AddCarScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={Platform.OS === "ios" ? 88 : 0}>
-        {/* Main ScrollView */}
-        <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 60 }}
-          keyboardShouldPersistTaps="handled"
-          removeClippedSubviews={false}
-          scrollEventThrottle={16}
-        >
+      <KeyboardAwareScrollView 
+        style={{ flex: 1 }} 
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 }}
+        keyboardShouldPersistTaps="handled"
+        enableOnAndroid={true}
+        extraScrollHeight={Platform.OS === "ios" ? 100 : 0}
+        enableAutomaticScroll={true}
+        keyboardDismissMode="on-drag"
+      >
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <TouchableOpacity onPress={() => { Keyboard.dismiss(); router.back(); }} activeOpacity={0.8} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Ionicons name={"arrow-back" as any} size={22} color={theme.text} />
@@ -701,24 +1019,27 @@ export default function AddCarScreen() {
             
             <View style={{ marginBottom: 12 }}>
               <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Marca</Text>
-              <TouchableOpacity onPress={async () => { Keyboard.dismiss(); await loadMakes(); setBrandOpen(true); }} style={{ borderRadius: 10, borderWidth: 1, borderColor: theme.likeBoxBackground, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.inputBackground }}>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setBrandOpen(true); loadMakes(); }} style={{ borderRadius: 10, borderWidth: 1, borderColor: theme.likeBoxBackground, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.inputBackground }}>
                 <Text style={{ color: theme.inputText, fontWeight: brand ? "700" : "400" }}>{brand || "Seleccionar marca"}</Text>
               </TouchableOpacity>
               <SelectionModal
                 visible={brandOpen}
                 title="Seleccionar Marca"
-                options={makesRemote.length ? makesRemote : makes}
-                onSelect={async (m) => {
-                  setBrand(m);
-                  setModel("");
-                  setVersion("");
-                  setVersionsRemote([]);
-                  await loadModels(m);
+                options={brandOptions}
+                onSelect={(m) => {
+                  handleSelectionWithValidation(m, brandOptions, async (validVal) => {
+                    setBrand(validVal);
+                    setModel("");
+                    setVersion("");
+                    setVersionsRemote([]);
+                    await loadModels(validVal);
+                  }, "Marca");
                 }}
                 onClose={() => setBrandOpen(false)}
                 value={brand}
                 placeholder="Buscar marca"
                 variant="inline"
+                allowAdd={true}
               />
             </View>
 
@@ -740,11 +1061,11 @@ export default function AddCarScreen() {
                 value={model}
                 placeholder="Buscar modelo"
                 variant="inline"
+                allowAdd={true}
               />
             </View>
 
-            {versionsRemote.length > 0 ? (
-              <View style={{ marginBottom: 12 }}>
+            <View style={{ marginBottom: 12 }}>
                 <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Versión</Text>
                 <TouchableOpacity disabled={!model} onPress={() => { Keyboard.dismiss(); setVersionOpen(true); }} style={{ borderRadius: 10, borderWidth: 1, borderColor: theme.likeBoxBackground, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.inputBackground, opacity: model ? 1 : 0.6 }}>
                   <Text style={{ color: theme.inputText, fontWeight: version ? "700" : "400" }}>{version || "Seleccionar versión"}</Text>
@@ -758,16 +1079,9 @@ export default function AddCarScreen() {
                   value={version}
                   placeholder="Buscar versión"
                   variant="inline"
+                  allowAdd={true}
                 />
-              </View>
-            ) : (
-              <Input
-                label="Versión"
-                value={version}
-                onChangeText={setVersion}
-                placeholder="Allure, Feline, etc."
-              />
-            )}
+            </View>
 
             <View style={{ marginBottom: 12 }}>
               <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Año</Text>
@@ -823,7 +1137,9 @@ export default function AddCarScreen() {
             <Input
               label="Kilómetros"
               value={km}
-              onChangeText={setKm}
+              onChangeText={(t) => { setKm(t); if(errors.km) validateField("km", t); }}
+              onBlur={() => validateField("km", km)}
+              error={errors.km}
               keyboardType="number-pad"
               placeholder="35000"
             />
@@ -848,15 +1164,40 @@ export default function AddCarScreen() {
                   textAlignVertical: "top",
                 }}
                 multiline
+                blurOnSubmit={true}
+                returnKeyType="next"
+                onSubmitEditing={() => {
+                   priceRef.current?.focus();
+                }}
               />
-              {Platform.OS === "ios" && (
-                <InputAccessoryView nativeID="detailsInputAccessory">
-                  <View style={{ backgroundColor: theme.card, flexDirection: "row", justifyContent: "flex-end", padding: 8, borderTopWidth: 1, borderTopColor: theme.badgeBorder }}>
-                    <Button onPress={() => Keyboard.dismiss()} title="Listo" />
-                  </View>
-                </InputAccessoryView>
-              )}
+              {/* InputAccessoryView removed to prevent black bar issue */}
             </View>
+          </View>
+
+          {/* Sección: Historial y Documentación */}
+          <View style={{ marginBottom: 20 }}>
+            <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "700", marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>Historial y Documentación</Text>
+            {[
+              { label: "Único dueño", value: singleOwner, setter: setSingleOwner },
+              { label: "Service oficiales", value: serviceRecords, setter: setServiceRecords },
+              { label: "VTV al día", value: vtvValid, setter: setVtvValid },
+              { label: "Papeles al día", value: papersUpToDate, setter: setPapersUpToDate },
+              { label: "En garantía", value: warranty, setter: setWarranty },
+            ].map((item, idx) => (
+              <TouchableOpacity 
+                key={idx}
+                activeOpacity={0.8}
+                onPress={() => item.setter(!item.value)}
+                style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}
+              >
+                <Ionicons 
+                  name={(item.value ? "checkbox" : "square-outline") as any} 
+                  size={24} 
+                  color={item.value ? theme.accent : theme.textMuted} 
+                />
+                <Text style={{ color: theme.text, marginLeft: 10, fontSize: 16 }}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
           {/* Sección: Precio y Financiación */}
@@ -868,53 +1209,134 @@ export default function AddCarScreen() {
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <View style={{ flex: 1 }}>
                   <TextInput
-                    value={price}
-                    onChangeText={setPrice}
+                    ref={priceRef}
+                    value={price ? Number(price).toLocaleString("es-AR") : ""}
+                    onChangeText={(t) => { 
+                        const raw = t.replace(/\D/g, "");
+                        setPrice(raw); 
+                        if(errors.price) validateField("price", raw); 
+                    }}
+                    onBlur={() => validateField("price", price)}
                     keyboardType="number-pad"
-                    placeholder="9500000"
+                    placeholder="9.500.000"
                     placeholderTextColor={theme.textMuted}
                     returnKeyType="done"
                     onSubmitEditing={() => Keyboard.dismiss()}
                     style={{
                       borderRadius: 10,
                       borderWidth: 1,
-                      borderColor: theme.likeBoxBackground,
+                      borderColor: errors.price ? theme.error || "#EF4444" : theme.likeBoxBackground,
                       paddingHorizontal: 12,
                       paddingVertical: 10,
                       color: theme.inputText,
                       backgroundColor: theme.inputBackground,
                     }}
                   />
+                  {errors.price && (
+                    <Text style={{ color: theme.error || "#EF4444", fontSize: 12, marginTop: 4 }}>
+                        {errors.price}
+                    </Text>
+                  )}
                 </View>
                 <View style={{ flexDirection: "row", backgroundColor: theme.inputBackground, borderRadius: 10, padding: 4, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
                   <TouchableOpacity 
-                    onPress={() => { Keyboard.dismiss(); setCurrency("ARS"); }}
+                    onPress={() => setCurrency("ARS")}
                     style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: currency === "ARS" ? theme.accent : "transparent", justifyContent: "center" }}
                   >
                     <Text style={{ color: currency === "ARS" ? "#FFF" : theme.textMuted, fontWeight: "700" }}>ARS</Text>
                   </TouchableOpacity>
                   <TouchableOpacity 
-                    onPress={() => { Keyboard.dismiss(); setCurrency("USD"); }}
+                    onPress={() => setCurrency("USD")}
                     style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: currency === "USD" ? theme.accent : "transparent", justifyContent: "center" }}
                   >
                     <Text style={{ color: currency === "USD" ? "#FFF" : theme.textMuted, fontWeight: "700" }}>USD</Text>
                   </TouchableOpacity>
                 </View>
               </View>
+              {priceSuggestion.loading && brand && model && year && (
+                 <Text style={{ marginTop: 4, color: theme.textMuted, fontSize: 12, fontStyle: 'italic' }}>Calculando precio sugerido...</Text>
+              )}
+              {priceSuggestion.count > 0 && !priceSuggestion.loading && (
+                <TouchableOpacity 
+                    onPress={() => setPrice(Math.round(priceSuggestion.avg).toString())}
+                    style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.card, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.accent }}
+                >
+                    <Ionicons name="bulb-outline" size={16} color={theme.accent} style={{ marginRight: 6 }} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.text, fontSize: 12, fontWeight: '700' }}>
+                            Precio sugerido: {currency} {Math.round(priceSuggestion.avg).toLocaleString("es-AR")}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                            Basado en {priceSuggestion.count} publicaciones similares (Min: {priceSuggestion.min.toLocaleString()} - Max: {priceSuggestion.max.toLocaleString()})
+                        </Text>
+                    </View>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View style={{ marginBottom: 12 }}>
-              <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Financiación</Text>
-              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setAcceptsFinancing((p) => !p); }} style={{ borderRadius: 999, borderWidth: 1, borderColor: theme.likeBoxBackground, paddingVertical: 10, alignItems: "center", backgroundColor: acceptsFinancing ? theme.buttonBackground : theme.badgeBackground }}>
-                <Text style={{ color: acceptsFinancing ? theme.buttonText : theme.text, fontWeight: "700" }}>{acceptsFinancing ? "Financia" : "No financia"}</Text>
-              </TouchableOpacity>
+                <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Motivo de venta (Opcional)</Text>
+                <TouchableOpacity onPress={() => { Keyboard.dismiss(); setSellingReasonOpen(true); }} style={{ borderRadius: 10, borderWidth: 1, borderColor: theme.likeBoxBackground, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.inputBackground }}>
+                  <Text style={{ color: theme.inputText, fontWeight: sellingReason ? "700" : "400" }}>{sellingReason || "Seleccionar motivo"}</Text>
+                </TouchableOpacity>
+                <SelectionModal
+                  visible={sellingReasonOpen}
+                  title="Seleccionar Motivo de venta"
+                  options={["Cambio de auto", "Necesidad económica", "Poco uso", "Urgente", "Otro"]}
+                  onSelect={(reason) => setSellingReason(reason)}
+                  onClose={() => setSellingReasonOpen(false)}
+                  value={sellingReason}
+                  searchable={false}
+                  variant="inline"
+                />
+            </View>
+
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.text, marginBottom: 8, fontSize: 14 }}>Flexibilidad de Venta</Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    <TouchableOpacity onPress={() => setNegotiablePrice(!negotiablePrice)} style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: negotiablePrice ? theme.accent : theme.likeBoxBackground, backgroundColor: negotiablePrice ? theme.accent + "20" : theme.inputBackground }}>
+                        <Ionicons name={negotiablePrice ? "checkmark-circle" : "ellipse-outline"} size={18} color={negotiablePrice ? theme.accent : theme.textMuted} />
+                        <Text style={{ marginLeft: 6, color: theme.text, fontSize: 13, fontWeight: negotiablePrice ? "600" : "400" }}>Precio conversable</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => setAcceptsTradeIn(!acceptsTradeIn)} style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: acceptsTradeIn ? theme.accent : theme.likeBoxBackground, backgroundColor: acceptsTradeIn ? theme.accent + "20" : theme.inputBackground }}>
+                        <Ionicons name={acceptsTradeIn ? "checkmark-circle" : "ellipse-outline"} size={18} color={acceptsTradeIn ? theme.accent : theme.textMuted} />
+                        <Text style={{ marginLeft: 6, color: theme.text, fontSize: 13, fontWeight: acceptsTradeIn ? "600" : "400" }}>Acepta permuta</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => setImmediateDelivery(!immediateDelivery)} style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: immediateDelivery ? theme.accent : theme.likeBoxBackground, backgroundColor: immediateDelivery ? theme.accent + "20" : theme.inputBackground }}>
+                        <Ionicons name={immediateDelivery ? "checkmark-circle" : "ellipse-outline"} size={18} color={immediateDelivery ? theme.accent : theme.textMuted} />
+                        <Text style={{ marginLeft: 6, color: theme.text, fontSize: 13, fontWeight: immediateDelivery ? "600" : "400" }}>Entrega inmediata</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => setAcceptsFinancing(!acceptsFinancing)} style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: acceptsFinancing ? theme.accent : theme.likeBoxBackground, backgroundColor: acceptsFinancing ? theme.accent + "20" : theme.inputBackground }}>
+                        <Ionicons name={acceptsFinancing ? "checkmark-circle" : "ellipse-outline"} size={18} color={acceptsFinancing ? theme.accent : theme.textMuted} />
+                        <Text style={{ marginLeft: 6, color: theme.text, fontSize: 13, fontWeight: acceptsFinancing ? "600" : "400" }}>Financiación posible</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            <View style={{ marginBottom: 12 }}>
               {acceptsFinancing && (
                 <View style={{ marginTop: 8, flexDirection: "row", gap: 8 }}>
+                   <View style={{ flex: 1 }}>
+                    <Input
+                      label="Anticipo (%)"
+                      value={finInitialPercent}
+                      onChangeText={(t) => { setFinInitialPercent(t); if(errors.finInitialPercent) validateField("finInitialPercent", t); }}
+                      onBlur={() => validateField("finInitialPercent", finInitialPercent)}
+                      error={errors.finInitialPercent}
+                      keyboardType="number-pad"
+                      placeholder="30"
+                    />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Input
                       label="Tasa anual (%)"
                       value={finRate}
-                      onChangeText={setFinRate}
+                      onChangeText={(t) => { setFinRate(t); if(errors.finRate) validateField("finRate", t); }}
+                      onBlur={() => validateField("finRate", finRate)}
+                      error={errors.finRate}
                       keyboardType="number-pad"
                       placeholder="25"
                     />
@@ -923,7 +1345,9 @@ export default function AddCarScreen() {
                     <Input
                       label="Plazo (meses)"
                       value={finMonths}
-                      onChangeText={setFinMonths}
+                      onChangeText={(t) => { setFinMonths(t); if(errors.finMonths) validateField("finMonths", t); }}
+                      onBlur={() => validateField("finMonths", finMonths)}
+                      error={errors.finMonths}
                       keyboardType="number-pad"
                       placeholder="24"
                     />
@@ -946,11 +1370,44 @@ export default function AddCarScreen() {
                 visible={provinceOpen}
                 title="Seleccionar Provincia"
                 options={PROVINCES}
-                onSelect={(p) => setProvince(p)}
+                onSelect={(p) => { setProvince(p); setCity(""); }}
                 onClose={() => setProvinceOpen(false)}
                 value={province}
                 placeholder="Buscar provincia"
                 variant="inline"
+              />
+            </View>
+
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Ciudad</Text>
+              <TouchableOpacity 
+                disabled={!province}
+                onPress={() => { Keyboard.dismiss(); setCityOpen(true); }} 
+                style={{ 
+                  borderRadius: 999, 
+                  borderWidth: 1, 
+                  borderColor: city ? theme.buttonBackground : theme.likeBoxBackground, 
+                  paddingHorizontal: 14, 
+                  paddingVertical: 10, 
+                  backgroundColor: city ? theme.buttonBackground : theme.badgeBackground, 
+                  flexDirection: "row", 
+                  alignItems: "center", 
+                  gap: 6,
+                  opacity: province ? 1 : 0.6
+                }}
+              >
+                <Text style={{ color: city ? theme.buttonText : theme.text, fontWeight: "700" }}>{city || (province ? "Seleccionar ciudad" : "Elegí provincia primero")}</Text>
+              </TouchableOpacity>
+              <SelectionModal
+                visible={cityOpen}
+                title="Seleccionar Ciudad"
+                options={citiesList}
+                onSelect={(c) => setCity(c)}
+                onClose={() => setCityOpen(false)}
+                value={city}
+                placeholder="Buscar ciudad"
+                variant="inline"
+                allowAdd={true}
               />
             </View>
 
@@ -1001,6 +1458,14 @@ export default function AddCarScreen() {
                         resizeMode="cover"
                       />
                     </View>
+                    {!coverUploading && (
+                    <TouchableOpacity 
+                        onPress={removeCoverImage}
+                        style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
+                    >
+                        <Ionicons name="close-circle" size={18} color="#FFF" />
+                    </TouchableOpacity>
+                    )}
                   </View>
                 ) : coverImage ? (
                   <View style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground }}>
@@ -1012,6 +1477,12 @@ export default function AddCarScreen() {
                         resizeMode="cover"
                       />
                     </View>
+                    <TouchableOpacity 
+                        onPress={removeCoverImage}
+                        style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
+                    >
+                        <Ionicons name="close-circle" size={18} color="#FFF" />
+                    </TouchableOpacity>
                   </View>
                 ) : null}
                 {gallery.map((g, idx) => (
@@ -1020,6 +1491,16 @@ export default function AddCarScreen() {
                       {/* @ts-ignore */}
                       <Image source={{ uri: g.localUri }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
                     </View>
+                    
+                    {!g.uploading && (
+                        <TouchableOpacity 
+                            onPress={() => removeGalleryImage(idx)}
+                            style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
+                        >
+                            <Ionicons name="close-circle" size={18} color="#FFF" />
+                        </TouchableOpacity>
+                    )}
+
                     {g.uploading && (
                       <View style={{ position: "absolute", bottom: 2, right: 4 }}>
                         <Text style={{ color: theme.text, fontSize: 10 }}>{g.progress ?? 0}%</Text>
@@ -1090,10 +1571,7 @@ export default function AddCarScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
-        
-        
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       <CustomAlert
         visible={alertConfig.visible}
         title={alertConfig.title}

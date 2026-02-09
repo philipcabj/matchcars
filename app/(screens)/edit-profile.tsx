@@ -1,0 +1,693 @@
+import { CustomAlert } from "@/components/CustomAlert";
+import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
+import { db, storage } from "@/lib/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import { useRouter } from "expo-router";
+import { doc, updateDoc } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import React, { useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
+import MapView, { Marker, Region } from "react-native-maps";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+export default function EditProfileScreen() {
+  const { theme } = useTheme();
+  const { user, profile } = useAuth();
+  const router = useRouter();
+
+  const isDealer = profile?.plan === "pro_dealer";
+
+  const [firstName, setFirstName] = useState(profile?.firstName || "");
+  const [lastName, setLastName] = useState(profile?.lastName || "");
+  
+  // Dealer Fields
+  const [businessAddress, setBusinessAddress] = useState(profile?.businessAddress || "");
+  const [businessCoordinates, setBusinessCoordinates] = useState<{latitude: number, longitude: number} | null>(profile?.businessCoordinates || null);
+  const [businessHours, setBusinessHours] = useState(profile?.businessHours || "");
+  const [website, setWebsite] = useState(profile?.website || "");
+  const [instagram, setInstagram] = useState(profile?.instagram || "");
+  const [whatsapp, setWhatsapp] = useState(profile?.whatsapp || "");
+  
+  const [bannerUrl, setBannerUrl] = useState(profile?.bannerUrl || "");
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  // Address Autocomplete
+  const [suggestions, setSuggestions] = useState<Location.LocationGeocodedAddress[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [typingTimeout, setTypingTimeout] = useState<any>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Map State
+  const [mapVisible, setMapVisible] = useState(false);
+  const [mapRegion, setMapRegion] = useState<Region>({
+      latitude: profile?.businessCoordinates?.latitude || -34.603722,
+      longitude: profile?.businessCoordinates?.longitude || -58.381592,
+      latitudeDelta: 0.05,
+      longitudeDelta: 0.05,
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({
+    visible: false,
+    title: "",
+    message: "",
+    type: "info" as "success" | "error" | "info" | "warning",
+    onClose: () => {},
+    options: undefined as undefined | Array<{ text: string, onPress?: () => void, style?: "default" | "cancel" | "destructive" }>
+  });
+
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info", onClose = () => {}, options?: any[]) => {
+    setAlertConfig({
+      visible: true,
+      title,
+      message,
+      type,
+      onClose: () => {
+        setAlertConfig((prev) => ({ ...prev, visible: false }));
+        onClose();
+      },
+      options
+    });
+  };
+
+  const formatAddress = (addr: Location.LocationGeocodedAddress) => {
+      const street = addr.street || addr.name || "";
+      const number = addr.streetNumber || "";
+      const city = addr.city || addr.subregion || "";
+      const region = addr.region || "";
+      const country = addr.country || "";
+      
+      let parts = [];
+      if (street) parts.push(`${street} ${number}`.trim());
+      if (city) parts.push(city);
+      if (region) parts.push(region);
+      if (parts.length < 2 && country) parts.push(country);
+      
+      return parts.join(", ");
+  };
+
+  const handleAddressChange = (text: string) => {
+    setBusinessAddress(text);
+    setIsSearching(true);
+    
+    if (typingTimeout) clearTimeout(typingTimeout);
+
+    if (text.length > 3) {
+        const timeout = setTimeout(async () => {
+            try {
+                const results = await Location.geocodeAsync(text);
+                const detailedSuggestions: Location.LocationGeocodedAddress[] = [];
+                
+                if (results.length > 0) {
+                     for (let i = 0; i < Math.min(results.length, 5); i++) {
+                         const reverse = await Location.reverseGeocodeAsync({
+                             latitude: results[i].latitude,
+                             longitude: results[i].longitude
+                         });
+                         if (reverse.length > 0) {
+                             detailedSuggestions.push({ ...reverse[0], ...results[i] } as any);
+                         }
+                     }
+                }
+                setSuggestions(detailedSuggestions);
+                setShowSuggestions(true);
+            } catch (e) {
+                console.log("Geocode error", e);
+                setSuggestions([]);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 800); 
+        setTypingTimeout(timeout);
+    } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        setIsSearching(false);
+    }
+  };
+
+  const handleSelectSuggestion = (suggestion: any) => {
+      const formatted = formatAddress(suggestion);
+      setBusinessAddress(formatted);
+      setShowSuggestions(false);
+      
+      // Update coordinates
+      if (suggestion.latitude && suggestion.longitude) {
+          const newCoords = { latitude: suggestion.latitude, longitude: suggestion.longitude };
+          setBusinessCoordinates(newCoords);
+          setMapRegion({
+              ...newCoords,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005
+          });
+      }
+  };
+
+  const handleSave = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const updateData: any = {
+        firstName,
+        lastName,
+      };
+
+      if (isDealer) {
+        updateData.businessAddress = businessAddress;
+        updateData.businessCoordinates = businessCoordinates;
+        updateData.businessHours = businessHours;
+        updateData.website = website;
+        updateData.instagram = instagram;
+        updateData.whatsapp = whatsapp;
+        updateData.bannerUrl = bannerUrl;
+      }
+
+      await updateDoc(doc(db, "users", user.uid), updateData);
+      // await refreshProfile(); // Context updates automatically via onSnapshot
+      showAlert("Éxito", "Perfil actualizado correctamente.", "success", () => router.back());
+    } catch (e) {
+      console.error("Error updating profile", e);
+      showAlert("Error", "No se pudo actualizar el perfil.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGeolocate = async () => {
+    setLocating(true);
+    try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+            showAlert("Permiso denegado", "Necesitamos acceso a tu ubicación para completar la dirección.", "warning");
+            setLocating(false);
+            return;
+        }
+
+        const enabled = await Location.hasServicesEnabledAsync();
+        if (!enabled) {
+            showAlert("Ubicación desactivada", "Por favor activá el GPS.", "warning");
+            setLocating(false);
+            return;
+        }
+
+        // MODE 1: VALIDATION (If user typed something)
+        if (businessAddress.trim().length > 3) {
+             const geocoded = await Location.geocodeAsync(businessAddress);
+             if (geocoded.length > 0) {
+                 const { latitude, longitude } = geocoded[0];
+                 const reverse = await Location.reverseGeocodeAsync({ latitude, longitude });
+                 
+                 if (reverse.length > 0) {
+                     const formatted = formatAddress(reverse[0]);
+                     
+                     // If it's basically the same, just notify success
+                     if (formatted.toLowerCase().includes(businessAddress.toLowerCase()) || businessAddress.toLowerCase().includes(formatted.toLowerCase())) {
+                         showAlert("Dirección Verificada", `La dirección "${formatted}" es válida.`, "success");
+                         setBusinessAddress(formatted); // Update with clean format
+                     } else {
+                         // Offer to replace
+                         showAlert(
+                             "Sugerencia de Dirección", 
+                             `Encontramos una coincidencia más precisa:\n"${formatted}"\n\n¿Deseas reemplazar lo que escribiste?`, 
+                             "info", 
+                             () => {}, 
+                             [
+                                 { text: "No, mantener", style: "cancel", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) },
+                                 { text: "Sí, actualizar", onPress: () => {
+                                     setBusinessAddress(formatted);
+                                     setAlertConfig(prev => ({ ...prev, visible: false }));
+                                 }}
+                             ]
+                         );
+                     }
+                 } else {
+                     showAlert("No encontrada", "No pudimos validar los detalles de esa dirección.", "warning");
+                 }
+             } else {
+                 showAlert("No encontrada", "No encontramos coordenadas para esa dirección. Intenta agregar la ciudad o provincia.", "warning");
+             }
+        } 
+        // MODE 2: DETECTION (If empty)
+        else {
+            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            const reverse = await Location.reverseGeocodeAsync({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude
+            });
+
+            if (reverse.length > 0) {
+                const formatted = formatAddress(reverse[0]);
+                setBusinessAddress(formatted);
+                showAlert("Ubicación Detectada", `Hemos completado la dirección:\n"${formatted}"`, "success");
+            } else {
+                 showAlert("Sin resultados", "No pudimos encontrar una dirección precisa.", "info");
+            }
+        }
+    } catch (e) {
+        console.error("Geolocate Error:", e);
+        showAlert("Error", "No pudimos obtener la ubicación.", "error");
+    } finally {
+        setLocating(false);
+    }
+  };
+
+  const handleOpenMap = async () => {
+      // Try to get current location to center map, otherwise use default
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+          try {
+              const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+              setMapRegion({
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.005,
+                  longitudeDelta: 0.005,
+              });
+          } catch (e) {
+              console.log("Could not get current location for map", e);
+          }
+      }
+      setMapVisible(true);
+  };
+
+  const handleMapConfirm = async () => {
+      setLocating(true);
+      try {
+          const reverse = await Location.reverseGeocodeAsync({
+              latitude: mapRegion.latitude,
+              longitude: mapRegion.longitude
+          });
+
+          if (reverse.length > 0) {
+              const formatted = formatAddress(reverse[0]);
+              setBusinessAddress(formatted);
+              setBusinessCoordinates({ latitude: mapRegion.latitude, longitude: mapRegion.longitude });
+              setMapVisible(false);
+              
+              // Clear any existing suggestions or search state
+              setSuggestions([]);
+              setShowSuggestions(false);
+              setIsSearching(false);
+              if (typingTimeout) clearTimeout(typingTimeout);
+          } else {
+              showAlert("Error", "No pudimos obtener la dirección de este punto.", "error");
+          }
+      } catch (e) {
+          console.error("Map Reverse Geocode Error:", e);
+          showAlert("Error", "Ocurrió un error al obtener la dirección.", "error");
+      } finally {
+          setLocating(false);
+      }
+  };
+
+  const pickBanner = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [3, 1], // Wide aspect ratio for banner
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets[0].uri) {
+        setBannerUploading(true);
+        const uri = result.assets[0].uri;
+        
+        // Resize
+        const manipulated = await ImageManipulator.manipulateAsync(
+            uri,
+            [{ resize: { width: 1200 } }],
+            { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        );
+
+        const blob: Blob = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function () {
+            resolve(xhr.response);
+          };
+          xhr.onerror = function (e) {
+            reject(new TypeError("Network request failed"));
+          };
+          xhr.responseType = "blob";
+          xhr.open("GET", manipulated.uri, true);
+          xhr.send(null);
+        });
+
+        const storageRef = ref(storage, `banners/${user?.uid}_${Date.now()}.jpg`);
+        await uploadBytes(storageRef, blob);
+        const url = await getDownloadURL(storageRef);
+        setBannerUrl(url);
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("Error", "No se pudo subir el banner.", "error");
+    } finally {
+      setBannerUploading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <View style={{ flexDirection: "row", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: theme.inputBackground }}>
+        <TouchableOpacity onPress={() => router.back()} style={{ padding: 8 }}>
+            <Ionicons name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700", marginLeft: 8 }}>
+            Editar Perfil {isDealer ? "Agencia" : ""}
+        </Text>
+      </View>
+
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+        style={{ flex: 1 }}
+      >
+      <ScrollView contentContainerStyle={{ padding: 20 }}>
+        
+        {isDealer && (
+            <View style={{ marginBottom: 24 }}>
+                <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 12 }}>Banner de Portada</Text>
+                <TouchableOpacity 
+                    onPress={pickBanner}
+                    style={{ 
+                        height: 120, 
+                        backgroundColor: theme.inputBackground, 
+                        borderRadius: 12, 
+                        overflow: 'hidden', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        borderWidth: 1,
+                        borderColor: theme.likeBoxBackground,
+                        borderStyle: 'dashed'
+                    }}
+                >
+                    {bannerUrl ? (
+                        <Image source={{ uri: bannerUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                        <View style={{ alignItems: 'center' }}>
+                            <Ionicons name="image-outline" size={32} color={theme.textMuted} />
+                            <Text style={{ color: theme.textMuted, marginTop: 8 }}>Tocar para subir banner</Text>
+                        </View>
+                    )}
+                    {bannerUploading && (
+                        <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
+                            <ActivityIndicator color="#FFF" />
+                        </View>
+                    )}
+                </TouchableOpacity>
+            </View>
+        )}
+
+        <View style={{ marginBottom: 20 }}>
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 16 }}>Información Personal</Text>
+            
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Nombre</Text>
+                <TextInput
+                    value={firstName}
+                    onChangeText={setFirstName}
+                    style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+            </View>
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Apellido</Text>
+                <TextInput
+                    value={lastName}
+                    onChangeText={setLastName}
+                    style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+            </View>
+        </View>
+
+        {isDealer && (
+            <View style={{ marginBottom: 20 }}>
+                <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600", marginBottom: 16 }}>Información de Agencia</Text>
+                
+                <View style={{ marginBottom: 12, zIndex: 10 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Dirección del Local</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.inputBackground, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                        <TextInput
+                            value={businessAddress}
+                            onChangeText={handleAddressChange}
+                            placeholder="Av. Libertador 1234, CABA"
+                            placeholderTextColor={theme.textMuted}
+                            style={{ flex: 1, color: theme.inputText, padding: 12 }}
+                        />
+                        <TouchableOpacity onPress={handleOpenMap} style={{ padding: 12, borderLeftWidth: 1, borderLeftColor: theme.likeBoxBackground }}>
+                             <Ionicons name="map-outline" size={24} color={theme.accent} />
+                        </TouchableOpacity>
+                    </View>
+                    
+                    {/* Inline Suggestions */}
+                    {showSuggestions && (
+                        <View style={{ 
+                            marginTop: 4,
+                            backgroundColor: theme.card, 
+                            borderRadius: 8, 
+                            borderWidth: 1,
+                            borderColor: theme.likeBoxBackground,
+                        }}>
+                            {isSearching ? (
+                                <View style={{ padding: 16, alignItems: 'center' }}>
+                                    <ActivityIndicator color={theme.accent} />
+                                    <Text style={{ color: theme.textMuted, marginTop: 8, fontSize: 12 }}>Buscando...</Text>
+                                </View>
+                            ) : (
+                                <>
+                                    {suggestions.length > 0 ? (
+                                        suggestions.map((item, index) => (
+                                            <TouchableOpacity 
+                                                key={index} 
+                                                onPress={() => handleSelectSuggestion(item)}
+                                                style={{ 
+                                                    padding: 12, 
+                                                    borderBottomWidth: 1, 
+                                                    borderBottomColor: theme.likeBoxBackground,
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center'
+                                                }}
+                                            >
+                                                <Ionicons name="location-outline" size={18} color={theme.textMuted} style={{ marginRight: 8 }} />
+                                                <Text style={{ color: theme.text, fontSize: 14, flex: 1 }}>{formatAddress(item)}</Text>
+                                            </TouchableOpacity>
+                                        ))
+                                    ) : (
+                                        <View style={{ padding: 16 }}>
+                                            <Text style={{ color: theme.textMuted, textAlign: 'center', marginBottom: 12 }}>
+                                                No encontramos esa dirección.
+                                            </Text>
+                                            <TouchableOpacity 
+                                                onPress={handleOpenMap}
+                                                style={{ 
+                                                    backgroundColor: theme.inputBackground, 
+                                                    padding: 10, 
+                                                    borderRadius: 8, 
+                                                    alignItems: 'center',
+                                                    flexDirection: 'row',
+                                                    justifyContent: 'center'
+                                                }}
+                                            >
+                                                <Ionicons name="map" size={18} color={theme.accent} style={{ marginRight: 8 }} />
+                                                <Text style={{ color: theme.text, fontWeight: '600' }}>Buscar en el mapa</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                    
+                                    {/* Always show manual map option at bottom if there are results too */}
+                                    {suggestions.length > 0 && (
+                                         <TouchableOpacity 
+                                            onPress={handleOpenMap}
+                                            style={{ 
+                                                padding: 12, 
+                                                backgroundColor: theme.inputBackground,
+                                                borderBottomLeftRadius: 8,
+                                                borderBottomRightRadius: 8,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'center'
+                                            }}
+                                        >
+                                            <Text style={{ color: theme.textMuted, fontSize: 12 }}>¿No está en la lista? </Text>
+                                            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '700' }}>Buscar en mapa</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </>
+                            )}
+                        </View>
+                    )}
+                    {businessCoordinates && (
+                        <View style={{ marginTop: 12, height: 150, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                             <MapView 
+                                style={{ flex: 1 }}
+                                region={{
+                                    ...businessCoordinates,
+                                    latitudeDelta: 0.005,
+                                    longitudeDelta: 0.005
+                                }}
+                                scrollEnabled={false}
+                                zoomEnabled={false}
+                                pitchEnabled={false}
+                                rotateEnabled={false}
+                            >
+                                <Marker coordinate={businessCoordinates} />
+                            </MapView>
+                            <TouchableOpacity 
+                                onPress={handleOpenMap}
+                                style={{ position: 'absolute', bottom: 8, right: 8, backgroundColor: theme.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
+                            >
+                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Editar en Mapa</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Horarios de Atención</Text>
+                    <TextInput
+                        value={businessHours}
+                        onChangeText={setBusinessHours}
+                        placeholder="Lun a Vie 9-18hs"
+                        placeholderTextColor={theme.textMuted}
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Sitio Web</Text>
+                    <TextInput
+                        value={website}
+                        onChangeText={setWebsite}
+                        placeholder="https://miagencia.com"
+                        placeholderTextColor={theme.textMuted}
+                        autoCapitalize="none"
+                        keyboardType="url"
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Instagram (Usuario)</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.inputBackground, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                        <Text style={{ paddingLeft: 12, color: theme.textMuted }}>@</Text>
+                        <TextInput
+                            value={instagram}
+                            onChangeText={setInstagram}
+                            placeholder="usuario"
+                            placeholderTextColor={theme.textMuted}
+                            autoCapitalize="none"
+                            style={{ flex: 1, color: theme.inputText, padding: 12 }}
+                        />
+                    </View>
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>WhatsApp Business</Text>
+                    <TextInput
+                        value={whatsapp}
+                        onChangeText={setWhatsapp}
+                        placeholder="+54911..."
+                        placeholderTextColor={theme.textMuted}
+                        keyboardType="phone-pad"
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
+            </View>
+        )}
+
+        <TouchableOpacity
+            onPress={handleSave}
+            disabled={loading}
+            style={{
+                backgroundColor: theme.accent,
+                padding: 16,
+                borderRadius: 999,
+                alignItems: "center",
+                marginTop: 20,
+                marginBottom: 40
+            }}
+        >
+            {loading ? (
+                <ActivityIndicator color="#FFF" />
+            ) : (
+                <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 16 }}>Guardar Cambios</Text>
+            )}
+        </TouchableOpacity>
+
+      </ScrollView>
+      </KeyboardAvoidingView>
+
+      <CustomAlert
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={alertConfig.onClose}
+        options={alertConfig.options}
+      />
+
+      <Modal visible={mapVisible} animationType="slide" onRequestClose={() => setMapVisible(false)}>
+        <View style={{ flex: 1 }}>
+            <MapView 
+                style={{ flex: 1 }}
+                region={mapRegion}
+                onRegionChangeComplete={setMapRegion}
+                showsUserLocation
+                showsMyLocationButton
+            />
+            
+            {/* Fixed Center Marker */}
+            <View style={{ 
+                position: 'absolute', 
+                top: '50%', 
+                left: '50%', 
+                marginLeft: -24, 
+                marginTop: -48, 
+                pointerEvents: 'none' 
+            }}>
+                <Ionicons name="location" size={48} color={theme.accent} />
+            </View>
+
+            {/* Header / Close */}
+            <View style={{ position: 'absolute', top: Platform.OS === 'ios' ? 50 : 20, left: 20, zIndex: 10 }}>
+                <TouchableOpacity 
+                    onPress={() => setMapVisible(false)}
+                    style={{ backgroundColor: theme.card, padding: 10, borderRadius: 50, shadowColor: "#000", shadowOffset: {width:0,height:2}, shadowOpacity:0.25, shadowRadius:3.84, elevation:5 }}
+                >
+                    <Ionicons name="close" size={24} color={theme.text} />
+                </TouchableOpacity>
+            </View>
+            
+            {/* Title */}
+            <View style={{ position: 'absolute', top: Platform.OS === 'ios' ? 60 : 30, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Mueve el mapa para ubicar</Text>
+            </View>
+
+            {/* Confirm Button */}
+            <View style={{ position: 'absolute', bottom: 40, left: 20, right: 20 }}>
+                <TouchableOpacity 
+                    onPress={handleMapConfirm}
+                    style={{ backgroundColor: theme.accent, padding: 16, borderRadius: 12, alignItems: 'center', shadowColor: "#000", shadowOffset: {width:0,height:2}, shadowOpacity:0.25, shadowRadius:3.84, elevation:5 }}
+                >
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Confirmar Ubicación</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}

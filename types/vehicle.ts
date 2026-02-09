@@ -46,6 +46,18 @@ export interface Vehicle {
     rate?: number;
     months?: number;
   };
+  negotiablePrice?: boolean; // Precio conversable
+  immediateDelivery?: boolean; // Entrega inmediata
+  sellingReason?: string; // Motivo de venta
+
+  // Historial y Documentación
+  originalPrice?: number; // Precio original para calcular rebajas
+  updatedAt?: any; // Última actualización
+  singleOwner?: boolean;
+  serviceRecords?: boolean;
+  vtvValid?: boolean;
+  papersUpToDate?: boolean;
+  warranty?: boolean;
 
   // Extras
   features?: string[];
@@ -56,8 +68,17 @@ export interface Vehicle {
   // Usuario dueño
   userId?: string;
   userName?: string;
+  userPlan?: string;
   createdAt?: any;
 
   // Publicación
   published?: boolean;
+  status?: "available" | "reserved" | "sold" | "pending" | "blocked" | "rejected"; // Estado de la publicación
+  rejectionReason?: string;
+  isFeatured?: boolean;
+  featuredAt?: any; // Timestamp of when it was featured
+  
+  // Métricas
+  views?: number;
+  likesCount?: number;
 }

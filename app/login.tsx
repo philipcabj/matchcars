@@ -6,20 +6,17 @@ import { getAuthErrorMessage } from "@/utils/firebaseErrors";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
   Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
@@ -27,6 +24,14 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
 } from "firebase/auth";
+
+let GoogleSignin: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
+} catch {
+  console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+}
 
 // Necesario para completar el flujo en Expo Go
 WebBrowser.maybeCompleteAuthSession();
@@ -63,9 +68,9 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [loadingGoogle, setLoadingGoogle] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{ visible: boolean; title: string; message: string; type: "error" | "success" | "info" }>({ visible: false, title: "", message: "", type: "info" });
+  const [alertConfig, setAlertConfig] = useState<{ visible: boolean; title: string; message: string; type: "error" | "success" | "info" | "warning" }>({ visible: false, title: "", message: "", type: "info" });
 
-  const showAlert = (title: string, message: string, type: "error" | "success" | "info" = "error") => {
+  const showAlert = (title: string, message: string, type: "error" | "success" | "info" | "warning" = "error") => {
     setAlertConfig({ visible: true, title, message, type });
   };
 
@@ -121,11 +126,9 @@ export default function LoginScreen() {
   };
 
   // ▶️ Botón Google
-  const handleGooglePress = async () => {
-    // Alert.alert("Aviso", "Google Sign-In deshabilitado temporalmente en Expo Go.");
-    
+  const handleGooglePress = async () => {    
     if (!GoogleSignin) {
-        Alert.alert("No disponible", "Google Sign-In requiere una Development Build (no funciona en Expo Go estándar).");
+        showAlert("No disponible", "Google Sign-In requiere una Development Build (no funciona en Expo Go estándar).", "warning");
         return;
     }
     try {
@@ -136,7 +139,7 @@ export default function LoginScreen() {
 
       const idToken = userInfo.data?.idToken || userInfo.idToken;
       if (!idToken) {
-        Alert.alert("Error", "No se recibió el token de Google.");
+        showAlert("Error", "No se recibió el token de Google.", "error");
         return;
       }
 
@@ -194,7 +197,7 @@ export default function LoginScreen() {
             // Usuario canceló
         } else {
             console.error("Google Sign-In Error:", error);
-            Alert.alert("Error Google", error.message || "Ocurrió un error.");
+            showAlert("Error Google", "No se pudo iniciar sesión con Google. Intentá nuevamente.", "error");
         }
     } finally {
       setLoadingGoogle(false);
@@ -223,24 +226,19 @@ export default function LoginScreen() {
             style={styles.input}
           />
 
+          {/* Contraseña */}
           <Text style={styles.label}>Contraseña</Text>
-          <View style={{ position: "relative" }}>
+          <View style={[styles.input, { flexDirection: "row", alignItems: "center", paddingVertical: 0 }]}>
             <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder={showPassword ? "tu contraseña" : "********"}
+              style={{ flex: 1, color: theme.inputText, paddingVertical: 10 }}
+              placeholder="••••••"
               placeholderTextColor={theme.textMuted}
               secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
             />
-            <TouchableOpacity
-              onPress={() => setShowPassword((p) => !p)}
-              style={{ position: "absolute", right: 10, top: 10, padding: 6 }}
-            >
-              <Text style={{ color: theme.accent, fontWeight: "600" }}>
-                {showPassword ? "Ocultar" : "Ver"}
-              </Text>
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ padding: 10, justifyContent: 'center' }}>
+              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={theme.textMuted} />
             </TouchableOpacity>
           </View>
 
@@ -294,11 +292,14 @@ export default function LoginScreen() {
         </TouchableOpacity>
 
         <View style={{ height: 12 }} />
-        {Platform.OS === "ios" && (
+        {Platform.OS === "ios" && !Platform.isPad && (
           <TouchableOpacity
             style={[styles.googleButton, { flexDirection: "row", justifyContent: "center", gap: 10 }]}
             onPress={() => {
-              loginWithApple().catch((e) => showAlert("Error", getAuthErrorMessage(e?.code) || e.message, "error"));
+              loginWithApple().catch((e) => {
+                if (e?.code === 'ERR_REQUEST_CANCELED') return;
+                showAlert("Error", "No se pudo iniciar con Apple.", "error");
+              });
             }}
           >
             <Ionicons name="logo-apple" size={20} color="#111827" />

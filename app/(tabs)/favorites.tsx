@@ -1,23 +1,41 @@
 import { CarCard } from "@/components/cards/carcard";
+import { CustomAlert } from "@/components/CustomAlert";
 import { Header } from "@/components/Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { sendNotificationEmail } from "@/lib/mail";
 import type { Vehicle } from "@/types/vehicle";
 import { useRouter } from "expo-router";
-import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function FavoritesTab() {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [favVehicles, setFavVehicles] = useState<Vehicle[]>([]);
   const [likesRemaining, setLikesRemaining] = useState<number>(10);
+  const [alertConfig, setAlertConfig] = useState({ 
+    visible: false, 
+    title: "", 
+    message: "", 
+    type: "info" as "success" | "error" | "info" | "warning",
+    onClose: () => {}
+  });
+
+  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info", onClose = () => {}) => {
+    setAlertConfig({ visible: true, title, message, type, onClose });
+  };
+
+  const closeAlert = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+    if (alertConfig.onClose) alertConfig.onClose();
+  };
 
   // Nota: no usar early return antes de hooks para evitar violar reglas de hooks
 
@@ -64,6 +82,16 @@ export default function FavoritesTab() {
           const others = prev.filter((p) => p.id !== vid);
           if (snap.exists()) {
             const data: any = snap.data();
+            // Filter out reported/deleted cars
+            if (["rejected", "blocked", "deleted"].includes(data.status)) {
+                return others;
+            }
+            
+            // Filter blocked users
+            if (profile?.blockedUsers && data.userId && profile.blockedUsers.includes(data.userId)) {
+                return others;
+            }
+
             const mapped: Vehicle = {
               id: snap.id,
               brand: data.brand,
@@ -88,7 +116,15 @@ export default function FavoritesTab() {
               userName: data.userName,
               createdAt: data.createdAt,
               published: data.published,
+              isFeatured: data.isFeatured,
+              status: data.status,
             } as any;
+            
+            // Filter
+            if (mapped.status === "blocked" || mapped.status === "rejected" || data.deleted === true) {
+                return others;
+            }
+
             return [...others, mapped];
           }
           return others;
@@ -100,7 +136,38 @@ export default function FavoritesTab() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [favoriteIds]);
+  }, [favoriteIds, profile?.blockedUsers]);
+
+  const [sellerProfiles, setSellerProfiles] = useState<Record<string, { name: string }>>({});
+
+  useEffect(() => {
+    if (favVehicles.length === 0) return;
+    
+    const fetchSellerProfiles = async () => {
+        const idsToFetch = Array.from(new Set(favVehicles.map(v => v.userId).filter((id): id is string => !!id && !sellerProfiles[id])));
+        if (idsToFetch.length === 0) return;
+
+        const profiles: Record<string, { name: string }> = {};
+        
+        await Promise.all(idsToFetch.map(async (uid) => {
+            try {
+                const userDoc = await getDoc(doc(db, "users", uid));
+                if (userDoc.exists()) {
+                    const data = userDoc.data();
+                    const name = data.displayName || data.firstName ? `${data.firstName || ""} ${data.lastName || ""}`.trim() : "Usuario";
+                    profiles[uid] = { name: name || "Usuario" };
+                } else {
+                    profiles[uid] = { name: "Usuario" };
+                }
+            } catch (e) {
+                profiles[uid] = { name: "Usuario" };
+            }
+        }));
+        
+        setSellerProfiles(prev => ({ ...prev, ...profiles }));
+    };
+    fetchSellerProfiles();
+  }, [favVehicles]);
 
   const toggleFavorite = async (vehicleId: string, vehicleOwnerId?: string) => {
     if (!user) {
@@ -113,9 +180,15 @@ export default function FavoritesTab() {
     if (isFav) {
       await deleteDoc(ref);
       try {
-        await updateDoc(vRef, { likedBy: arrayRemove(user.uid) });
-      } catch (e) {
-        Alert.alert("Error", "No se pudo actualizar los likes en la publicación.");
+        await updateDoc(vRef, { 
+          likedBy: arrayRemove(user.uid),
+          likesCount: increment(-1) 
+        });
+      } catch {
+        // Fallback: intentar sin decrementar si falla
+        try {
+          await updateDoc(vRef, { likedBy: arrayRemove(user.uid) });
+        } catch {}
       }
     } else {
       const start = new Date();
@@ -124,14 +197,49 @@ export default function FavoritesTab() {
       const q = query(favRef, where("createdAt", ">=", Timestamp.fromDate(start)));
       const snap = await getDocs(q);
       if (snap.size >= 10) {
-        Alert.alert("Límite diario", "Sólo podés dar hasta 10 likes por día.");
+        showAlert("Límite diario", "Sólo podés dar hasta 10 likes por día.", "warning");
         return;
       }
       await setDoc(ref, { vehicleId, createdAt: serverTimestamp(), userId: user.uid, vehicleOwnerId: vehicleOwnerId ?? null });
       try {
-        await updateDoc(vRef, { likedBy: arrayUnion(user.uid) });
-      } catch (e) {
-        Alert.alert("Error", "No se pudo actualizar los likes en la publicación.");
+        await updateDoc(vRef, { 
+          likedBy: arrayUnion(user.uid),
+          likesCount: increment(1) 
+        });
+      } catch {
+        // Fallback
+        try {
+          await updateDoc(vRef, { likedBy: arrayUnion(user.uid) });
+        } catch {}
+      }
+
+      // Send Notification Email
+      if (vehicleOwnerId && vehicleOwnerId !== user.uid) {
+        try {
+            const vSnap = await getDoc(vRef);
+            const vData = vSnap.data() as any;
+            const carModel = `${vData?.brand || ""} ${vData?.model || ""}`.trim();
+    
+            const myVehiclesRef = query(
+                collection(db, "vehicles"), 
+                where("userId", "==", user.uid), 
+                where("likedBy", "array-contains", vehicleOwnerId)
+            );
+            const matchSnap = await getDocs(myVehiclesRef);
+            const isMatch = !matchSnap.empty;
+    
+            const myName = (user.displayName || (user.email?.split('@')[0] ?? "Usuario")).trim();
+            
+            await sendNotificationEmail(isMatch ? "match" : "like", {
+                recipientUid: vehicleOwnerId,
+                senderName: myName,
+                senderUid: user.uid,
+                subject: isMatch ? `¡Tenés un nuevo Match con ${myName}!` : `¡A ${myName} le gustó tu auto!`,
+                carModel: carModel
+            });
+        } catch (err) {
+            console.error("Error sending notification:", err);
+        }
       }
     }
   };
@@ -167,13 +275,24 @@ export default function FavoritesTab() {
           <FlatList
             data={favVehicles}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <CarCard vehicle={item} liked={true} onToggleLike={() => toggleFavorite(item.id, item.userId)} compact horizontal />
-            )}
+            renderItem={({ item }) => {
+            const sellerName = item.userId ? sellerProfiles[item.userId]?.name : undefined;
+            const vehicleToRender = sellerName ? { ...item, userName: sellerName } : item;
+            return (
+              <CarCard vehicle={vehicleToRender} liked={true} onToggleLike={() => toggleFavorite(item.id, item.userId)} compact horizontal />
+            );
+          }}
             contentContainerStyle={{ paddingBottom: 24 }}
           />
         )}
       </View>
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={closeAlert}
+      />
     </SafeAreaView>
   );
 }

@@ -1,3 +1,4 @@
+import { useNotifications } from "@/contexts/NotificationContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
@@ -5,6 +6,7 @@ import React from "react";
 
 export default function TabsLayout() {
   const { theme } = useTheme();
+  const { unreadMessagesCount, unreadLikesCount, unreadMatchesCount } = useNotifications();
 
   return (
     <Tabs
@@ -44,6 +46,7 @@ export default function TabsLayout() {
         name="matches"
         options={{
           title: "Matches",
+          tabBarBadge: unreadMatchesCount > 0 ? unreadMatchesCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name={"heart" as any} size={size ?? 24} color={color} />
           ),
@@ -53,6 +56,7 @@ export default function TabsLayout() {
         name="interesados"
         options={{
           title: "Interesados",
+          tabBarBadge: unreadLikesCount > 0 ? unreadLikesCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name={"people-outline" as any} size={size ?? 24} color={color} />
           ),
@@ -62,6 +66,7 @@ export default function TabsLayout() {
         name="messages"
         options={{
           title: "Mensajes",
+          tabBarBadge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name={"chatbubbles-outline" as any} size={size ?? 24} color={color} />
           ),

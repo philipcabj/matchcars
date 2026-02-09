@@ -1,17 +1,74 @@
 // app/components/Header.tsx
-import { db } from "@/lib/firebase";
+import { CustomAlert } from "@/components/CustomAlert";
+import { useNotifications } from "@/contexts/NotificationContext";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import React, { useState } from "react";
+import { Image, Text, TouchableOpacity, View } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 
-export function Header() {
+export interface HeaderProps {
+  title?: string;
+  showBack?: boolean;
+  onBackPress?: () => void;
+  customTitle?: React.ReactNode;
+}
+
+export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, customTitle }) => {
   const { theme } = useTheme();
   const { user, profile, logout } = useAuth();
   const router = useRouter();
+  const { totalUnreadCount } = useNotifications();
+
+  const [alertConfig, setAlertConfig] = useState({ 
+    visible: false, 
+    title: "", 
+    message: "", 
+    type: "info" as "success" | "error" | "info" | "warning",
+    showCancel: false,
+    onConfirm: () => {},
+    onCancel: () => {},
+    confirmText: "OK",
+    cancelText: "Cancelar"
+  });
+
+  const showAlert = (
+    title: string, 
+    message: string, 
+    type: "success" | "error" | "info" | "warning" = "info",
+    showCancel = false,
+    onConfirm = () => {},
+    confirmText = "OK",
+    cancelText = "Cancelar"
+  ) => {
+    setAlertConfig({ 
+      visible: true, 
+      title, 
+      message, 
+      type, 
+      showCancel, 
+      onConfirm, 
+      onCancel: () => setAlertConfig(prev => ({ ...prev, visible: false })),
+      confirmText,
+      cancelText
+    });
+  };
+
+  const handleConfirm = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+    if (alertConfig.onConfirm) alertConfig.onConfirm();
+  };
+
+  const handleBack = () => {
+    if (onBackPress) {
+      onBackPress();
+    } else if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.push("/(tabs)");
+    }
+  };
 
   const initials =
     profile?.initials ||
@@ -37,44 +94,6 @@ export function Header() {
     }
   };
 
-  const [hasUnread, setHasUnread] = useState(false);
-  const [lastSeenAt, setLastSeenAt] = useState<any>(null);
-  useEffect(() => {
-    if (!user) {
-      setLastSeenAt(null);
-      return;
-    }
-    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
-      const data = snap.data() as any;
-      setLastSeenAt(data?.notificationsLastSeenAt || null);
-    }, () => setLastSeenAt(null));
-    return () => unsub();
-  }, [user]);
-  useEffect(() => {
-    if (!user) {
-      setHasUnread(false);
-      return;
-    }
-    const q = query(collection(db, "conversations"), where("members", "array-contains", user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      let flag = false;
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const updatedAt = data?.updatedAt;
-        const lastSenderId = data?.lastSenderId;
-        if (lastSenderId && lastSenderId !== user.uid) {
-          if (!lastSeenAt) {
-            flag = true;
-          } else if (updatedAt && typeof updatedAt.toMillis === "function" && typeof lastSeenAt?.toMillis === "function") {
-            if (updatedAt.toMillis() > lastSeenAt.toMillis()) flag = true;
-          }
-        }
-      });
-      setHasUnread(flag);
-    }, () => setHasUnread(false));
-    return () => unsub();
-  }, [user, lastSeenAt]);
-
   return (
     <View
       style={{
@@ -88,38 +107,57 @@ export function Header() {
         borderBottomColor: theme.badgeBorder,
       }}
     >
-      {/* IZQUIERDA: Marca + saludo */}
-      <View>
-        <Text
-          style={{
-            color: theme.accent,
-            fontSize: 13,
-            fontWeight: "600",
-            letterSpacing: 1,
-          }}
-        >
-          MATCH
-        </Text>
-        <Text
-          style={{
-            color: theme.text,
-            fontSize: 22,
-            fontWeight: "800",
-          }}
-        >
-          CARS
-        </Text>
+      {/* IZQUIERDA: Marca + saludo o Botón Volver + Título */}
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        {showBack ? (
+          <>
+            <TouchableOpacity onPress={handleBack} style={{ padding: 4 }}>
+              <Ionicons name="chevron-back" size={28} color={theme.text} />
+            </TouchableOpacity>
+            {customTitle ? (
+              customTitle
+            ) : (
+              title && (
+                <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700" }} numberOfLines={1}>
+                  {title}
+                </Text>
+              )
+            )}
+          </>
+        ) : (
+          <View>
+            <Text
+              style={{
+                color: theme.accent,
+                fontSize: 13,
+                fontWeight: "600",
+                letterSpacing: 1,
+              }}
+            >
+              MATCH
+            </Text>
+            <Text
+              style={{
+                color: theme.text,
+                fontSize: 22,
+                fontWeight: "800",
+              }}
+            >
+              CARS
+            </Text>
 
-        {user && (
-          <Text
-            style={{
-              color: theme.textLight,
-              fontSize: 13,
-              marginTop: 4,
-            }}
-          >
-            Bienvenido, {fullName || "usuario"}
-          </Text>
+            {user && (
+              <Text
+                style={{
+                  color: theme.textLight,
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
+                Bienvenido, {fullName || "usuario"}
+              </Text>
+            )}
+          </View>
         )}
       </View>
 
@@ -128,8 +166,23 @@ export function Header() {
         <TouchableOpacity activeOpacity={0.7} onPress={() => { if (!user) { router.push("/login"); } else { router.push("/(screens)/notifications"); } }}>
           <View>
             <Ionicons name="notifications-outline" size={24} color={theme.text} />
-            {hasUnread && (
-              <View style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: "#FF3B30" }} />
+            {totalUnreadCount > 0 && (
+              <View style={{ 
+                position: "absolute", 
+                top: -6, 
+                right: -6, 
+                minWidth: 18, 
+                height: 18, 
+                borderRadius: 9, 
+                backgroundColor: "#FF3B30", 
+                alignItems: "center", 
+                justifyContent: "center",
+                paddingHorizontal: 4
+              }}>
+                <Text style={{ color: "white", fontSize: 10, fontWeight: "bold" }}>
+                  {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
+                </Text>
+              </View>
             )}
           </View>
         </TouchableOpacity>
@@ -138,19 +191,14 @@ export function Header() {
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={() => {
-              Alert.alert(
+              showAlert(
                 "Cerrar sesión",
                 "¿Seguro que querés salir?",
-                [
-                  { text: "Cancelar", style: "cancel" },
-                  {
-                    text: "Salir",
-                    style: "destructive",
-                    onPress: () => {
-                      logout().catch(() => {});
-                    },
-                  },
-                ]
+                "info",
+                true,
+                () => logout().catch(() => {}),
+                "Salir",
+                "Cancelar"
               );
             }}
             style={{
@@ -174,18 +222,38 @@ export function Header() {
             backgroundColor: avatarColor,
             alignItems: "center",
             justifyContent: "center",
+            overflow: "hidden",
           }}
         >
-          <Text
-            style={{
-              color: "#FFFFFF",
-              fontWeight: "700",
-            }}
-          >
-            {initials}
-          </Text>
+          {profile?.photoURL ? (
+            <Image 
+              source={{ uri: profile.photoURL }} 
+              style={{ width: 38, height: 38 }} 
+            />
+          ) : (
+            <Text
+              style={{
+                color: "#FFFFFF",
+                fontWeight: "700",
+              }}
+            >
+              {initials}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
+
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={handleConfirm}
+        showCancel={alertConfig.showCancel}
+        onCancel={alertConfig.onCancel}
+        confirmText={alertConfig.confirmText}
+        cancelText={alertConfig.cancelText}
+      />
     </View>
   );
-}
+};

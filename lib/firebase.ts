@@ -1,6 +1,7 @@
 // app/lib/firebase.ts
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApp, getApps, initializeApp } from "firebase/app";
+import * as firebaseAuth from "firebase/auth";
 import { getAuth, initializeAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
@@ -23,16 +24,10 @@ let authInstance: ReturnType<typeof getAuth>;
 if (Platform.OS === "web") {
   authInstance = getAuth(app);
 } else {
-  let getRNPersist: any = undefined;
-  try {
-    // Cargar en runtime para evitar fallos de bundling si el submódulo no existe
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const rnAuth = require("firebase/auth/react-native");
-    getRNPersist = rnAuth?.getReactNativePersistence;
-  } catch { }
-  if (typeof getRNPersist === "function") {
+  const getReactNativePersistence = (firebaseAuth as any).getReactNativePersistence;
+  if (getReactNativePersistence) {
     authInstance = initializeAuth(app, {
-      persistence: getRNPersist(AsyncStorage as any),
+      persistence: getReactNativePersistence(AsyncStorage),
     });
   } else {
     authInstance = getAuth(app);

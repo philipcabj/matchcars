@@ -3,9 +3,10 @@ import { Header } from "@/components/Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { sendNotificationEmail } from "@/lib/mail";
 import type { Vehicle } from "@/types/vehicle";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -33,6 +34,10 @@ export default function UserFavoritesByUidScreen() {
       const items: Vehicle[] = [];
       snap.forEach((docSnap) => {
         const data: any = docSnap.data();
+        // Filter out reported/deleted cars
+        if (["rejected", "blocked", "deleted"].includes(data.status)) {
+            return;
+        }
         const mapped: Vehicle = {
           id: docSnap.id,
           brand: data.brand,
@@ -57,7 +62,15 @@ export default function UserFavoritesByUidScreen() {
           userName: data.userName,
           createdAt: data.createdAt,
           published: data.published,
+          isFeatured: data.isFeatured,
+          status: data.status,
         } as any;
+        
+        // Filter out blocked, rejected or deleted vehicles
+        if (mapped.status === "blocked" || mapped.status === "rejected" || data.deleted === true) {
+          return;
+        }
+
         items.push(mapped);
       });
       setVehicles(items);
@@ -103,8 +116,13 @@ export default function UserFavoritesByUidScreen() {
     if (isFav) {
       await deleteDoc(ref);
       try {
-        await updateDoc(vRef, { likedBy: arrayRemove(user.uid) });
-      } catch {}
+        await updateDoc(vRef, { 
+          likedBy: arrayRemove(user.uid),
+          likesCount: increment(-1) 
+        });
+      } catch {
+        try { await updateDoc(vRef, { likedBy: arrayRemove(user.uid) }); } catch {}
+      }
     } else {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -116,8 +134,42 @@ export default function UserFavoritesByUidScreen() {
       }
       await setDoc(ref, { vehicleId, createdAt: serverTimestamp(), userId: user.uid, vehicleOwnerId: vehicleOwnerId ?? null });
       try {
-        await updateDoc(vRef, { likedBy: arrayUnion(user.uid) });
-      } catch {}
+        await updateDoc(vRef, { 
+          likedBy: arrayUnion(user.uid),
+          likesCount: increment(1) 
+        });
+      } catch {
+        try { await updateDoc(vRef, { likedBy: arrayUnion(user.uid) }); } catch {}
+      }
+      
+      // Send Notification Email
+      if (vehicleOwnerId && vehicleOwnerId !== user.uid) {
+        try {
+            const vSnap = await getDoc(vRef);
+            const vData = vSnap.data() as any;
+            const carModel = `${vData?.brand || ""} ${vData?.model || ""}`.trim();
+    
+            const myVehiclesRef = query(
+                collection(db, "vehicles"), 
+                where("userId", "==", user.uid), 
+                where("likedBy", "array-contains", vehicleOwnerId)
+            );
+            const matchSnap = await getDocs(myVehiclesRef);
+            const isMatch = !matchSnap.empty;
+    
+            const myName = (user.displayName || (user.email?.split('@')[0] ?? "Usuario")).trim();
+            
+            await sendNotificationEmail(isMatch ? "match" : "like", {
+                recipientUid: vehicleOwnerId,
+                senderName: myName,
+                senderUid: user.uid,
+                subject: isMatch ? `¡Tenés un nuevo Match con ${myName}!` : `¡A ${myName} le gustó tu auto!`,
+                carModel: carModel
+            });
+        } catch (err) {
+            console.error("Error sending notification:", err);
+        }
+      }
     }
   };
 
