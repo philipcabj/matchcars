@@ -1,22 +1,30 @@
 // app/car/[id].tsx
+import { CarCard } from "@/components/cards/carcard";
+import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
+import { PriceRecommendation } from "@/components/PriceRecommendation";
 import { SelectionModal } from "@/components/SelectionModal";
+import { WebContainer } from "@/components/WebContainer";
 import type { Theme } from "@/config/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
 import { db, storage } from "@/lib/firebase";
+import { getOptimizedImageUrl } from "@/utils/imageUtils";
 import { Ionicons } from "@expo/vector-icons";
+import { ResizeMode, Video } from "expo-av";
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import * as Linking from 'expo-linking';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from 'expo-sharing';
-import { arrayUnion, doc, getDoc, increment, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
+import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Dimensions, Image, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Dimensions, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-type CarDetailsTabs = "resumen" | "ficha" | "historial" | "financiacion" | "fotos";
+type CarDetailsTabs = "resumen" | "ficha" | "financiacion" | "fotos" | "video";
 
 // Por ahora usamos any para no pelearnos con el tipo Vehicle
 type VehicleDoc = any;
@@ -43,6 +51,7 @@ const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
 export default function CarDetailsScreen() {
   const { id, tab, edit } = useLocalSearchParams<{ id: string; tab?: string; edit?: string }>();
   const router = useRouter();
+  const { user, profile, initializing } = useAuth();
   const { theme } = useTheme();
   const styles = createStyles(theme);
 
@@ -50,7 +59,15 @@ export default function CarDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<CarDetailsTabs>("resumen");
   const [editing, setEditing] = useState(false);
-  const [ownerProfile, setOwnerProfile] = useState<{ photoURL?: string; initials: string; avatarColor: string } | null>(null);
+  const [ownerProfile, setOwnerProfile] = useState<{ 
+    photoURL?: string; 
+    initials: string; 
+    avatarColor: string; 
+    plan?: string; 
+    trustLevel?: string;
+    sellerRating?: number;
+    sellerReviewCount?: number;
+  } | null>(null);
   const [editState, setEditState] = useState({
     price: "",
     km: "",
@@ -83,22 +100,255 @@ export default function CarDetailsScreen() {
   } as any);
 
   const [citiesList, setCitiesList] = useState<string[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
   // Alert State
-  const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ 
+    visible: false,
     title: "", 
     message: "", 
-    type: "info" as "success" | "error" | "info" | "warning" 
+    type: "info" as "success" | "error" | "info" | "warning",
+    onClose: () => {},
+    showCancel: false,
+    onCancel: () => {},
+    confirmText: "Entendido",
+    cancelText: "Cancelar",
+    options: undefined as any
   });
 
   // Full Screen Image Viewer State
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
 
-  const showAlert = (title: string, message: string, type: "success" | "error" | "info" | "warning" = "info") => {
-    setAlertConfig({ title, message, type });
-    setAlertVisible(true);
+  // Price Recommendation State
+  const [hideRecommendation, setHideRecommendation] = useState(false);
+  
+  // Hero Items State (Images + Video)
+   const [heroItems, setHeroItems] = useState<{ type: 'image' | 'video', uri: string }[]>([]);
+   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+
+   useEffect(() => {
+    if (!user) {
+        setFavoriteIds([]);
+        return;
+    }
+    const favRef = collection(db, "users", user.uid, "favorites");
+    const unsubFav = onSnapshot(favRef, (snap) => {
+        const ids: string[] = [];
+        snap.forEach((d) => ids.push(d.id));
+        setFavoriteIds(ids);
+    });
+    return () => unsubFav();
+  }, [user]);
+
+  const toggleFavorite = async () => {
+    if (!user) {
+        router.push("/login");
+        return;
+    }
+    if (!vehicle) return;
+
+    const vehicleId = vehicle.id;
+    const ref = doc(db, "users", user.uid, "favorites", vehicleId);
+    const vRef = doc(db, "vehicles", vehicleId);
+    const isFav = favoriteIds.includes(vehicleId);
+
+    if (isFav) {
+        await deleteDoc(ref);
+        try {
+            await updateDoc(vRef, { 
+                likedBy: arrayRemove(user.uid),
+                likesCount: increment(-1) 
+            });
+        } catch {
+            try { await updateDoc(vRef, { likedBy: arrayRemove(user.uid) }); } catch {}
+        }
+    } else {
+        // Check daily limit
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const favRef = collection(db, "users", user.uid, "favorites");
+        const q = query(favRef, where("createdAt", ">=", Timestamp.fromDate(start)));
+        const snap = await getDocs(q);
+        if (snap.size >= 10) {
+            showAlert("Límite diario", "Sólo podés dar hasta 10 likes por día.", "warning");
+            return;
+        }
+
+        await setDoc(ref, { 
+            vehicleId, 
+            createdAt: serverTimestamp(), 
+            userId: user.uid, 
+            vehicleOwnerId: vehicle.userId ?? null 
+        });
+        try {
+            await updateDoc(vRef, { 
+                likedBy: arrayUnion(user.uid),
+                likesCount: increment(1) 
+            });
+        } catch {
+            try { await updateDoc(vRef, { likedBy: arrayUnion(user.uid) }); } catch {}
+        }
+    }
+  };
+
+  // Helper Component for Video with Replay
+   const ReplayableVideo = ({ uri, resizeMode, shouldPlay, isMuted, style, useNativeControls = true }: any) => {
+      const videoRef = React.useRef<Video>(null);
+      const [showReplay, setShowReplay] = useState(false);
+
+      return (
+          <View style={[{ overflow: 'hidden' }, style]}>
+              <Video
+                  ref={videoRef}
+                  source={{ uri }}
+                  style={{ width: '100%', height: '100%' }}
+                  useNativeControls={useNativeControls}
+                  resizeMode={resizeMode}
+                  isLooping={false}
+                  shouldPlay={shouldPlay}
+                  isMuted={isMuted}
+                  onPlaybackStatusUpdate={(status) => {
+                      if (status.isLoaded && status.didJustFinish) {
+                          setShowReplay(true);
+                      } else if (status.isLoaded && status.isPlaying) {
+                          setShowReplay(false);
+                      }
+                  }}
+              />
+              {showReplay && (
+                  <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 10 }]}>
+                      <TouchableOpacity 
+                        onPress={() => {
+                            videoRef.current?.replayAsync();
+                            setShowReplay(false);
+                        }}
+                        style={{ padding: 10 }}
+                      >
+                          <Ionicons name="refresh-circle" size={70} color="#FFF" />
+                          <Text style={{ color: "#FFF", fontWeight: "700", textAlign: "center" }}>Ver de nuevo</Text>
+                      </TouchableOpacity>
+                  </View>
+              )}
+          </View>
+      );
+   };
+
+   useEffect(() => {
+    if (!vehicle) return;
+    const items: { type: 'image' | 'video', uri: string }[] = [];
+    
+    // 1. Cover + Gallery
+    if (editState.cover) items.push({ type: 'image', uri: getOptimizedImageUrl(editState.cover) });
+    
+    // 2. Video (User requested: between cover and gallery)
+    if (vehicle.video) items.push({ type: 'video', uri: vehicle.video });
+    
+    // 3. Gallery
+    if (editState.gallery && editState.gallery.length > 0) {
+        editState.gallery.forEach((g: string) => {
+            if (g !== editState.cover) items.push({ type: 'image', uri: getOptimizedImageUrl(g) });
+        });
+    }
+    
+    setHeroItems(items);
+  }, [vehicle, editState.cover, editState.gallery]);
+
+  // Similar Vehicles State
+  const [similarVehicles, setSimilarVehicles] = useState<any[]>([]);
+
+  // Calculator State
+  const [calcDownPayment, setCalcDownPayment] = useState<string>("");
+  const [calcMonths, setCalcMonths] = useState<number>(24);
+
+  useEffect(() => {
+    if (vehicle?.price && vehicle?.financing) {
+        // Default to saved initial percent or 30%
+        const initialPct = vehicle.financing.initialPercent || 30;
+        const initialAmount = Math.floor(vehicle.price * (initialPct / 100));
+        setCalcDownPayment(String(initialAmount).replace(/\B(?=(\d{3})+(?!\d))/g, "."));
+        setCalcMonths(vehicle.financing.months || 24);
+    }
+  }, [vehicle?.id]); // Reset when vehicle changes
+
+  const calculateQuota = () => {
+      if (!vehicle?.price || !vehicle?.financing) return 0;
+      const price = Number(vehicle.price);
+      const down = Number(calcDownPayment.replace(/\./g, '').replace(/,/g, '')) || 0;
+      const loan = price - down;
+      
+      if (loan <= 0) return 0;
+      
+      const rateAnnual = Number(vehicle.financing.rate) || 0;
+      const months = calcMonths || 1;
+      
+      // French Amortization System
+      const rateMonthly = (rateAnnual / 100) / 12;
+      if (rateMonthly === 0) return loan / months;
+      
+      const quota = (loan * rateMonthly) / (1 - Math.pow(1 + rateMonthly, -months));
+      return Math.round(quota);
+  };
+
+  useEffect(() => {
+    if (!vehicle || !vehicle.brand) return;
+    
+    const fetchSimilar = async () => {
+        try {
+            const q = query(
+                collection(db, "vehicles"),
+                where("brand", "==", vehicle.brand),
+                where("published", "==", true),
+                limit(10)
+            );
+            const snap = await getDocs(q);
+            const list = snap.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter((v: any) => v.id !== vehicle.id && v.status !== 'deleted' && v.status !== 'sold' && v.status !== 'blocked' && v.status !== 'rejected')
+                .slice(0, 5);
+            setSimilarVehicles(list);
+        } catch (e) {
+            console.log("Error fetching similar vehicles", e);
+        }
+    };
+    fetchSimilar();
+  }, [vehicle?.id, vehicle?.brand]);
+
+  const showAlert = (
+    title: string, 
+    message: string, 
+    type: "success" | "error" | "info" | "warning" = "info",
+    onClose?: () => void,
+    showCancel = false, 
+    onCancel?: () => void,
+    confirmText = "Entendido",
+    cancelText = "Cancelar",
+    options?: any[]
+  ) => {
+      setAlertConfig({ 
+        visible: true,
+        title, 
+        message, 
+        type, 
+        onClose: () => {
+          setAlertConfig(prev => ({ ...prev, visible: false }));
+          if (onClose) onClose();
+        },
+        showCancel, 
+        onCancel: () => {
+          setAlertConfig(prev => ({ ...prev, visible: false }));
+          if (onCancel) onCancel();
+        },
+        confirmText, 
+        cancelText,
+        options: options?.map(opt => ({
+            ...opt,
+            onPress: () => {
+                setAlertConfig(prev => ({ ...prev, visible: false }));
+                if (opt.onPress) opt.onPress();
+            }
+        }))
+      });
   };
 
   // Price Indicator Hook (Safe top-level call)
@@ -106,7 +356,8 @@ export default function CarDetailsScreen() {
     vehicle?.brand || "", 
     vehicle?.model || "", 
     vehicle?.year || "", 
-    vehicle?.currency || "ARS"
+    vehicle?.currency || "ARS",
+    vehicle?.id // Exclude current vehicle from average calculation
   );
 
   useEffect(() => {
@@ -141,7 +392,6 @@ export default function CarDetailsScreen() {
     fetchCities();
   }, [editState.province]);
 
-  const { user, profile, initializing } = useAuth();
   const [authChecking, setAuthChecking] = useState(true);
   
 
@@ -152,7 +402,7 @@ export default function CarDetailsScreen() {
   }, [initializing]);
 
   useEffect(() => {
-    if (tab && ["resumen", "ficha", "historial", "financiacion", "fotos"].includes(String(tab))) {
+    if (tab && ["resumen", "ficha", "financiacion", "fotos", "video"].includes(String(tab))) {
       setActiveTab(tab as CarDetailsTabs);
     }
     if (edit === "true") {
@@ -161,7 +411,9 @@ export default function CarDetailsScreen() {
   }, [tab, edit]);
 
   useEffect(() => {
-    if (!id || initializing || authChecking || !user) return;
+    // Allow web users to fetch data without login
+    const isWeb = Platform.OS === 'web';
+    if (!id || initializing || (authChecking && !isWeb) || (!user && !isWeb)) return;
 
     // Increment views
     const incrementView = async () => {
@@ -241,7 +493,34 @@ export default function CarDetailsScreen() {
           }
           const avatarColor = data.avatarColor || theme.accent;
           const photoURL = data.photoURL || data.avatar || null;
-          setOwnerProfile({ photoURL, initials, avatarColor });
+          const plan = data.plan;
+          const trustLevel = data.trustLevel;
+          setOwnerProfile({ 
+            photoURL, 
+            initials, 
+            avatarColor, 
+            plan, 
+            trustLevel, 
+            sellerRating: data.sellerRating, 
+            sellerReviewCount: data.sellerReviewCount 
+          });
+
+          // Sync denormalized data to vehicle if needed
+          if (vehicle && (
+              vehicle.sellerRating !== data.sellerRating ||
+              vehicle.sellerReviewCount !== data.sellerReviewCount ||
+              vehicle.sellerTrustLevel !== trustLevel ||
+              vehicle.userPlan !== plan
+          )) {
+              console.log("Syncing vehicle owner data...");
+              const vRef = doc(db, "vehicles", id);
+              updateDoc(vRef, {
+                  sellerRating: data.sellerRating ?? null,
+                  sellerReviewCount: data.sellerReviewCount ?? 0,
+                  sellerTrustLevel: trustLevel ?? "new",
+                  userPlan: plan ?? "free"
+              }).catch(e => console.log("Error syncing vehicle owner data", e));
+          }
         }
       } catch (e) {
         console.error("Error fetching owner profile", e);
@@ -259,7 +538,7 @@ export default function CarDetailsScreen() {
     );
   }
 
-  if (!user) {
+  if (!user && Platform.OS !== 'web') {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <Text style={styles.errorText}>Necesitás iniciar sesión para ver detalles.</Text>
@@ -352,14 +631,23 @@ export default function CarDetailsScreen() {
     "Auto sin título";
 
   const isSold = vehicle.status === "sold";
-  const isDealer = vehicle.userPlan === 'pro_dealer';
-  const showMetrics = vehicle.userPlan === 'pro_plus' || vehicle.userPlan === 'pro_dealer';
+  
+  const isOwner = user && user.uid === vehicle.userId;
+  // Use current profile plan if owner, else stored vehicle plan for accurate permission check
+  const effectivePlan = isOwner ? profile?.plan : vehicle.userPlan;
+  
+  const isDealer = effectivePlan && effectivePlan.includes('pro_dealer');
+  const showMetrics = effectivePlan && (effectivePlan.includes('pro_plus') || effectivePlan.includes('pro_dealer'));
+  const effectiveAvg = priceSuggestion.avg;
   
   const getPriceIndicator = () => {
-    if (!vehicle.price || priceSuggestion.loading || priceSuggestion.count === 0) return null;
+    if (!vehicle.price || priceSuggestion.loading) return null;
     
     const currentPrice = Number(vehicle.price);
     const avg = priceSuggestion.avg;
+
+    if (avg === 0) return null;
+
     // Threshold of 5% difference
     const diff = ((currentPrice - avg) / avg) * 100;
     
@@ -470,6 +758,22 @@ export default function CarDetailsScreen() {
       }
   };
 
+  const handleQuickPriceUpdate = async (targetPrice: number) => {
+    if (!vehicle) return;
+    try {
+        const ref = doc(db, "vehicles", vehicle.id);
+        await updateDoc(ref, {
+            price: targetPrice,
+            updatedAt: serverTimestamp()
+        });
+        showAlert("Precio actualizado", "El precio se ha actualizado correctamente.", "success");
+        setHideRecommendation(true); // Hide recommendation after applying
+    } catch (e) {
+        console.error("Error updating price", e);
+        showAlert("Error", "No se pudo actualizar el precio.", "error");
+    }
+  };
+
   async function handleSaveEdits() {
     if (!vehicle) return;
 
@@ -549,6 +853,29 @@ export default function CarDetailsScreen() {
 
   // --- Contenidos de cada pestaña ---
 
+  const handleShareVehicle = async () => {
+    if (!vehicle) return;
+    try {
+      const webLink = `https://matchcars.app/car/${vehicle.id}`;
+      const downloadLinks = "\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393";
+      const message = `¡Mirá este ${vehicle.brand} ${vehicle.model} en MatchCars! 🚗💨`;
+
+      if (Platform.OS === 'ios') {
+        await Share.share({
+          message: message + downloadLinks,
+          url: webLink,
+        });
+      } else {
+        await Share.share({
+          message: `${message}\n${webLink}${downloadLinks}`,
+          title: 'MatchCars',
+        });
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   const renderResumen = () => {
     const daysSincePublished = vehicle.createdAt
       ? Math.floor((new Date().getTime() - (vehicle.createdAt.toDate ? vehicle.createdAt.toDate() : new Date(vehicle.createdAt)).getTime()) / (1000 * 60 * 60 * 24))
@@ -560,6 +887,15 @@ export default function CarDetailsScreen() {
     const priceDrop = vehicle.originalPrice && vehicle.price < vehicle.originalPrice
       ? Math.round(((vehicle.originalPrice - vehicle.price) / vehicle.originalPrice) * 100)
       : 0;
+
+    const showPriceRecommendation = 
+        user && 
+        user.uid === vehicle.userId && 
+        (vehicle.userPlan === 'pro_dealer' || profile?.plan === 'pro_dealer') && 
+        !isSold && 
+        !hideRecommendation &&
+        priceSuggestion.avg > 0 &&
+        vehicle.price > priceSuggestion.avg;
 
     return (
     <View style={styles.sectionCard}>
@@ -590,6 +926,16 @@ export default function CarDetailsScreen() {
         </View>
       )}
 
+      {showPriceRecommendation && (
+        <PriceRecommendation
+            currentPrice={Number(vehicle.price)}
+            avgPrice={priceSuggestion.avg}
+            currency={vehicle.currency}
+            onLowerPrice={handleQuickPriceUpdate}
+            onIgnore={() => setHideRecommendation(true)}
+        />
+      )}
+
       <Text style={styles.sectionTitle}>Resumen</Text>
 
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -613,7 +959,9 @@ export default function CarDetailsScreen() {
         )}
       </View>
 
-      <Text style={styles.carTitle}>{displayTitle}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <Text style={styles.carTitle}>{displayTitle}</Text>
+      </View>
 
       <View style={{ marginBottom: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -664,6 +1012,25 @@ export default function CarDetailsScreen() {
           </View>
         )}
       </View>
+
+      <TouchableOpacity 
+          onPress={handleShare}
+          style={{ 
+            flexDirection: 'row', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            backgroundColor: theme.accent, 
+            paddingHorizontal: 16, 
+            paddingVertical: 8, 
+            borderRadius: 8,
+            gap: 8,
+            marginBottom: 16,
+            alignSelf: 'flex-start'
+          }}
+        >
+          <Ionicons name="share-social" size={18} color="#FFF" />
+          <Text style={{ color: "#FFF", fontWeight: "600", fontSize: 14 }}>Compartir publicación</Text>
+      </TouchableOpacity>
 
       {vehicle.sellingReason && (
           <View style={{ marginTop: 8, marginBottom: 16, padding: 10, backgroundColor: theme.inputBackground, borderRadius: 8 }}>
@@ -752,9 +1119,43 @@ export default function CarDetailsScreen() {
             </View>
             <View style={{ flex: 1 }}>
                 <Text style={styles.ownerLabel}>Publicado por</Text>
-                <Text style={styles.ownerName}>
-                  {vehicle.userName || vehicle.sellerName || "Usuario desconocido"}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Text style={styles.ownerName} numberOfLines={1}>
+                      {vehicle.userName || vehicle.sellerName || "Usuario desconocido"}
+                    </Text>
+                    {(ownerProfile?.plan?.includes('pro_dealer') || vehicle.userPlan?.includes('pro_dealer')) && (
+                        <Ionicons name="checkmark-circle" size={14} color="#9013FE" />
+                    )}
+                </View>
+                
+                {/* Reputation / Status */}
+                {(ownerProfile?.plan?.includes('pro_dealer') || vehicle.userPlan?.includes('pro_dealer')) ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        <Text style={{ color: "#9013FE", fontSize: 12, fontWeight: "700" }}>Agencia Verificada</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                            <Ionicons name="star" size={12} color="#F5A623" />
+                            <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>{Number(vehicle.sellerRating || ownerProfile?.sellerRating || 0).toFixed(1)}</Text>
+                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>({vehicle.sellerReviewCount || ownerProfile?.sellerReviewCount || 0})</Text>
+                        </View>
+                    </View>
+                ) : ((vehicle.sellerRating !== undefined && vehicle.sellerRating !== null) || (ownerProfile?.sellerRating !== undefined && ownerProfile?.sellerRating !== null) || (vehicle.sellerReviewCount || 0) > 0 || (ownerProfile?.sellerReviewCount || 0) > 0) ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                        <Ionicons name="star" size={14} color="#F5A623" />
+                        <Text style={{ color: theme.text, fontSize: 13, fontWeight: "700" }}>{Number(vehicle.sellerRating || ownerProfile?.sellerRating || 0).toFixed(1)}</Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>({vehicle.sellerReviewCount || ownerProfile?.sellerReviewCount || 0} ventas)</Text>
+                    </View>
+                ) : (
+                    <Text style={{ 
+                        color: (ownerProfile?.trustLevel === 'verified' || vehicle.sellerTrustLevel === 'verified') ? "#34C759" : 
+                               (ownerProfile?.trustLevel === 'active' || vehicle.sellerTrustLevel === 'active') ? theme.accent : theme.textMuted, 
+                        fontSize: 12, 
+                        fontWeight: "600", 
+                        marginTop: 2 
+                    }}>
+                        {(ownerProfile?.trustLevel === 'verified' || vehicle.sellerTrustLevel === 'verified') ? "Vendedor Verificado" : 
+                         (ownerProfile?.trustLevel === 'active' || vehicle.sellerTrustLevel === 'active') ? "Vendedor Activo" : "Usuario Nuevo"}
+                    </Text>
+                )}
             </View>
         </TouchableOpacity>
         {vehicle.createdAt && (
@@ -765,7 +1166,7 @@ export default function CarDetailsScreen() {
               : new Date(vehicle.createdAt).toLocaleDateString("es-AR")}
           </Text>
         )}
-        {user && user.uid !== vehicle.userId && (
+        {user && user.uid !== vehicle.userId && Platform.OS !== 'web' && (
           <TouchableOpacity
             disabled={isSold}
             style={[styles.ctaButton, { marginTop: 12, backgroundColor: isSold ? theme.textMuted : theme.primary, opacity: isSold ? 0.6 : 1 }]}
@@ -774,6 +1175,13 @@ export default function CarDetailsScreen() {
             <Text style={styles.ctaButtonText}>{isSold ? "No disponible" : "Enviar mensaje"}</Text>
           </TouchableOpacity>
         )}
+        
+        {Platform.OS === 'web' && (
+            <View style={{ marginTop: 16 }}>
+                <DownloadAppBanner message="Descargá la App para contactar al vendedor" />
+            </View>
+        )}
+
       </View>
       {vehicle.description ? (
         <View style={{ marginTop: 12 }}>
@@ -862,31 +1270,6 @@ export default function CarDetailsScreen() {
     </View>
   );
 
-  const renderHistorial = () => {
-    const items = vehicle.history || [];
-    return (
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Historial del Vehículo</Text>
-        {items.length === 0 ? (
-           <Text style={styles.mutedText}>No hay eventos registrados.</Text>
-        ) : (
-           <View style={styles.timeline}>
-             {items.map((h: any, i: number) => (
-               <View key={i} style={styles.timelineItem}>
-                 <View style={styles.timelineDot} />
-                 <View style={styles.timelineContent}>
-                   <Text style={styles.timelineYear}>{h.year}</Text>
-                   <Text style={styles.timelineTitle}>{h.title}</Text>
-                   {h.note ? <Text style={styles.timelineNote}>{h.note}</Text> : null}
-                 </View>
-               </View>
-             ))}
-           </View>
-        )}
-      </View>
-    );
-  };
-
   const renderFinanciacion = () => {
     if (!vehicle.acceptsFinancing || !vehicle.financing) {
        return (
@@ -897,24 +1280,83 @@ export default function CarDetailsScreen() {
        );
     }
     const { rate, months } = vehicle.financing;
+    const quota = calculateQuota();
+    const currency = vehicle.currency || "$";
+
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Opciones de Financiación</Text>
+        <Text style={styles.sectionTitle}>Calculadora de Cuotas</Text>
+        
         <View style={styles.financeBox}>
-           <View style={styles.financeRow}>
-             <Text style={styles.financeLabel}>Tasa (aprox.)</Text>
-             <Text style={styles.financeValue}>{rate}%</Text>
+           {/* Info Principal */}
+           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 16 }}>
+              <View>
+                  <Text style={styles.financeLabel}>Tasa Anual</Text>
+                  <Text style={styles.financeValue}>{rate}%</Text>
+              </View>
+              <View>
+                  <Text style={styles.financeLabel}>Plazo Máximo</Text>
+                  <Text style={styles.financeValue}>{months} meses</Text>
+              </View>
            </View>
-           <View style={styles.financeRow}>
-             <Text style={styles.financeLabel}>Plazo</Text>
-             <Text style={styles.financeValue}>{months} cuotas</Text>
-           </View>
-           <View style={{ height: 1, backgroundColor: theme.badgeBorder, marginVertical: 8 }} />
-           <View style={styles.financeRow}>
-             <Text style={styles.financeLabelStrong}>Anticipo sugerido</Text>
-             <Text style={styles.financeValueStrong}>50%</Text>
+
+           {/* Calculadora */}
+           <View style={{ gap: 12 }}>
+              <View>
+                  <Text style={styles.specLabel}>Tu Anticipo ({currency})</Text>
+                  <TextInput 
+                    style={[styles.input, { backgroundColor: theme.background }]}
+                    value={calcDownPayment}
+                    onChangeText={(t) => {
+                        const numeric = t.replace(/\D/g, '');
+                        const formatted = numeric.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                        setCalcDownPayment(formatted);
+                    }}
+                    keyboardType="numeric"
+                    placeholder="Ej: 5.000.000"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                />
+                  <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
+                      Sugerido: {vehicle.financing.initialPercent || 30}% ({currency} {Math.floor(vehicle.price * ((vehicle.financing.initialPercent || 30)/100)).toLocaleString()})
+                  </Text>
+              </View>
+
+              <View>
+                  <Text style={styles.specLabel}>Plazo (Meses)</Text>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                      {[12, 24, 36, 48, 60].filter(m => m <= months).map(m => (
+                          <TouchableOpacity 
+                              key={m}
+                              onPress={() => setCalcMonths(m)}
+                              style={{ 
+                                  backgroundColor: calcMonths === m ? theme.accent : theme.badgeBackground,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                  borderRadius: 8
+                              }}
+                          >
+                              <Text style={{ color: calcMonths === m ? theme.buttonText : theme.text, fontWeight: "600" }}>{m}</Text>
+                          </TouchableOpacity>
+                      ))}
+                      {/* Custom input if needed, or just standard options */}
+                  </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: theme.badgeBorder, marginVertical: 8 }} />
+              
+              <View style={{ alignItems: "center", padding: 12, backgroundColor: theme.badgeBackground, borderRadius: 12 }}>
+                  <Text style={{ fontSize: 14, color: theme.textMuted, marginBottom: 4 }}>Cuota Estimada Mensual</Text>
+                  <Text style={{ fontSize: 24, fontWeight: "800", color: theme.accent }}>
+                      {currency} {quota.toLocaleString("es-AR")}
+                  </Text>
+                  <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 4 }}>
+                      * Cálculo aproximado (Sistema Francés). No incluye gastos administrativos ni seguro.
+                  </Text>
+              </View>
            </View>
         </View>
+
         <TouchableOpacity style={styles.ctaButton} onPress={handleContact}>
            <Text style={styles.ctaButtonText}>Consultar financiación</Text>
         </TouchableOpacity>
@@ -925,13 +1367,18 @@ export default function CarDetailsScreen() {
   const renderFotos = () => (
     <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Galería de Fotos</Text>
+        
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {images.map((img, i) => (
                 <TouchableOpacity key={i} onPress={() => {
-                    setViewerIndex(i);
-                    setViewerVisible(true);
+                    // Find the index in heroItems to open the viewer correctly
+                    const idx = heroItems.findIndex(h => h.uri === img && h.type === 'image');
+                    if (idx !== -1) {
+                        setViewerIndex(idx);
+                        setViewerVisible(true);
+                    }
                 }}>
-                    <Image source={{ uri: img }} style={{ width: (screenWidth - 60) / 3, height: (screenWidth - 60) / 3, borderRadius: 8, backgroundColor: theme.inputBackground }} />
+                    <Image source={{ uri: img }} style={{ width: (Dimensions.get("window").width - 60) / 3, height: (Dimensions.get("window").width - 60) / 3, borderRadius: 8, backgroundColor: theme.inputBackground }} />
                 </TouchableOpacity>
             ))}
             {images.length === 0 && <Text style={styles.mutedText}>No hay fotos disponibles.</Text>}
@@ -939,13 +1386,39 @@ export default function CarDetailsScreen() {
     </View>
   );
 
+  const renderVideo = () => {
+    if (!vehicle.video) return (
+        <View style={styles.sectionCard}>
+            <Text style={styles.mutedText}>No hay video disponible.</Text>
+        </View>
+    );
+    
+    return (
+        <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Video</Text>
+            <View style={{ alignItems: 'center' }}>
+                <View style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#000', width: '65%', aspectRatio: 9/16 }}>
+                    <ReplayableVideo
+                        uri={vehicle.video}
+                        style={{ width: '100%', height: '100%' }}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={true}
+                        isMuted={true}
+                    />
+                </View>
+            </View>
+        </View>
+    );
+  };
+
   const renderActiveTab = () => {
     switch (activeTab) {
       case "resumen": return renderResumen();
       case "ficha": return renderFichaTecnica();
-      case "historial": return renderHistorial();
       case "financiacion": return renderFinanciacion();
       case "fotos": return renderFotos();
+      case "video": return renderVideo();
       default: return renderResumen();
     }
   };
@@ -1273,6 +1746,48 @@ export default function CarDetailsScreen() {
     }
   };
 
+  const handleDeleteVehicle = () => {
+    showAlert(
+      "Eliminar publicación",
+      "¿Estás seguro de que querés eliminar esta publicación? Esta acción no se puede deshacer.",
+      "warning",
+      async () => {
+        if (!vehicle?.id) return;
+        try {
+          setLoading(true);
+
+          // Delete video if exists
+          if (vehicle.video) {
+              try {
+                  const videoRef = ref(storage, vehicle.video);
+                  await deleteObject(videoRef);
+              } catch (e) {
+                  console.error("Error deleting video file:", e);
+                  // Continue with vehicle deletion anyway
+              }
+          }
+
+          const docRef = doc(db, "vehicles", vehicle.id);
+          await updateDoc(docRef, { 
+            status: "deleted",
+            updatedAt: serverTimestamp() 
+          });
+          showAlert("Eliminado", "La publicación ha sido eliminada.", "success", () => {
+            router.replace("/(tabs)/mycars");
+          });
+        } catch (error) {
+          console.error("Error deleting vehicle:", error);
+          showAlert("Error", "No se pudo eliminar la publicación.", "error");
+          setLoading(false);
+        }
+      },
+      true,
+      () => {},
+      "Eliminar",
+      "Cancelar"
+    );
+  };
+
   const handleGeneratePDF = async () => {
     if (!vehicle) return;
     
@@ -1291,7 +1806,7 @@ export default function CarDetailsScreen() {
             "Función Premium",
             "Generar la ficha PDF con QR es exclusivo para planes Pro Plus y Pro Dealer. ¡Mejorá tu plan para acceder!",
             "info",
-            () => router.push("/subscribe"), // Redirect to subscribe
+            () => router.push("/(screens)/subscribe"), // Redirect to subscribe
             true,
             () => {},
             "Ver Planes",
@@ -1424,34 +1939,41 @@ export default function CarDetailsScreen() {
   };
 
   const handleShare = async () => {
-      if (!vehicle) return;
-      
-      // Usamos un link HTTPS para garantizar que sea clickeable en apps de mensajería (WhatsApp, etc)
-      // Nota: Requiere configuración de Universal Links para abrir la app directamente.
-      const webLink = `https://matchcars.app/car/${vehicle.id}`;
-      
-      const headline = displayTitle;
-      const message = `¡Mirá este auto en MatchCars!\n\n${headline}\n${priceText}\n\nVer publicación:`;
+    if (!vehicle) return;
+    
+    // Generamos el link con el esquema personalizado (matchcars://car/ID)
+    // Esto permitirá abrir la app directamente si se tiene instalada.
+    const schemeLink = Linking.createURL(`/car/${vehicle.id}`);
+    
+    // Link Web Universal (https://matchcars.app/car/ID)
+    // Al tener configurado Universal Links, este link abrirá la app si está instalada,
+    // o llevará a la landing page si no lo está.
+    const webLink = `https://matchcars.app/car/${vehicle.id}`;
+    
+    const headline = displayTitle;
+    const downloadLinks = `\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393`;
+    const message = `¡Mirá este auto en MatchCars!\n\n${headline}\n${priceText}\n\nVer publicación: ${webLink}`;
 
-      try {
-        if (Platform.OS === 'ios') {
-            await Share.share({
-                message: message,
-                url: webLink
-            });
-        } else {
-            await Share.share({
-                message: `${message} ${webLink}`,
-                title: 'MatchCars'
-            });
-        }
-      } catch (error: any) {
-        // ignore
+    try {
+      if (Platform.OS === 'ios') {
+          await Share.share({
+              message: message + downloadLinks,
+              url: webLink // iOS usa esto para previsualizar y abrir
+          });
+      } else {
+          await Share.share({
+              message: `${message}${downloadLinks}`,
+              title: 'MatchCars'
+          });
       }
+    } catch (error: any) {
+      // ignore
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      <WebContainer>
       <View style={styles.topActions}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backPill}>
           <Text style={styles.backPillText}>← Volver</Text>
@@ -1460,12 +1982,12 @@ export default function CarDetailsScreen() {
             <TouchableOpacity onPress={handleGoHome} style={styles.homePill}>
                 <Ionicons name="home" size={18} color={theme.text} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleShare} style={styles.homePill}>
-                <Ionicons name="share-outline" size={18} color={theme.text} />
-            </TouchableOpacity>
-            
+
             {user && user.uid === vehicle.userId && (
                 <>
+                    <TouchableOpacity onPress={handleDeleteVehicle} style={[styles.homePill, { backgroundColor: theme.error + '20' }]}>
+                        <Ionicons name="trash-outline" size={18} color={theme.error} />
+                    </TouchableOpacity>
                     <TouchableOpacity onPress={handleGeneratePDF} style={styles.homePill}>
                         <Ionicons name="document-outline" size={18} color={theme.text} />
                     </TouchableOpacity>
@@ -1477,32 +1999,57 @@ export default function CarDetailsScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView 
+            style={{ flex: 1 }} 
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 160 : 20}
+          >
+      <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
           <View style={styles.heroContainer}>
-              {images.length > 0 ? (
+              {heroItems.length > 0 ? (
                   <ScrollView 
                     horizontal 
                     pagingEnabled 
                     showsHorizontalScrollIndicator={false}
                     onMomentumScrollEnd={(e) => {
                         const newIndex = Math.round(e.nativeEvent.contentOffset.x / (Dimensions.get("window").width - 24));
-                        // Optional: track index if needed
+                        setActiveHeroIndex(newIndex);
                     }}
                   >
-                    {images.map((img, idx) => (
-                        <TouchableOpacity 
+                    {heroItems.map((item, idx) => (
+                        <View 
                             key={idx} 
-                            activeOpacity={0.9} 
-                            onPress={() => {
-                                setViewerIndex(idx);
-                                setViewerVisible(true);
-                            }}
+                            style={{ width: Dimensions.get("window").width - 24, height: (Dimensions.get("window").width - 24) * 0.65, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}
                         >
-                            <Image 
-                                source={{ uri: img }} 
-                                style={{ width: Dimensions.get("window").width - 24, height: (Dimensions.get("window").width - 24) * 0.65, resizeMode: "cover" }} 
-                            />
-                        </TouchableOpacity>
+                            {item.type === 'video' ? (
+                                <ReplayableVideo
+                                    uri={item.uri}
+                                    style={{ width: '100%', height: '100%' }}
+                                    useNativeControls
+                                    resizeMode={ResizeMode.COVER}
+                                    shouldPlay={activeHeroIndex === idx}
+                                    isMuted={true}
+                                />
+                            ) : (
+                                <TouchableOpacity 
+                                    activeOpacity={0.9} 
+                                    onPress={() => {
+                                        // Find index in original images array for viewer
+                                        const imgIdx = images.indexOf(item.uri);
+                                        if (imgIdx >= 0) {
+                                            setViewerIndex(imgIdx);
+                                            setViewerVisible(true);
+                                        }
+                                    }}
+                                    style={{ width: '100%', height: '100%' }}
+                                >
+                                    <Image 
+                                        source={{ uri: item.uri }} 
+                                        style={{ width: '100%', height: '100%', resizeMode: "cover" }} 
+                                    />
+                                </TouchableOpacity>
+                            )}
+                        </View>
                     ))}
                   </ScrollView>
               ) : (
@@ -1511,10 +2058,10 @@ export default function CarDetailsScreen() {
                       <Text style={styles.heroPlaceholderText}>Sin foto de portada</Text>
                   </View>
               )}
-              {images.length > 1 && (
+              {heroItems.length > 1 && (
                   <View style={{ position: "absolute", bottom: 12, right: 12, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
                       <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "700" }}>
-                          +{images.length} FOTOS
+                          +{heroItems.length} MEDIA
                       </Text>
                   </View>
               )}
@@ -1522,14 +2069,56 @@ export default function CarDetailsScreen() {
                   <Text style={styles.heroTitle} numberOfLines={1}>{displayTitle}</Text>
                   <Text style={styles.heroPrice}>{priceText}</Text>
               </View>
+
+              {!isOwner && Platform.OS !== 'web' && (
+                   <TouchableOpacity 
+                     onPress={toggleFavorite} 
+                     hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+                     style={{ 
+                         position: 'absolute', 
+                         bottom: 12, 
+                         left: 12, 
+                         backgroundColor: 'rgba(0,0,0,0.4)', 
+                         borderRadius: 999, 
+                         padding: 8,
+                         zIndex: 50,
+                         elevation: 10
+                     }}
+                   >
+                       <Ionicons 
+                         name={favoriteIds.includes(vehicle?.id) ? "heart" : "heart-outline"} 
+                         size={22} 
+                         color={favoriteIds.includes(vehicle?.id) ? "#ef4444" : "#FFF"} 
+                       />
+                   </TouchableOpacity>
+               )}
           </View>
 
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={styles.tabsContainer}
-          >
-              {(["resumen", "ficha", "historial", "financiacion", "fotos"] as const).map((t) => (
+          {null}
+
+          {isOwner && showMetrics && !isSold && !hideRecommendation && effectiveAvg > 0 && Number(vehicle.price) > effectiveAvg && (
+            <View>
+                {null}
+                <PriceRecommendation
+                    currentPrice={Number(vehicle.price)}
+                    avgPrice={effectiveAvg}
+                    currency={vehicle.currency || "ARS"}
+                    onLowerPrice={handleQuickPriceUpdate}
+                    onIgnore={() => setHideRecommendation(true)}
+                />
+            </View>
+          )}
+
+      <View style={styles.tabsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsScrollContent}
+        >
+          {(() => {
+              const tabs: CarDetailsTabs[] = ["resumen", "ficha", "financiacion", "fotos", "video"];
+              
+              return tabs.map((t) => (
                   <TouchableOpacity
                       key={t}
                       style={[styles.tabChip, activeTab === t && styles.tabChipActive]}
@@ -1539,13 +2128,34 @@ export default function CarDetailsScreen() {
                           {t.charAt(0).toUpperCase() + t.slice(1)}
                       </Text>
                   </TouchableOpacity>
-              ))}
-          </ScrollView>
+              ));
+          })()}
+        </ScrollView>
+      </View>
 
           {editing ? renderEditActiveTab() : renderActiveTab()}
           
+          {!editing && similarVehicles.length > 0 && (
+              <View style={{ marginTop: 24, paddingHorizontal: 12 }}>
+                  <Text style={styles.sectionTitle}>Vehículos similares</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
+                      {similarVehicles.map(v => (
+                          <View key={v.id} style={{ width: 280 }}>
+                              <CarCard 
+                                vehicle={v} 
+                                compact 
+                                hideLike={Platform.OS === 'web'} 
+                                hideCompare={Platform.OS === 'web'} 
+                              />
+                          </View>
+                      ))}
+                  </ScrollView>
+              </View>
+          )}
+          
           <View style={{ height: 40 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {editing && (
           <View style={{ padding: 12, borderTopWidth: 1, borderColor: theme.badgeBorder, backgroundColor: theme.card }}>
@@ -1554,6 +2164,7 @@ export default function CarDetailsScreen() {
               </TouchableOpacity>
           </View>
       )}
+      </WebContainer>
 
       {loading && (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' }]}>
@@ -1563,13 +2174,6 @@ export default function CarDetailsScreen() {
 
       <Modal visible={viewerVisible} transparent={true} animationType="fade" onRequestClose={() => setViewerVisible(false)}>
           <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center" }}>
-              <TouchableOpacity 
-                  style={{ position: "absolute", top: 40, right: 20, zIndex: 10, padding: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 20 }}
-                  onPress={() => setViewerVisible(false)}
-              >
-                  <Ionicons name="close" size={24} color="#FFF" />
-              </TouchableOpacity>
-              
               <ScrollView 
                   horizontal 
                   pagingEnabled 
@@ -1580,29 +2184,62 @@ export default function CarDetailsScreen() {
                       setViewerIndex(idx);
                   }}
               >
-                  {images.map((img, idx) => (
+                  {heroItems.map((item, idx) => (
                       <View key={idx} style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height, justifyContent: "center", alignItems: "center" }}>
-                           <ScrollView
-                              minimumZoomScale={1}
-                              maximumZoomScale={3}
-                              showsHorizontalScrollIndicator={false}
-                              showsVerticalScrollIndicator={false}
-                              contentContainerStyle={{ flex: 1, justifyContent: 'center' }}
-                           >
-                              <Image 
-                                  source={{ uri: img }} 
-                                  style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8, resizeMode: "contain" }} 
-                              />
-                           </ScrollView>
+                           {item.type === 'video' ? (
+                               <View style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height, justifyContent: "center" }}>
+                                   <ReplayableVideo
+                                       uri={item.uri}
+                                       style={{ width: '100%', height: '100%' }}
+                                       useNativeControls
+                                       resizeMode={ResizeMode.CONTAIN}
+                                       shouldPlay={viewerIndex === idx}
+                                       isMuted={true}
+                                   />
+                               </View>
+                           ) : (
+                               <ScrollView
+                                  minimumZoomScale={1}
+                                  maximumZoomScale={3}
+                                  showsHorizontalScrollIndicator={false}
+                                  showsVerticalScrollIndicator={false}
+                                  contentContainerStyle={{ flex: 1, justifyContent: 'center' }}
+                               >
+                                  <Image 
+                                      source={{ uri: item.uri }} 
+                                      style={{ width: Dimensions.get("window").width, height: Dimensions.get("window").height * 0.8, resizeMode: "contain" }} 
+                                  />
+                               </ScrollView>
+                           )}
                       </View>
                   ))}
               </ScrollView>
               
-              <View style={{ position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 }}>
-                  <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 16 }}>{viewerIndex + 1} / {images.length}</Text>
+              <TouchableOpacity 
+                  style={{ position: "absolute", top: 40, right: 20, zIndex: 999, elevation: 10, padding: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 20 }}
+                  onPress={() => setViewerVisible(false)}
+              >
+                  <Ionicons name="close" size={24} color="#FFF" />
+              </TouchableOpacity>
+
+              <View style={{ position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, zIndex: 999, elevation: 10 }}>
+                  <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 16 }}>{viewerIndex + 1} / {heroItems.length}</Text>
               </View>
           </View>
       </Modal>
+
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={alertConfig.onClose}
+        showCancel={alertConfig.showCancel}
+        onCancel={alertConfig.onCancel}
+        confirmText={alertConfig.confirmText}
+        cancelText={alertConfig.cancelText}
+        options={alertConfig.options}
+      />
     </SafeAreaView>
   );
 }
@@ -1713,17 +2350,17 @@ function createStyles(theme: Theme) {
       fontSize: 14,
     },
     tabsContainer: {
-      flexDirection: "row",
-      // flexWrap: "wrap", // Removed
-      gap: 4, // Tight gap to fit screen
       marginTop: 8,
       marginBottom: 8,
-      paddingHorizontal: 8, 
-      paddingRight: 64,
+    },
+    tabsScrollContent: {
+      paddingHorizontal: 12,
+      gap: 8,
+      paddingRight: 24, // Extra padding for last item
     },
     tabChip: {
       paddingVertical: 6,
-      paddingHorizontal: 10, // Restored slightly
+      paddingHorizontal: 10,
       borderRadius: 999,
       backgroundColor: theme.card,
     },

@@ -1,12 +1,14 @@
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { sendNotificationEmail } from "@/lib/mail";
 import { sendPushNotification } from "@/lib/notifications";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { addDoc, arrayUnion, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ChatWithUserScreen() {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const router = useRouter();
   const { uid, name: paramName, vehicleId, vehicleData: vehicleDataParam } = useLocalSearchParams<{ uid: string; name?: string; vehicleId?: string; vehicleData?: string }>();
   const peerUid = typeof uid === "string" ? uid : "";
@@ -44,24 +46,63 @@ export default function ChatWithUserScreen() {
     setAlertVisible(true);
   };
 
-  // Parse vehicle data if available
-  const vehicleData = useMemo(() => {
-    if (!vehicleDataParam) return null;
-    try {
-      return JSON.parse(vehicleDataParam);
-    } catch {
-      return null;
+  const [activeVehicleData, setActiveVehicleData] = useState<any>(null);
+  const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(vehicleId || null);
+
+  useEffect(() => {
+    if (vehicleId) setCurrentVehicleId(vehicleId);
+  }, [vehicleId]);
+
+  // Initial load from params
+  useEffect(() => {
+    if (vehicleDataParam) {
+        try {
+            const parsed = JSON.parse(vehicleDataParam);
+            const normalized = {
+                ...parsed,
+                cover: parsed.coverImage ?? parsed.images?.cover ?? parsed.images?.gallery?.[0] ?? parsed.cover ?? ""
+            };
+            setActiveVehicleData(normalized);
+        } catch {}
     }
   }, [vehicleDataParam]);
+
+  // Real-time listener for vehicle data (if vehicleId exists)
+  useEffect(() => {
+    if (!currentVehicleId) return;
+    
+    // Si ya tenemos una cover válida de los params, quizás no sea urgente, 
+    // pero igual escuchamos cambios para precio/estado, etc.
+    // La prioridad es que si NO hay cover, esto la traiga.
+
+    const unsub = onSnapshot(doc(db, "vehicles", currentVehicleId), (snap) => {
+        if (snap.exists()) {
+            const v = snap.data() as any;
+            const cover = v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? "";
+            
+            // Actualizamos activeVehicleData con la data fresca
+            setActiveVehicleData((prev: any) => ({
+                ...(prev || {}),
+                id: snap.id,
+                brand: v.brand,
+                model: v.model,
+                year: v.year,
+                price: v.price,
+                currency: v.currency,
+                cover: cover || (prev?.cover || "") // Prefer fresh cover, fallback to existing if empty (rare)
+            }));
+        }
+    });
+
+    return () => unsub();
+  }, [currentVehicleId]);
 
   const convId = useMemo(() => {
     const a = String(user?.uid || "");
     const b = String(peerUid || "");
     const arr = [a, b].sort();
-    const baseId = arr.join("_");
-    if (vehicleId) return `${baseId}_${vehicleId}`;
-    return baseId;
-  }, [user?.uid, peerUid, vehicleId]);
+    return arr.join("_");
+  }, [user?.uid, peerUid]);
 
   useEffect(() => {
     if (typeof paramName === "string" && paramName.trim()) {
@@ -150,9 +191,60 @@ export default function ChatWithUserScreen() {
 
         if (vehicleId) {
           commonData.vehicleId = vehicleId;
-          if (vehicleData) {
-            commonData.vehicleData = vehicleData;
+          if (activeVehicleData) {
+            commonData.vehicleData = activeVehicleData;
+          } else if (!activeVehicleData) {
+             try {
+                const vRef = doc(db, "vehicles", vehicleId);
+                const vSnap = await getDoc(vRef);
+                if (vSnap.exists()) {
+                     const v = vSnap.data() as any;
+                     const vData = {
+                         id: vSnap.id,
+                         brand: v.brand,
+                         model: v.model,
+                         year: v.year,
+                         price: v.price,
+                         currency: v.currency,
+                         cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? ""
+                     };
+                     setActiveVehicleData(vData);
+                     commonData.vehicleData = vData;
+                }
+             } catch {}
           }
+        } else if (cSnap.exists()) {
+            // Try to recover vehicleId from conversation if not in params
+            const d = cSnap.data() as any;
+
+            if (d.vehicleId && !currentVehicleId) {
+                setCurrentVehicleId(d.vehicleId);
+            }
+
+            if (d.vehicleId && !activeVehicleData) {
+                // Fetch vehicle data if missing
+                try {
+                    const vRef = doc(db, "vehicles", d.vehicleId);
+                    const vSnap = await getDoc(vRef);
+                    if (vSnap.exists()) {
+                        const v = vSnap.data() as any;
+                        const vData = {
+                            id: vSnap.id,
+                            brand: v.brand,
+                            model: v.model,
+                            year: v.year,
+                            price: v.price,
+                            currency: v.currency,
+                            cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? ""
+                        };
+                        setActiveVehicleData(vData);
+                        // Update conversation with vehicleData for future
+                        await updateDoc(cRef, { vehicleData: vData });
+                    }
+                } catch {}
+            } else if (d.vehicleData && !activeVehicleData) {
+                setActiveVehicleData(d.vehicleData);
+            }
         }
         
         // Mark as read by current user when entering
@@ -225,12 +317,14 @@ export default function ChatWithUserScreen() {
       });
 
       // Send email notification
-      const myName = (user.displayName || (user.email?.split('@')[0] ?? "Usuario")).trim();
+      const myName = (profile?.firstName && profile?.lastName) 
+        ? `${profile.firstName} ${profile.lastName}`.trim()
+        : (profile?.firstName || user.displayName || (user.email?.split('@')[0] ?? "Usuario")).trim();
       
       let carModel = "";
       // Try from local params
-      if (vehicleData) {
-        carModel = `${vehicleData.brand} ${vehicleData.model}`.trim();
+      if (activeVehicleData) {
+        carModel = `${activeVehicleData.brand} ${activeVehicleData.model}`.trim();
       } 
       // Try from conversation doc if not in params
       else if (cSnap.exists()) {
@@ -288,6 +382,28 @@ export default function ChatWithUserScreen() {
     );
   }
 
+  if (Platform.OS === 'web') {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <WebContainer>
+          <Header title={peerName || "Chat"} showBack />
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+              <Ionicons name="chatbubbles-outline" size={64} color={theme.textMuted} style={{ marginBottom: 20 }} />
+              <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+                  Chat disponible en la App
+              </Text>
+              <Text style={{ color: theme.textMuted, fontSize: 14, marginBottom: 30, textAlign: 'center', maxWidth: 400 }}>
+                  Para chatear con {peerName || "el vendedor"}, por favor descargá nuestra aplicación móvil.
+              </Text>
+              <View style={{ width: '100%', maxWidth: 400 }}>
+                <DownloadAppBanner message="Descargá la App para chatear" />
+              </View>
+          </View>
+        </WebContainer>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <KeyboardAvoidingView 
@@ -321,7 +437,7 @@ export default function ChatWithUserScreen() {
                 }}
               >
                 {peerPhotoUrl ? (
-                  <Image source={{ uri: peerPhotoUrl }} style={{ width: 36, height: 36 }} />
+                  <ExpoImage source={{ uri: peerPhotoUrl }} style={{ width: 36, height: 36, borderRadius: 18 }} contentFit="cover" />
                 ) : (
                   <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 14 }}>
                     {peerInitials}
@@ -342,22 +458,34 @@ export default function ChatWithUserScreen() {
             </TouchableOpacity>
           }
         />
-        {vehicleData && (
-            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.card, padding: 8, marginHorizontal: 16, marginTop: 8, borderRadius: 12, gap: 10 }}>
-              <Image
-                source={{ uri: vehicleData.cover }}
-                style={{ width: 40, height: 40, borderRadius: 8 }}
+        {activeVehicleData && (
+          <TouchableOpacity 
+            onPress={() => router.push(`/car/${activeVehicleData.id || currentVehicleId}` as any)}
+            activeOpacity={0.8}
+            style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.card, padding: 10, marginHorizontal: 16, marginTop: 10, borderRadius: 12, gap: 12, borderWidth: 1, borderColor: theme.badgeBorder }}
+          >
+            {activeVehicleData.cover ? (
+              <ExpoImage
+                source={{ uri: activeVehicleData.cover }}
+                style={{ width: 52, height: 52, borderRadius: 8, backgroundColor: theme.background }}
                 contentFit="cover"
+                transition={200}
               />
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>
-                  {vehicleData.brand} {vehicleData.model} {vehicleData.year}
-                </Text>
-                <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 12 }}>
-                  {vehicleData.currency} {Number(vehicleData.price).toLocaleString("es-AR")}
-                </Text>
+            ) : (
+              <View style={{ width: 52, height: 52, borderRadius: 8, backgroundColor: theme.background, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="car-sport-outline" size={24} color={theme.textMuted} />
               </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 15 }} numberOfLines={1}>
+                {activeVehicleData.brand} {activeVehicleData.model} {activeVehicleData.year}
+              </Text>
+              <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 13, marginTop: 2 }}>
+                {activeVehicleData.currency} {Number(activeVehicleData.price).toLocaleString("es-AR")}
+              </Text>
             </View>
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+          </TouchableOpacity>
         )}
         <View style={{ flex: 1, paddingHorizontal: 16 }}>
           {loading ? (
@@ -383,7 +511,7 @@ export default function ChatWithUserScreen() {
                     <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
                       <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: peerAvatarColor, alignItems: "center", justifyContent: "center", marginBottom: 4, overflow: "hidden" }}>
                         {peerPhotoUrl ? (
-                          <Image source={{ uri: peerPhotoUrl }} style={{ width: 32, height: 32 }} />
+                          <ExpoImage source={{ uri: peerPhotoUrl }} style={{ width: 32, height: 32, borderRadius: 16 }} contentFit="cover" />
                         ) : (
                           <Text style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 12 }}>{peerInitials}</Text>
                         )}

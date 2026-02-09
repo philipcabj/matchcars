@@ -1,7 +1,7 @@
 // app/_layout.tsx
+import { Ionicons } from "@expo/vector-icons";
+import { useFonts } from "expo-font";
 import * as Linking from 'expo-linking';
-import * as NavigationBar from 'expo-navigation-bar';
-import * as Notifications from 'expo-notifications';
 import { Redirect, Stack, usePathname } from "expo-router";
 import React, { useEffect } from "react";
 import { ActivityIndicator, LogBox, Platform, Text, View } from "react-native";
@@ -14,7 +14,6 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { RevenueCatProvider } from "@/contexts/RevenueCatContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
-import { registerForPushNotificationsAsync } from "@/lib/notifications";
 
 export const linking = {
   prefixes: [Linking.createURL('/'), 'matchcars://', 'https://matchcars.app'],
@@ -44,33 +43,52 @@ export const linking = {
   },
 };
 
+import { CompareFloatButton } from "@/components/CompareFloatButton";
+import { CompareProvider } from "@/contexts/CompareContext";
+
 function RootStack() {
   const { theme } = useTheme();
   const { user, profile, initializing } = useAuth();
   const pathname = usePathname();
+  
+  const [fontsLoaded] = useFonts({
+    ...Ionicons.font,
+  });
 
   useEffect(() => {
-    if (user?.uid) {
-      registerForPushNotificationsAsync(user.uid);
+    if (Platform.OS === 'web') {
+      // Inyectar CSS global para Ionicons usando el archivo en /fonts/Ionicons.ttf
+      const style = document.createElement('style');
+      style.textContent = `
+        @font-face {
+          font-family: 'Ionicons';
+          src: url('/fonts/Ionicons.ttf') format('truetype');
+          font-style: normal;
+          font-weight: normal;
+        }
+      `;
+      document.head.appendChild(style);
     }
-  }, [user?.uid]);
 
-  useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener((response: Notifications.NotificationResponse) => {
-      const url = response.notification.request.content.data.url;
-      if (url) {
-        Linking.openURL(url as string);
-      }
-    });
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
     if (Platform.OS === 'android') {
-      NavigationBar.setVisibilityAsync('hidden');
-      NavigationBar.setBehaviorAsync('overlay-swipe');
+      // Asegurar que la barra de navegación sea visible (reset de estado previo)
+      try {
+        const NavigationBar = require('expo-navigation-bar');
+        NavigationBar.setVisibilityAsync('visible');
+      } catch (error) {
+        // Ignorar si no está instalado o falla
+      }
     }
   }, []);
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
+        <ActivityIndicator size="large" color={theme.accent} />
+        <Text style={{ marginTop: 20, color: theme.text }}>Cargando recursos...</Text>
+      </View>
+    );
+  }
 
   // Solo spinner mientras Firebase inicializa la sesión
   if (initializing) {
@@ -103,16 +121,19 @@ function RootStack() {
 
   // Siempre tenemos las tabs; login/register son pantallas aparte
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="register" options={{ headerShown: false }} />
-      <Stack.Screen name="terms" options={{ headerShown: false }} />
-      <Stack.Screen name="legal-terms" options={{ headerShown: false }} />
-      <Stack.Screen name="privacy" options={{ headerShown: false }} />
-      <Stack.Screen name="(admin)" options={{ headerShown: false }} />
-      {/* acá podés agregar screens como add-car si no están dentro de tabs */}
-    </Stack>
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+        <Stack.Screen name="register" options={{ headerShown: false }} />
+        <Stack.Screen name="terms" options={{ headerShown: false }} />
+        <Stack.Screen name="legal-terms" options={{ headerShown: false }} />
+        <Stack.Screen name="privacy" options={{ headerShown: false }} />
+        <Stack.Screen name="(admin)" options={{ headerShown: false }} />
+        {/* acá podés agregar screens como add-car si no están dentro de tabs */}
+      </Stack>
+      <CompareFloatButton />
+    </View>
   );
 }
 
@@ -123,7 +144,9 @@ export default function RootLayout() {
         <AuthProvider>
           <NotificationProvider>
             <RevenueCatProvider>
-              <RootStack />
+              <CompareProvider>
+                <RootStack />
+              </CompareProvider>
             </RevenueCatProvider>
           </NotificationProvider>
         </AuthProvider>

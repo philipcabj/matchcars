@@ -6,12 +6,12 @@ import { getAuthErrorMessage } from "@/utils/firebaseErrors";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -21,16 +21,18 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as WebBrowser from "expo-web-browser";
 import {
-  GoogleAuthProvider,
-  signInWithCredential,
+    GoogleAuthProvider,
+    signInWithCredential,
 } from "firebase/auth";
 
 let GoogleSignin: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
-} catch {
-  console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+if (Platform.OS !== 'web') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
+  } catch {
+    console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+  }
 }
 
 // Necesario para completar el flujo en Expo Go
@@ -57,11 +59,24 @@ function getAvatarColorFromEmail(email: string): string {
   return AVATAR_COLORS[index];
 }
 
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
+
 export default function LoginScreen() {
   const { theme } = useTheme();
   const styles = createStyles(theme);
   const router = useRouter();
   const { loginWithEmail, loginWithApple, resetPassword } = useAuth();
+
+  if (Platform.OS === 'web') {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <DownloadAppBanner message="Descargá la App para iniciar sesión" />
+          <TouchableOpacity onPress={() => router.replace("/(tabs)")} style={{ marginTop: 20, padding: 10 }}>
+              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>Volver al inicio</Text>
+          </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

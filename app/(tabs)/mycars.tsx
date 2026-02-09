@@ -1,6 +1,8 @@
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
@@ -17,6 +19,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Share,
   Text,
   TextInput,
   TouchableOpacity,
@@ -89,7 +92,6 @@ export default function MyCarsTab() {
   const [loadingRecent, setLoadingRecent] = useState(false);
 
   // Calculate quota
-  const featuredCount = myVehicles.filter(v => v.isFeatured).length;
   
   const getFeaturedLimit = () => {
     const p = profile?.plan || "free";
@@ -97,6 +99,22 @@ export default function MyCarsTab() {
     if (p.includes("pro_plus")) return 6;
     if (p.includes("pro")) return 3; // Covers pro_monthly and pro_annual
     return 0;
+  };
+
+  const getPublicationLimit = () => {
+    const p = profile?.plan || "free";
+    if (p !== 'free') return Infinity;
+    return 2;
+  };
+
+  const handleShareProfile = async () => {
+    try {
+      await Share.share({
+        message: `¡Mirá mis autos en MatchCars! 🚗💨\n\nDescargá la app y buscame para ver mi inventario completo.\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393`,
+      });
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const getDaysRemaining = (featuredAt: any) => {
@@ -110,20 +128,46 @@ export default function MyCarsTab() {
   };
 
   const quotaLimit = getFeaturedLimit();
-  const remainingQuota = quotaLimit === Infinity ? "Ilimitado" : Math.max(0, quotaLimit - featuredCount);
+  const pubLimit = getPublicationLimit();
+  const featuredCount = myVehicles.filter(v => v.isFeatured).length;
+  // Para el límite de publicaciones, contamos todos los vehículos no eliminados
+  const totalVehiclesCount = myVehicles.length;
 
   const handleToggleFeature = async (vehicle: Vehicle) => {
     if (!vehicle.id) return;
 
-    // Si ya está destacado, lo quitamos (siempre permitido)
+    // Si ya está destacado, ofrecemos extender/renovar o quitar
     if (vehicle.isFeatured) {
-       try {
-        const ref = doc(db, "vehicles", vehicle.id);
-        await updateDoc(ref, { isFeatured: false });
-      } catch (e) {
-        showAlert("Error", "No se pudo actualizar el estado.", "error");
-      }
-      return;
+       showAlert(
+         "Gestionar Destacado",
+         "¿Querés renovar el destacado por 7 días más o quitarlo?",
+         "info",
+         true,
+         async () => {
+            // Renovar
+            try {
+                const ref = doc(db, "vehicles", vehicle.id);
+                await updateDoc(ref, { 
+                  featuredAt: serverTimestamp()
+                });
+                showAlert("¡Listo!", "Tu destacado ha sido renovado por 7 días más.", "success");
+            } catch (e) {
+                showAlert("Error", "No se pudo renovar.", "error");
+            }
+         },
+         "Renovar (7 días)",
+         "Quitar Destacado",
+         async () => {
+             // Quitar
+             try {
+                const ref = doc(db, "vehicles", vehicle.id);
+                await updateDoc(ref, { isFeatured: false });
+             } catch (e) {
+                showAlert("Error", "No se pudo quitar.", "error");
+             }
+         }
+       );
+       return;
     }
 
     // Si quiere destacar, verificamos cupo
@@ -332,7 +376,9 @@ export default function MyCarsTab() {
           rejectionReason: data.rejectionReason,
           isFeatured: data.isFeatured,
         } as any;
-        items.push(mapped);
+        if (mapped.status !== 'deleted') {
+          items.push(mapped);
+        }
       });
       items.sort((a, b) => {
         // Sold items at the bottom
@@ -359,6 +405,7 @@ export default function MyCarsTab() {
   if (!user) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <WebContainer>
         <Header />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
           <Text style={{ color: theme.text, fontSize: 16, textAlign: "center" }}>
@@ -373,6 +420,7 @@ export default function MyCarsTab() {
             </TouchableOpacity>
           </View>
         </View>
+        </WebContainer>
       </SafeAreaView>
     );
   }
@@ -390,21 +438,67 @@ export default function MyCarsTab() {
         confirmText={alertConfig.confirmText}
         cancelText={alertConfig.cancelText}
       />
+      <WebContainer>
       <Header />
       <View style={{ padding: 16, flex: 1 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <TouchableOpacity onPress={() => router.push("/(screens)/add-car")} style={{ backgroundColor: theme.accent, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16, alignItems: "center" }}>
-            <Text style={{ color: theme.buttonText, fontWeight: "700" }}>Publicar auto</Text>
-          </TouchableOpacity>
-          
-          {profile?.plan && profile.plan !== 'free' && (
-            <View style={{ alignItems: "flex-end" }}>
-              <Text style={{ color: theme.text, fontSize: 12 }}>Destacados disponibles</Text>
-              <Text style={{ color: theme.accent, fontWeight: "700" }}>
-                 {quotaLimit === Infinity ? "Ilimitados" : `${featuredCount} / ${quotaLimit}`}
-              </Text>
+        {Platform.OS === 'web' && (
+            <View style={{ marginBottom: 16 }}>
+                <DownloadAppBanner message="Descargá la App para gestionar mejor tus ventas" />
             </View>
-          )}
+        )}
+        {/* Stats Bar */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20, backgroundColor: theme.card, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: theme.inputBackground }}>
+             <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.title, fontSize: 20, fontWeight: '700' }}>{myVehicles.filter(v => v.published).length}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Publicados</Text>
+             </View>
+             <View style={{ height: '100%', width: 1, backgroundColor: theme.inputBackground }} />
+             <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.title, fontSize: 20, fontWeight: '700' }}>{profile?.salesCount || 0}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Ventas</Text>
+             </View>
+        </View>
+
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8, flex: 1 }}>
+            <TouchableOpacity 
+              onPress={() => router.push("/(screens)/add-car")} 
+              style={{ 
+                backgroundColor: theme.accent, 
+                borderRadius: 12, 
+                paddingVertical: 12, 
+                paddingHorizontal: 16, 
+                alignItems: "center",
+                flexDirection: "row",
+                gap: 8,
+                flex: 1,
+                justifyContent: "center"
+              }}
+            >
+              <Ionicons name="add-circle" size={24} color={theme.buttonText} />
+              <Text style={{ color: theme.buttonText, fontWeight: "700", fontSize: 16 }}>Publicar auto</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity onPress={handleShareProfile} style={{ backgroundColor: theme.card, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, alignItems: "center", borderWidth: 1, borderColor: theme.inputBackground, justifyContent: "center" }}>
+              <Ionicons name="share-outline" size={24} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={{ flexDirection: "row", justifyContent: "space-around", alignItems: "center", marginBottom: 10, backgroundColor: theme.card, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.inputBackground }}>
+             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Publicaciones:</Text>
+                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>
+                   {pubLimit === Infinity ? "Ilimitadas" : `${totalVehiclesCount} / ${pubLimit}`}
+                </Text>
+             </View>
+             <View style={{ width: 1, height: 16, backgroundColor: theme.inputBackground }} />
+             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Destacados:</Text>
+                <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 13 }}>
+                   {quotaLimit === Infinity ? "Ilimitados" : `${featuredCount} / ${quotaLimit}`}
+                </Text>
+             </View>
         </View>
 
         {loading ? (
@@ -412,10 +506,14 @@ export default function MyCarsTab() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : myVehicles.length === 0 ? (
-          <Text style={{ color: theme.textMuted, marginTop: 12 }}>Todavía no publicaste ningún auto.</Text>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 20 }}>
+             <Ionicons name="car-sport-outline" size={48} color={theme.textMuted} />
+             <Text style={{ color: theme.textMuted, marginTop: 12, fontSize: 16, textAlign: "center" }}>Todavía no publicaste ningún auto.</Text>
+          </View>
         ) : (
           <FlatList
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 12, flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
             data={myVehicles}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
@@ -457,7 +555,7 @@ export default function MyCarsTab() {
                 )}
 
                 {/* Feature Toggle Control */}
-                {item.published && profile?.plan && profile.plan !== 'pro_dealer' && (
+                {item.published && profile?.plan && (
                   <View style={{ 
                     flexDirection: "row", 
                     alignItems: "center", 
@@ -528,7 +626,6 @@ export default function MyCarsTab() {
                 )}
               </View>
             )}
-            contentContainerStyle={{ paddingBottom: 24 }}
           />
         )}
 
@@ -543,7 +640,7 @@ export default function MyCarsTab() {
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 }}
           >
-            <View style={{ backgroundColor: theme.card, borderRadius: 20, padding: 20 }}>
+            <View style={{ backgroundColor: theme.card, borderRadius: 20, padding: 20, maxWidth: 500, width: "100%", alignSelf: "center" }}>
               <Text style={{ color: theme.title, fontSize: 20, fontWeight: "700", marginBottom: 16, textAlign: "center" }}>
                 ¡Felicitaciones por la venta! 🎉
               </Text>
@@ -720,6 +817,7 @@ export default function MyCarsTab() {
           </KeyboardAvoidingView>
         </Modal>
       </View>
+      </WebContainer>
     </SafeAreaView>
   );
 }

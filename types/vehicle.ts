@@ -17,6 +17,7 @@ export interface Vehicle {
   // Imágenes
   coverImage?: string;
   additionalImages?: string[];
+  video?: string; // Video Walkaround URL
 
   // Ubicación (igual filosofía que MatchProp)
   city?: string;
@@ -41,6 +42,8 @@ export interface Vehicle {
 
   // Operación
   operationType?: "sale" | "swap"; // venta / permuta
+  acceptsTradeIn?: boolean; // Acepta permuta
+  tradeIn?: boolean; // Alias para permuta (legacy/compatibility)
   acceptsFinancing?: boolean;
   financing?: {
     rate?: number;
@@ -69,11 +72,14 @@ export interface Vehicle {
   userId?: string;
   userName?: string;
   userPlan?: string;
+  sellerTrustLevel?: "new" | "active" | "verified"; // Denormalized
+  sellerRating?: number; // Denormalized 1-5
+  sellerReviewCount?: number; // Denormalized
   createdAt?: any;
 
   // Publicación
   published?: boolean;
-  status?: "available" | "reserved" | "sold" | "pending" | "blocked" | "rejected"; // Estado de la publicación
+  status?: "available" | "reserved" | "sold" | "pending" | "blocked" | "rejected" | "deleted"; // Estado de la publicación
   rejectionReason?: string;
   isFeatured?: boolean;
   featuredAt?: any; // Timestamp of when it was featured

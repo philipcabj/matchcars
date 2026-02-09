@@ -20,7 +20,7 @@ export default function TermsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <Header title="Términos de Uso" showBack />
+      <Header title="Términos de Uso" showBack hideRightOptions />
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: theme.textMuted, fontSize: 14, marginBottom: 24 }}>
           Última actualización: {new Date().toLocaleDateString()}

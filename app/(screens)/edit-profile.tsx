@@ -11,31 +11,52 @@ import { doc, updateDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
-import MapView, { Marker, Region } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+let MapView: any = null;
+let Marker: any = null;
+
+if (Platform.OS !== 'web') {
+    try {
+        const Maps = require("react-native-maps");
+        MapView = Maps.default;
+        Marker = Maps.Marker;
+    } catch (e) {
+        console.log("Maps module not found", e);
+    }
+}
+
+// Dummy type for web
+type Region = {
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+};
 
 export default function EditProfileScreen() {
   const { theme } = useTheme();
   const { user, profile } = useAuth();
   const router = useRouter();
 
-  const isDealer = profile?.plan === "pro_dealer";
+  const isDealer = profile?.plan && profile.plan.includes("pro_dealer");
 
   const [firstName, setFirstName] = useState(profile?.firstName || "");
   const [lastName, setLastName] = useState(profile?.lastName || "");
   
   // Dealer Fields
+  const [agencyName, setAgencyName] = useState(profile?.agencyName || "");
   const [businessAddress, setBusinessAddress] = useState(profile?.businessAddress || "");
   const [businessCoordinates, setBusinessCoordinates] = useState<{latitude: number, longitude: number} | null>(profile?.businessCoordinates || null);
   const [businessHours, setBusinessHours] = useState(profile?.businessHours || "");
@@ -169,6 +190,7 @@ export default function EditProfileScreen() {
       };
 
       if (isDealer) {
+        updateData.agencyName = agencyName;
         updateData.businessAddress = businessAddress;
         updateData.businessCoordinates = businessCoordinates;
         updateData.businessHours = businessHours;
@@ -437,6 +459,17 @@ export default function EditProfileScreen() {
         {isDealer && (
             <View style={{ marginBottom: 20 }}>
                 <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600", marginBottom: 16 }}>Información de Agencia</Text>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Nombre de la Agencia</Text>
+                    <TextInput
+                        value={agencyName}
+                        onChangeText={setAgencyName}
+                        placeholder="Ej. Automotores Pilar"
+                        placeholderTextColor={theme.textMuted}
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
                 
                 <View style={{ marginBottom: 12, zIndex: 10 }}>
                     <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Dirección del Local</Text>
@@ -532,20 +565,27 @@ export default function EditProfileScreen() {
                     )}
                     {businessCoordinates && (
                         <View style={{ marginTop: 12, height: 150, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: theme.likeBoxBackground }}>
-                             <MapView 
-                                style={{ flex: 1 }}
-                                region={{
-                                    ...businessCoordinates,
-                                    latitudeDelta: 0.005,
-                                    longitudeDelta: 0.005
-                                }}
-                                scrollEnabled={false}
-                                zoomEnabled={false}
-                                pitchEnabled={false}
-                                rotateEnabled={false}
-                            >
-                                <Marker coordinate={businessCoordinates} />
-                            </MapView>
+                             {Platform.OS !== 'web' && MapView ? (
+                                 <MapView 
+                                    style={{ flex: 1 }}
+                                    region={{
+                                        ...businessCoordinates,
+                                        latitudeDelta: 0.005,
+                                        longitudeDelta: 0.005
+                                    }}
+                                    scrollEnabled={false}
+                                    zoomEnabled={false}
+                                    pitchEnabled={false}
+                                    rotateEnabled={false}
+                                >
+                                    <Marker coordinate={businessCoordinates} />
+                                </MapView>
+                             ) : (
+                                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.inputBackground }}>
+                                     <Ionicons name="map" size={32} color={theme.textMuted} />
+                                     <Text style={{ color: theme.textMuted, marginTop: 8 }}>Mapa no disponible en web</Text>
+                                 </View>
+                             )}
                             <TouchableOpacity 
                                 onPress={handleOpenMap}
                                 style={{ position: 'absolute', bottom: 8, right: 8, backgroundColor: theme.accent, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 }}
@@ -642,13 +682,22 @@ export default function EditProfileScreen() {
 
       <Modal visible={mapVisible} animationType="slide" onRequestClose={() => setMapVisible(false)}>
         <View style={{ flex: 1 }}>
-            <MapView 
-                style={{ flex: 1 }}
-                region={mapRegion}
-                onRegionChangeComplete={setMapRegion}
-                showsUserLocation
-                showsMyLocationButton
-            />
+            {Platform.OS !== 'web' && MapView ? (
+                <MapView 
+                    style={{ flex: 1 }}
+                    region={mapRegion}
+                    onRegionChangeComplete={setMapRegion}
+                    showsUserLocation
+                    showsMyLocationButton
+                />
+            ) : (
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
+                    <Text style={{ color: theme.text }}>El mapa no está disponible en la versión web.</Text>
+                    <TouchableOpacity onPress={() => setMapVisible(false)} style={{ marginTop: 20, padding: 10, backgroundColor: theme.accent, borderRadius: 8 }}>
+                        <Text style={{ color: '#fff' }}>Cerrar</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
             
             {/* Fixed Center Marker */}
             <View style={{ 

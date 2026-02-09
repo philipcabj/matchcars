@@ -3,10 +3,14 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { Platform } from "react-native";
 
 export default function TabsLayout() {
   const { theme } = useTheme();
   const { unreadMessagesCount, unreadLikesCount, unreadMatchesCount } = useNotifications();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -15,12 +19,18 @@ export default function TabsLayout() {
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarLabelStyle: {
-          fontSize: 9,
+          fontSize: Platform.OS === 'web' ? 10 : 9,
           marginBottom: 4,
+          ...(Platform.OS === 'web' ? { width: 90, textAlign: 'center' } : {}),
         },
+        tabBarItemStyle: Platform.OS === 'web' ? { minWidth: 90 } : undefined,
         tabBarStyle: {
           backgroundColor: theme.tabBackground,
           borderTopColor: "#00000033",
+          // Altura base (60) + padding inferior necesario (insets.bottom)
+          height: 60 + (Platform.OS === 'ios' ? insets.bottom : insets.bottom > 0 ? insets.bottom : 10),
+          paddingBottom: Platform.OS === 'ios' ? insets.bottom : insets.bottom > 0 ? insets.bottom : 10,
+          paddingTop: 8,
         },
       }}
     >

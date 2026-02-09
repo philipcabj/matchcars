@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MatchCars | Compra y Venta de Autos</title>
+    <meta name="description" content="La forma más segura y rápida de comprar y vender tu auto.">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://matchcars.app/">
+    <meta property="og:title" content="MatchCars">
+    <meta property="og:description" content="Descargá la app y encontrá tu próximo auto.">
+    <meta property="og:image" content="https://matchcars.app/icon.png">
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #F3F4F6;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            max-width: 90%;
+            width: 400px;
+        }
+        .logo {
+            width: 120px;
+            height: 120px;
+            background-color: #2563EB;
+            border-radius: 24px;
+            margin-bottom: 1.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+        }
+        h1 {
+            font-size: 24px;
+            color: #111827;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: #6B7280;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .store-button {
+            display: block;
+            padding: 12px 24px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: white;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .store-button:hover {
+            opacity: 0.9;
+        }
+        .ios {
+            background-color: #000000;
+        }
+        .android {
+            background-color: #2563EB;
+        }
+        .footer {
+            margin-top: 2rem;
+            font-size: 12px;
+            color: #9CA3AF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">M</div>
+        <h1>MatchCars</h1>
+        <p>Estás intentando ver un contenido exclusivo de nuestra App.<br>Descargala gratis para continuar.</p>
+        
+        <div class="buttons">
+            <a href="https://apps.apple.com/app/id6739093393" class="store-button ios">
+                Descargar en App Store
+            </a>
+            <a href="https://play.google.com/store/apps/details?id=com.matchcars.app" class="store-button android">
+                Descargar en Google Play
+            </a>
+        </div>
+    </div>
+    <div class="footer">
+        &copy; 2026 MatchCars
+    </div>
+
+    <script>
+        // Simple script to detect if we are on a deep link path
+        const path = window.location.pathname;
+        if (path.includes('/car/') || path.includes('/user-profile/')) {
+            // We could try to auto-open the app here with a timeout fallback
+            // window.location.href = "matchcars:/" + path;
+        }
+    </script>
+</body>
+</html>

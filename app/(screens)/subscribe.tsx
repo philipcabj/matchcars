@@ -5,7 +5,7 @@ import { ENTITLEMENT_ID, useRevenueCat } from "@/contexts/RevenueCatContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { PurchasesPackage } from "react-native-purchases";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -37,6 +37,7 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "🚀 Posicionamiento mejorado",
       "📊 Vistas y Likes en tus autos",
       "🏷️ Badge PRO",
+      "📹 Video Walkaround",
       "🚗 Autos ilimitados",
     ],
     color: "#4A90E2",
@@ -56,6 +57,7 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "📄 Ficha PDF con QR para imprimir",
       "📊 Vistas y Likes",
       "🏷️ Badge PRO",
+      "📹 Video Walkaround",
       "📩 Contacto prioritario",
       "🚗 Autos ilimitados",
     ],
@@ -73,9 +75,11 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     features: [
       "⭐ Destacados ilimitados (7 días c/u)",
       "🚀 Posicionamiento Máximo",
-      "📈 Análisis de Precio + Métricas",
+      "📈 Análisis de Precio y Sugerencias",
+      "📊 Reportes de Rendimiento",
       "📄 Ficha PDF con QR para imprimir",
       "✅ Badge Agencia Verificada",
+      "📹 Video Walkaround",
       "👥 Gestión multi-auto",
       "📩 Contacto prioritario",
       "🚗 Autos ilimitados",
@@ -88,11 +92,26 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
 export default function SubscribeScreen() {
   const { theme } = useTheme();
   const { user, profile, updatePlan } = useAuth();
-  const { currentOffering, purchasePackage, isReady } = useRevenueCat();
+  const { currentOffering, purchasePackage, isReady, restorePurchases, debugInfo, checkTrialOrIntroductoryPriceEligibility } = useRevenueCat();
   const router = useRouter();
   
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
   const [purchasing, setPurchasing] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [trialEligibility, setTrialEligibility] = useState<{[key: string]: any}>({});
+
+  useEffect(() => {
+    const checkEligibility = async () => {
+      if (currentOffering && currentOffering.availablePackages.length > 0) {
+        const productIds = currentOffering.availablePackages.map(p => p.product.identifier);
+        const eligibility = await checkTrialOrIntroductoryPriceEligibility(productIds);
+        setTrialEligibility(eligibility);
+      }
+    };
+    if (isReady) {
+        checkEligibility();
+    }
+  }, [currentOffering, isReady]);
 
   const [alertConfig, setAlertConfig] = useState({
     visible: false,
@@ -244,18 +263,31 @@ export default function SubscribeScreen() {
     );
   };
 
+  const handleRestorePurchases = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      await restorePurchases();
+      showAlert("Restaurado", "Tus compras han sido restauradas.", "success");
+    } catch (e) {
+      showAlert("Aviso", "No se encontraron compras para restaurar o hubo un error.", "info");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   // Helper para buscar el paquete de RevenueCat
   const getPackage = (identifier: string): PurchasesPackage | undefined => {
     return currentOffering?.availablePackages.find(p => p.identifier === identifier);
   };
 
-  if (!isReady && !isAdmin) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: "center", alignItems: "center" }}>
-         <ActivityIndicator size="large" color={theme.accent} />
-      </SafeAreaView>
-    );
-  }
+  // if (!isReady && !isAdmin) {
+  //   return (
+  //     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, justifyContent: "center", alignItems: "center" }}>
+  //        <ActivityIndicator size="large" color={theme.accent} />
+  //     </SafeAreaView>
+  //   );
+  // }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
@@ -303,16 +335,45 @@ export default function SubscribeScreen() {
           {PLAN_DEFINITIONS.map((planDef) => {
             const packageId = billingCycle === "monthly" ? planDef.packageIdMonthly : planDef.packageIdAnnual;
             const rcPackage = getPackage(packageId);
+            const product = rcPackage?.product;
+            const introPrice = product?.introPrice;
             
+            // Verificar elegibilidad (status 2 = ELIGIBLE)
+            const eligibilityData = trialEligibility[product?.identifier || ""];
+            const isEligible = eligibilityData?.status === 2;
+
+            // Detectar si hay prueba gratis real configurada en la tienda y el usuario es elegible
+            const hasFreeTrial = introPrice && introPrice.price === 0 && isEligible;
+
+            // Formatear duración del trial
+            let trialDurationText = "7 días"; // Default fallback
+            if (hasFreeTrial) {
+                const unit = introPrice.periodUnit;
+                const count = introPrice.periodNumberOfUnits;
+                // Mapeo simple (RevenueCat devuelve strings en versiones recientes, pero por seguridad...)
+                // @ts-ignore - RevenueCat types might vary between versions
+                if (unit === 'DAY' || unit === 0) trialDurationText = `${count} días`;
+                // @ts-ignore
+                else if (unit === 'WEEK' || unit === 1) trialDurationText = `${count} ${count === 1 ? 'semana' : 'semanas'}`;
+                // @ts-ignore
+                else if (unit === 'MONTH' || unit === 2) trialDurationText = `${count} ${count === 1 ? 'mes' : 'meses'}`;
+                // @ts-ignore
+                else if (unit === 'YEAR' || unit === 3) trialDurationText = `${count} ${count === 1 ? 'año' : 'años'}`;
+            }
+
             // Lógica de precio para mostrar
-            const priceString = rcPackage 
-                ? rcPackage.product.priceString 
+            const priceString = product 
+                ? product.priceString 
                 : `USD $${billingCycle === "monthly" ? planDef.fallbackPriceMonthly : planDef.fallbackPriceAnnual}`;
 
             const period = billingCycle === "monthly" ? "/ mes" : "/ año";
             
             // Si es admin, siempre habilitado. Si es usuario, depende de si hay paquete RC.
             const isButtonEnabled = isAdmin || !!rcPackage;
+            
+            // Decidir si mostramos el badge de trial
+            // Mostramos si RevenueCat dice que hay trial, O si estamos en modo fallback y la definición dice que hay trial
+            const showTrialBadge = hasFreeTrial || (!rcPackage && planDef.hasTrial);
 
             return (
               <View
@@ -342,18 +403,27 @@ export default function SubscribeScreen() {
                   <Text style={{ color: planDef.color, fontSize: 14, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>
                     {planDef.title}
                   </Text>
-                  {planDef.hasTrial && (
+                  {showTrialBadge && (
                     <View style={{ alignSelf: "flex-start", marginTop: 4, backgroundColor: "#E8F5E9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                        <Text style={{ color: "#2E7D32", fontSize: 10, fontWeight: "700" }}>PRUEBA 7 DÍAS GRATIS</Text>
+                        <Text style={{ color: "#2E7D32", fontSize: 10, fontWeight: "700" }}>
+                            PRUEBA {hasFreeTrial ? trialDurationText.toUpperCase() : "7 DÍAS"} GRATIS
+                        </Text>
                     </View>
                   )}
-                  <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 4 }}>
-                    <Text style={{ color: theme.text, fontSize: 28, fontWeight: "800" }}>
-                      {priceString}
-                    </Text>
-                    <Text style={{ color: theme.textMuted, fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
-                      {period}
-                    </Text>
+                  <View style={{ marginTop: 4 }}>
+                      <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+                        <Text style={{ color: theme.text, fontSize: 28, fontWeight: "800" }}>
+                          {priceString}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
+                          {period}
+                        </Text>
+                      </View>
+                      {showTrialBadge && (
+                          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                              Después de la prueba, se renovará automáticamente.
+                          </Text>
+                      )}
                   </View>
                   
                   <View style={{ marginTop: 16, gap: 10 }}>
@@ -384,7 +454,7 @@ export default function SubscribeScreen() {
                             ? "No disponible" 
                             : (isAdmin 
                                 ? "Asignar Gratis (Admin)" 
-                                : (planDef.hasTrial ? "Comenzar Prueba Gratis" : "Suscribirme")
+                                : (showTrialBadge ? "Comenzar Prueba Gratis" : "Suscribirme")
                               )
                         }
                         </Text>
@@ -422,9 +492,23 @@ export default function SubscribeScreen() {
 
         {/* Enlaces Legales (Requerido por Apple) */}
         <View style={{ marginTop: 40, paddingBottom: 20, alignItems: 'center' }}>
-          <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 10 }}>
-            Información Legal
+          
+          <TouchableOpacity 
+            onPress={handleRestorePurchases}
+            disabled={restoring}
+            style={{ marginBottom: 20, padding: 10 }}
+          >
+             <Text style={{ color: theme.accent, fontSize: 14, fontWeight: "600" }}>
+               {restoring ? "Restaurando..." : "Restaurar Compras"}
+             </Text>
+          </TouchableOpacity>
+
+          <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: "center", marginBottom: 16, paddingHorizontal: 20 }}>
+            El pago se cargará a tu cuenta de Apple ID o Google Play al confirmar la compra. 
+            La suscripción se renueva automáticamente a menos que se cancele al menos 24 horas antes del final del período actual. 
+            Podés gestionar y cancelar tus suscripciones desde la configuración de tu cuenta en la tienda de aplicaciones.
           </Text>
+
           <View style={{ flexDirection: 'row', gap: 20 }}>
             <TouchableOpacity onPress={() => router.push("/legal-terms" as any)}>
               <Text style={{ color: theme.textMuted, fontSize: 12, textDecorationLine: 'underline' }}>
@@ -443,6 +527,18 @@ export default function SubscribeScreen() {
       </ScrollView>
 
       <CustomAlert {...alertConfig} />
+      {/* Debug Info para Admins */}
+      {isAdmin && (
+          <View style={{ padding: 16, marginTop: 20, backgroundColor: "#000", borderRadius: 8 }}>
+              <Text style={{ color: "#0F0", fontWeight: "bold", marginBottom: 8 }}>[DEBUG INFO]</Text>
+              <Text style={{ color: "#FFF", fontSize: 10 }}>Configured: {debugInfo?.isConfigured ? 'YES' : 'NO'}</Text>
+              <Text style={{ color: "#FFF", fontSize: 10 }}>Init Error: {debugInfo?.initError || 'None'}</Text>
+              <Text style={{ color: "#FFF", fontSize: 10 }}>Offerings Found: {debugInfo?.allOfferings.join(', ') || 'None'}</Text>
+              <Text style={{ color: "#FFF", fontSize: 10 }}>Current Offering: {currentOffering?.identifier || 'NULL'}</Text>
+              <Text style={{ color: "#FFF", fontSize: 10 }}>Packages: {currentOffering?.availablePackages.map(p => p.identifier).join(', ') || 'None'}</Text>
+          </View>
+      )}
+      <View style={{ height: 40 }} />
     </SafeAreaView>
   );
 }

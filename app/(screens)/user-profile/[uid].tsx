@@ -1,23 +1,27 @@
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { CarCard } from "@/components/cards/carcard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import type { Vehicle } from "@/types/vehicle";
+import { getOptimizedImageUrl } from "@/utils/imageUtils";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Linking,
-  Platform,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Linking,
+    Platform,
+    Share,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -88,6 +92,28 @@ export default function UserProfileScreen() {
     setAlertConfig(prev => ({ ...prev, visible: false }));
   };
 
+  const handleShareProfile = async () => {
+    try {
+      const webLink = `https://matchcars.app/user-profile/${uid}`;
+      const downloadLinks = "\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393";
+      const message = `¡Mirá el perfil de ${profileName || "este usuario"} en MatchCars! 🚗💨`;
+
+      if (Platform.OS === 'ios') {
+        await Share.share({
+            message: message + downloadLinks,
+            url: webLink
+        });
+      } else {
+        await Share.share({
+            message: `${message}\n${webLink}${downloadLinks}`,
+            title: 'MatchCars'
+        });
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   const hasUid = typeof uid === "string" && uid.length > 0;
 
   // Check if blocked
@@ -108,7 +134,8 @@ export default function UserProfileScreen() {
         const pd = pSnap.data() as any;
         setProfileData(pd);
         
-        const name = pd?.firstName || pd?.lastName ? `${pd?.firstName ?? ""} ${pd?.lastName ?? ""}`.trim() : (pd?.displayName || pd?.email || "Usuario");
+        // Prioritize agencyName if it exists, otherwise use display name logic
+        const name = pd?.agencyName || (pd?.firstName || pd?.lastName ? `${pd?.firstName ?? ""} ${pd?.lastName ?? ""}`.trim() : (pd?.displayName || pd?.email || "Usuario"));
         setProfileName(name);
         
         let initials = String(pd?.initials || "");
@@ -161,6 +188,7 @@ export default function UserProfileScreen() {
         const data: any = docSnap.data();
         // Filter out sold items
         if (data.status === 'sold') return;
+        if (data.status === 'deleted') return;
 
         const mapped: Vehicle = {
           id: docSnap.id,
@@ -208,7 +236,77 @@ export default function UserProfileScreen() {
     return () => unsub();
   }, [uid, hasUid, isBlocked]);
 
-  const handleBlockUser = async () => {
+  // Auto-calculate Rating from Sales (Self-healing)
+  useEffect(() => {
+    if (!hasUid || !profileData) return;
+    
+    const calculateRating = async () => {
+        try {
+            const q = query(collection(db, "sales"), where("sellerId", "==", uid));
+            const snap = await getDocs(q);
+            let totalRating = 0;
+            let count = 0;
+            
+            snap.forEach(d => {
+                const data = d.data();
+                const r = Number(data.rating);
+                if (!isNaN(r) && r > 0) {
+                    totalRating += r;
+                    count++;
+                }
+            });
+
+            if (count > 0) {
+                const avg = totalRating / count;
+                const currentRating = profileData.sellerRating || 0;
+                const currentCount = profileData.sellerReviewCount || 0;
+
+                if (Math.abs(currentRating - avg) > 0.1 || currentCount !== count) {
+                    console.log(`Auto-healing rating: ${avg} (${count} reviews)`);
+                    await updateDoc(doc(db, "users", uid!), {
+                        sellerRating: avg,
+                        sellerReviewCount: count
+                    });
+                    setProfileData((prev: any) => ({ ...prev, sellerRating: avg, sellerReviewCount: count }));
+                }
+            }
+        } catch (e) {
+            console.log("Error calculating rating", e);
+        }
+    };
+    
+    calculateRating();
+  }, [uid, hasUid, profileData?.id]);
+
+  // Auto-sync User Rating to Vehicles
+    useEffect(() => {
+        if (!profileData || vehicles.length === 0) return;
+
+        const rating = profileData.sellerRating;
+        const reviewCount = profileData.sellerReviewCount;
+        const trustLevel = profileData.trustLevel;
+        const plan = profileData.plan;
+
+        vehicles.forEach(v => {
+            if (
+                v.sellerRating !== rating ||
+                v.sellerReviewCount !== reviewCount ||
+                v.sellerTrustLevel !== trustLevel ||
+                v.userPlan !== plan
+            ) {
+                 // Update vehicle in background
+                 const vRef = doc(db, "vehicles", v.id);
+                 updateDoc(vRef, {
+                    sellerRating: rating ?? null,
+                    sellerReviewCount: reviewCount ?? 0,
+                    sellerTrustLevel: trustLevel ?? "new",
+                    userPlan: plan ?? "free"
+                 }).catch(e => console.log(`Error syncing vehicle ${v.id}`, e));
+            }
+        });
+    }, [profileData, vehicles]);
+
+    const handleBlockUser = async () => {
     if (!user) {
         showAlert("Iniciar sesión", "Debés iniciar sesión para bloquear usuarios.", "info", () => router.push("/login"));
         return;
@@ -254,17 +352,82 @@ export default function UserProfileScreen() {
       router.push({ pathname: "/report/[id]", params: { id: uid, type: "user", name: profileName } });
    };
 
-   // Header Render Helper
+   const renderActionButtons = () => (
+   <View style={{ flexDirection: 'row', gap: 6, marginTop: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
+      {(!user || user.uid !== uid) && Platform.OS !== 'web' && (
+          <>
+          <TouchableOpacity 
+              onPress={handleReportUser}
+               style={{ 
+                   flexDirection: 'row', 
+                   alignItems: 'center', 
+                   gap: 3,
+                   backgroundColor: theme.inputBackground,
+                   paddingHorizontal: 10,
+                   paddingVertical: 6,
+                   borderRadius: 8,
+                   borderWidth: 1,
+                   borderColor: theme.likeBox
+               }}
+           >
+               <Ionicons name="flag-outline" size={12} color={theme.text} />
+               <Text style={{ color: theme.text, fontWeight: '600', fontSize: 11 }}>Reportar</Text>
+           </TouchableOpacity>
+
+           {isBlocked ? (
+               <TouchableOpacity 
+                   onPress={handleUnblockUser}
+                   style={{ 
+                       flexDirection: 'row', 
+                       alignItems: 'center', 
+                       gap: 3,
+                       backgroundColor: theme.inputBackground,
+                       paddingHorizontal: 10,
+                       paddingVertical: 6,
+                       borderRadius: 8,
+                       borderWidth: 1,
+                       borderColor: theme.likeBox
+                   }}
+               >
+                   <Ionicons name="eye-outline" size={12} color={theme.text} />
+                   <Text style={{ color: theme.text, fontWeight: '600', fontSize: 11 }}>Desbloquear</Text>
+               </TouchableOpacity>
+           ) : (
+               <TouchableOpacity 
+                   onPress={handleBlockUser}
+                   style={{ 
+                       flexDirection: 'row', 
+                       alignItems: 'center', 
+                       gap: 3,
+                       backgroundColor: theme.inputBackground,
+                       paddingHorizontal: 10,
+                       paddingVertical: 6,
+                       borderRadius: 8,
+                       borderWidth: 1,
+                       borderColor: theme.likeBox
+                   }}
+               >
+                   <Ionicons name="ban-outline" size={12} color="#FF3B30" />
+                   <Text style={{ color: "#FF3B30", fontWeight: '600', fontSize: 11 }}>Bloquear</Text>
+               </TouchableOpacity>
+           )}
+           </>
+       )}
+   </View>
+  );
+
+  // Header Render Helper
   const renderHeader = () => {
-    const isDealer = profileData?.plan === 'pro_dealer';
+    const isDealer = profileData?.plan && profileData.plan.includes('pro_dealer');
 
     if (isDealer) {
         return (
-            <View style={{ marginBottom: 24, backgroundColor: theme.card, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: theme.inputBackground }}>
+            <View style={{ marginBottom: 24 }}>
+                <View style={{ backgroundColor: theme.card, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: theme.inputBackground }}>
                 {/* Banner */}
                 <View style={{ height: 120, backgroundColor: theme.inputBackground }}>
                     {profileData?.bannerUrl ? (
-                        <Image source={{ uri: profileData.bannerUrl }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        <Image source={{ uri: getOptimizedImageUrl(profileData.bannerUrl) }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                     ) : (
                         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                             <Ionicons name="image-outline" size={40} color={theme.textMuted} style={{ opacity: 0.3 }} />
@@ -288,7 +451,7 @@ export default function UserProfileScreen() {
                         }}>
                             {profilePhotoUrl ? (
                             <Image 
-                                source={{ uri: profilePhotoUrl }} 
+                                source={{ uri: getOptimizedImageUrl(profilePhotoUrl) }} 
                                 style={{ width: "100%", height: "100%" }} 
                                 resizeMode="cover"
                             />
@@ -297,10 +460,17 @@ export default function UserProfileScreen() {
                             )}
                         </View>
 
-                        {/* Dealer Badge */}
-                        <View style={{ backgroundColor: '#9013FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                            <Ionicons name="shield-checkmark" size={12} color="#FFF" />
-                            <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "700", textTransform: 'uppercase' }}>Agencia Verificada</Text>
+                        {/* Dealer Badge & Rating */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                            <View style={{ backgroundColor: '#9013FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="shield-checkmark" size={12} color="#FFF" />
+                                <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "700", textTransform: 'uppercase' }}>Agencia Verificada</Text>
+                            </View>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.card, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: theme.inputBackground }}>
+                                <Ionicons name="star" size={14} color="#F5A623" />
+                                <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>{(profileData?.sellerRating || 0).toFixed(1)}</Text>
+                                <Text style={{ color: theme.textMuted, fontSize: 12 }}>({profileData?.sellerReviewCount || 0})</Text>
+                            </View>
                         </View>
                     </View>
 
@@ -340,7 +510,8 @@ export default function UserProfileScreen() {
                         )}
                     </View>
 
-                    {/* Social / Contact Actions */}
+                    {/* Social / Contact Actions - HIDDEN ON WEB */}
+                    {Platform.OS !== 'web' && (
                     <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
                         {profileData?.whatsapp && (
                             <TouchableOpacity onPress={() => openWhatsApp(profileData.whatsapp)} style={{ flex: 1, backgroundColor: '#25D366', paddingVertical: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -359,6 +530,27 @@ export default function UserProfileScreen() {
                             </TouchableOpacity>
                         )}
                     </View>
+                    )}
+
+                    {/* Share Profile Button (Agency) */}
+                    <TouchableOpacity 
+                        onPress={handleShareProfile}
+                        style={{ 
+                            flexDirection: 'row', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            gap: 8, 
+                            backgroundColor: theme.inputBackground, 
+                            paddingVertical: 10, 
+                            borderRadius: 8,
+                            marginTop: 12,
+                            borderWidth: 1,
+                            borderColor: theme.likeBoxBackground
+                        }}
+                    >
+                        <Ionicons name="share-social-outline" size={18} color={theme.text} />
+                        <Text style={{ color: theme.text, fontWeight: '600' }}>Compartir Perfil</Text>
+                    </TouchableOpacity>
 
                     {/* Stats */}
                     <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: theme.inputBackground, flexDirection: 'row', justifyContent: 'space-around' }}>
@@ -366,8 +558,17 @@ export default function UserProfileScreen() {
                             <Text style={{ color: theme.title, fontSize: 18, fontWeight: '700' }}>{vehicles.length}</Text>
                             <Text style={{ color: theme.textMuted, fontSize: 12 }}>Autos</Text>
                          </View>
+                         <View style={{ width: 1, height: '100%', backgroundColor: theme.inputBackground }} />
+                         <View style={{ alignItems: 'center' }}>
+                            <Text style={{ color: theme.title, fontSize: 18, fontWeight: '700' }}>{profileData?.salesCount || 0}</Text>
+                            <Text style={{ color: theme.textMuted, fontSize: 12 }}>Ventas</Text>
+                         </View>
                     </View>
                 </View>
+                </View>
+
+                {/* Shared Action Buttons */}
+                {renderActionButtons()}
             </View>
         );
     }
@@ -386,7 +587,7 @@ export default function UserProfileScreen() {
           }}>
             {profilePhotoUrl ? (
               <Image 
-                source={{ uri: profilePhotoUrl }} 
+                source={{ uri: getOptimizedImageUrl(profilePhotoUrl) }} 
                 style={{ width: "100%", height: "100%" }} 
                 resizeMode="cover"
               />
@@ -403,93 +604,50 @@ export default function UserProfileScreen() {
              Miembro desde {profileData?.createdAt?.toDate ? profileData.createdAt.toDate().getFullYear() : new Date().getFullYear()}
           </Text>
 
-          {/* Trust Badge if available */}
-            {profileData?.trustLevel === 'verified' && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#34C75920", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
-                    <Ionicons name="checkmark-circle" size={14} color="#34C759" />
-                    <Text style={{ color: "#34C759", fontSize: 12, fontWeight: "700" }}>Usuario Verificado</Text>
-                </View>
-            )}
-             {profileData?.trustLevel === 'active' && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#007AFF20", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
-                    <Ionicons name="flash" size={14} color="#007AFF" />
-                    <Text style={{ color: "#007AFF", fontSize: 12, fontWeight: "700" }}>Usuario Activo</Text>
-                </View>
-            )}
-            {(!profileData?.trustLevel || profileData?.trustLevel === 'new') && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#8E8E9320", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
-                    <Ionicons name="leaf" size={14} color="#8E8E93" />
-                    <Text style={{ color: "#8E8E93", fontSize: 12, fontWeight: "700" }}>Usuario Nuevo</Text>
-                </View>
-            )}
+          {/* User Rating / Trust Badge */}
+          {profileData?.sellerRating ? (
+             <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.card, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: theme.inputBackground }}>
+                <Ionicons name="star" size={16} color="#F5A623" />
+                <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700" }}>{profileData.sellerRating.toFixed(1)}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 14 }}>({profileData.sellerReviewCount || 0} ventas)</Text>
+             </View>
+          ) : (
+             <>
+                {profileData?.trustLevel === 'verified' && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#34C75920", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
+                        <Ionicons name="checkmark-circle" size={14} color="#34C759" />
+                        <Text style={{ color: "#34C759", fontSize: 12, fontWeight: "700" }}>Usuario Verificado</Text>
+                    </View>
+                )}
+                 {profileData?.trustLevel === 'active' && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#007AFF20", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
+                        <Ionicons name="flash" size={14} color="#007AFF" />
+                        <Text style={{ color: "#007AFF", fontSize: 12, fontWeight: "700" }}>Usuario Activo</Text>
+                    </View>
+                )}
+                {(!profileData?.trustLevel || profileData?.trustLevel === 'new') && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#8E8E9320", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 8 }}>
+                        <Ionicons name="leaf" size={14} color="#8E8E93" />
+                        <Text style={{ color: "#8E8E93", fontSize: 12, fontWeight: "700" }}>Usuario Nuevo</Text>
+                    </View>
+                )}
+             </>
+          )}
 
-        <View style={{ flexDirection: 'row', gap: 24, marginTop: 24 }}>
+        <View style={{ flexDirection: 'row', gap: 24, marginTop: 24, justifyContent: 'center' }}>
              <View style={{ alignItems: 'center' }}>
                 <Text style={{ color: theme.title, fontSize: 18, fontWeight: '700' }}>{vehicles.length}</Text>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>Publicaciones</Text>
              </View>
+             <View style={{ width: 1, height: '100%', backgroundColor: theme.inputBackground }} />
+             <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.title, fontSize: 18, fontWeight: '700' }}>{profileData?.salesCount || 0}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Ventas</Text>
+             </View>
         </View>
 
-        {/* Action Buttons: Report & Block */}
-        {user && user.uid !== uid && (
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-                <TouchableOpacity 
-                    onPress={handleReportUser}
-                    style={{ 
-                        flexDirection: 'row', 
-                        alignItems: 'center', 
-                        gap: 6,
-                        backgroundColor: theme.inputBackground,
-                        paddingHorizontal: 16,
-                        paddingVertical: 10,
-                        borderRadius: 8,
-                        borderWidth: 1,
-                        borderColor: theme.likeBox
-                    }}
-                >
-                    <Ionicons name="flag-outline" size={16} color={theme.text} />
-                    <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>Reportar</Text>
-                </TouchableOpacity>
-
-                {isBlocked ? (
-                    <TouchableOpacity 
-                        onPress={handleUnblockUser}
-                        style={{ 
-                            flexDirection: 'row', 
-                            alignItems: 'center', 
-                            gap: 6,
-                            backgroundColor: theme.inputBackground,
-                            paddingHorizontal: 16,
-                            paddingVertical: 10,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: theme.likeBox
-                        }}
-                    >
-                        <Ionicons name="eye-outline" size={16} color={theme.text} />
-                        <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>Desbloquear</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <TouchableOpacity 
-                        onPress={handleBlockUser}
-                        style={{ 
-                            flexDirection: 'row', 
-                            alignItems: 'center', 
-                            gap: 6,
-                            backgroundColor: theme.inputBackground,
-                            paddingHorizontal: 16,
-                            paddingVertical: 10,
-                            borderRadius: 8,
-                            borderWidth: 1,
-                            borderColor: theme.likeBox
-                        }}
-                    >
-                        <Ionicons name="ban-outline" size={16} color="#FF3B30" />
-                        <Text style={{ color: "#FF3B30", fontWeight: '600', fontSize: 14 }}>Bloquear</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-        )}
+        {/* Action Buttons */}
+        {renderActionButtons()}
         </View>
     );
   };
@@ -506,8 +664,10 @@ export default function UserProfileScreen() {
   }
 
   return (
+    <WebContainer>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <Header showBack={true} title="Perfil Público" />
+      <Header showBack={true} title="Perfil Público" showHome={Platform.OS === 'web'} />
+      {Platform.OS === 'web' && <DownloadAppBanner floating />}
 
       <FlatList
         data={vehicles}
@@ -540,5 +700,6 @@ export default function UserProfileScreen() {
         cancelText={alertConfig.cancelText}
       />
     </SafeAreaView>
+    </WebContainer>
   );
 }

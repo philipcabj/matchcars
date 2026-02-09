@@ -20,7 +20,7 @@ export default function PrivacyScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <Header title="Política de Privacidad" showBack />
+      <Header title="Política de Privacidad" showBack hideRightOptions />
       <ScrollView contentContainerStyle={{ padding: 20 }}>
         <Text style={{ color: theme.textMuted, fontSize: 14, marginBottom: 24 }}>
           Última actualización: {new Date().toLocaleDateString()}

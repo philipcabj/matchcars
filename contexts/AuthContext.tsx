@@ -26,9 +26,17 @@ import {
 import { auth, db } from "@/lib/firebase";
 import { TrustLevel } from "@/types/commerce";
 import { SubscriptionPlan, UserProfile, UserRole } from "@/types/user";
-import * as AppleAuthentication from "expo-apple-authentication";
 import { Timestamp, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { Platform } from "react-native";
+
+let AppleAuthentication: any = null;
+if (Platform.OS !== 'web') {
+    try {
+        AppleAuthentication = require("expo-apple-authentication");
+    } catch (e) {
+        console.warn("AppleAuthentication module not found");
+    }
+}
 
 WebBrowser.maybeCompleteAuthSession(); // Cierra bien el flujo OAuth
 
@@ -179,6 +187,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (unsubProfile) unsubProfile();
     };
   }, []);
+
+  // Safety Timeout for Auth Initialization (fix for iOS Web hanging)
+  useEffect(() => {
+      if (!initializing) return;
+      const timer = setTimeout(() => {
+          console.warn("Auth initialization timed out. Forcing app load.");
+          setInitializing(false);
+      }, 4000); // 4 seconds timeout
+      return () => clearTimeout(timer);
+  }, [initializing]);
 
   // Check for subscription expiration
   useEffect(() => {
@@ -584,7 +602,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const q = query(collection(db, "vehicles"), where("userId", "==", user.uid));
       const querySnapshot = await getDocs(q);
       
-      const shouldFeatureAll = plan === "pro_dealer";
+      const shouldFeatureAll = plan.startsWith("pro_dealer");
       const shouldUnfeatureAll = plan === "free";
       
       querySnapshot.forEach((doc) => {

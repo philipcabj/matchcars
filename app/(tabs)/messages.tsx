@@ -142,6 +142,40 @@ export default function MessagesTab() {
     fetchProfiles();
   }, [chats, profiles]);
 
+  // Auto-fetch missing vehicle data for chats that have vehicleId but no vehicleData
+  useEffect(() => {
+    const missingVehicles = chats.filter(c => c.vehicleId && !c.vehicleData);
+    if (missingVehicles.length === 0) return;
+
+    const fetchVehicles = async () => {
+      await Promise.all(missingVehicles.map(async (chat) => {
+        try {
+          const vRef = doc(db, "vehicles", chat.vehicleId);
+          const vSnap = await getDoc(vRef);
+          if (vSnap.exists()) {
+            const v = vSnap.data() as any;
+            const vData = {
+                id: v.id,
+                brand: v.brand,
+                model: v.model,
+                year: v.year,
+                price: v.price,
+                currency: v.currency,
+                cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? ""
+            };
+            // Update conversation to cache this data
+            const cRef = doc(db, "conversations", chat.id);
+            await updateDoc(cRef, { vehicleData: vData });
+          }
+        } catch (e) {
+          console.log("Error fetching vehicle for chat", chat.id, e);
+        }
+      }));
+    };
+    
+    fetchVehicles();
+  }, [chats]);
+
 
   const handleDeleteChat = (item: any) => {
     setSelectedChat(item);
@@ -197,6 +231,7 @@ export default function MessagesTab() {
 
     // Handle vehicle context
     const vehicleName = item.vehicleData ? `${item.vehicleData.brand} ${item.vehicleData.model}` : null;
+    const vehicleCover = item.vehicleData?.cover || null;
     
     const isUnread = user && item.lastSenderId !== user.uid && (!item.readBy || !Array.isArray(item.readBy) || !item.readBy.includes(user.uid));
 
@@ -283,7 +318,14 @@ export default function MessagesTab() {
 
             {vehicleName && (
                 <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 2 }}>
-                    <Ionicons name="car-sport-outline" size={12} color={theme.accent} style={{ marginRight: 4 }} />
+                    {vehicleCover ? (
+                      <Image 
+                        source={{ uri: vehicleCover }} 
+                        style={{ width: 24, height: 24, borderRadius: 4, marginRight: 6 }} 
+                      />
+                    ) : (
+                      <Ionicons name="car-sport-outline" size={12} color={theme.accent} style={{ marginRight: 4 }} />
+                    )}
                     <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "600" }}>{vehicleName}</Text>
                 </View>
             )}

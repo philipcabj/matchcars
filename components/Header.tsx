@@ -2,20 +2,25 @@
 import { CustomAlert } from "@/components/CustomAlert";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
-import { Image, Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+
+const iconImage = require('@/assets/images/icono.png');
 
 export interface HeaderProps {
   title?: string;
   showBack?: boolean;
   onBackPress?: () => void;
   customTitle?: React.ReactNode;
+  hideRightOptions?: boolean;
+  showHome?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, customTitle }) => {
+export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, customTitle, hideRightOptions, showHome }) => {
   const { theme } = useTheme();
   const { user, profile, logout } = useAuth();
   const router = useRouter();
@@ -114,134 +119,158 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
             <TouchableOpacity onPress={handleBack} style={{ padding: 4 }}>
               <Ionicons name="chevron-back" size={28} color={theme.text} />
             </TouchableOpacity>
+            {showHome && (
+              <TouchableOpacity onPress={() => router.push("/(tabs)")} style={{ padding: 4, marginRight: 4 }}>
+                  <Ionicons name="home-outline" size={24} color={theme.text} />
+              </TouchableOpacity>
+            )}
             {customTitle ? (
               customTitle
             ) : (
               title && (
-                <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700" }} numberOfLines={1}>
+                <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700", flex: 1 }} numberOfLines={1}>
                   {title}
                 </Text>
               )
             )}
           </>
         ) : (
-          <View>
-            <Text
-              style={{
-                color: theme.accent,
-                fontSize: 13,
-                fontWeight: "600",
-                letterSpacing: 1,
-              }}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity 
+              onPress={() => router.push("/(tabs)")}
+              activeOpacity={0.7}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
             >
-              MATCH
-            </Text>
-            <Text
-              style={{
-                color: theme.text,
-                fontSize: 22,
-                fontWeight: "800",
-              }}
-            >
-              CARS
-            </Text>
+              <Image 
+                source={iconImage} 
+                style={{ width: 32, height: 32, borderRadius: 8 }} 
+                contentFit="contain"
+                transition={200}
+              />
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text
+                    style={{
+                      color: theme.accent,
+                      fontSize: 13,
+                      fontWeight: "600",
+                      letterSpacing: 1,
+                    }}
+                  >
+                    MATCH
+                  </Text>
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 22,
+                      fontWeight: "800",
+                    }}
+                  >
+                    CARS
+                  </Text>
+                </View>
 
-            {user && (
-              <Text
-                style={{
-                  color: theme.textLight,
-                  fontSize: 13,
-                  marginTop: 4,
-                }}
-              >
-                Bienvenido, {fullName || "usuario"}
-              </Text>
-            )}
+                {user && (
+                  <Text
+                    style={{
+                      color: theme.textLight,
+                      fontSize: 11,
+                      marginTop: -2,
+                    }}
+                  >
+                    Hola, {fullName.split(' ')[0] || "usuario"}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
           </View>
         )}
       </View>
 
       {/* DERECHA: Campanita + logout + avatar */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-        <TouchableOpacity activeOpacity={0.7} onPress={() => { if (!user) { router.push("/login"); } else { router.push("/(screens)/notifications"); } }}>
-          <View>
-            <Ionicons name="notifications-outline" size={24} color={theme.text} />
-            {totalUnreadCount > 0 && (
-              <View style={{ 
-                position: "absolute", 
-                top: -6, 
-                right: -6, 
-                minWidth: 18, 
-                height: 18, 
-                borderRadius: 9, 
-                backgroundColor: "#FF3B30", 
-                alignItems: "center", 
-                justifyContent: "center",
-                paddingHorizontal: 4
-              }}>
-                <Text style={{ color: "white", fontSize: 10, fontWeight: "bold" }}>
-                  {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
-                </Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-
-        {user && (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => {
-              showAlert(
-                "Cerrar sesión",
-                "¿Seguro que querés salir?",
-                "info",
-                true,
-                () => logout().catch(() => {}),
-                "Salir",
-                "Cancelar"
-              );
-            }}
-            style={{
-              backgroundColor: theme.removeButton,
-              borderRadius: 999,
-              paddingVertical: 8,
-              paddingHorizontal: 12,
-            }}
-          >
-            <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>Salir</Text>
+      {!hideRightOptions && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => { if (!user) { router.push("/login"); } else { router.push("/(screens)/notifications"); } }}>
+            <View>
+              <Ionicons name="notifications-outline" size={24} color={theme.text} />
+              {totalUnreadCount > 0 && (
+                <View style={{ 
+                  position: "absolute", 
+                  top: -6, 
+                  right: -6, 
+                  minWidth: 18, 
+                  height: 18, 
+                  borderRadius: 9, 
+                  backgroundColor: "#FF3B30", 
+                  alignItems: "center", 
+                  justifyContent: "center",
+                  paddingHorizontal: 4
+                }}>
+                  <Text style={{ color: "white", fontSize: 10, fontWeight: "bold" }}>
+                    {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
+                  </Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
-        )}
 
-        <TouchableOpacity
-          onPress={handleAvatarPress}
-          activeOpacity={0.8}
-          style={{
-            width: 38,
-            height: 38,
-            borderRadius: 19,
-            backgroundColor: avatarColor,
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-          }}
-        >
-          {profile?.photoURL ? (
-            <Image 
-              source={{ uri: profile.photoURL }} 
-              style={{ width: 38, height: 38 }} 
-            />
-          ) : (
-            <Text
+          {user && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                showAlert(
+                  "Cerrar sesión",
+                  "¿Seguro que querés salir?",
+                  "info",
+                  true,
+                  () => logout().catch(() => {}),
+                  "Salir",
+                  "Cancelar"
+                );
+              }}
               style={{
-                color: "#FFFFFF",
-                fontWeight: "700",
+                backgroundColor: theme.removeButton,
+                borderRadius: 999,
+                paddingVertical: 8,
+                paddingHorizontal: 12,
               }}
             >
-              {initials}
-            </Text>
+              <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>Salir</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      </View>
+
+          <TouchableOpacity
+            onPress={handleAvatarPress}
+            activeOpacity={0.8}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              backgroundColor: avatarColor,
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+            }}
+          >
+            {profile?.photoURL ? (
+              <Image 
+                source={{ uri: profile.photoURL }} 
+                style={{ width: 38, height: 38 }} 
+                contentFit="cover"
+              />
+            ) : (
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontWeight: "700",
+                }}
+              >
+                {initials}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       <CustomAlert 
         visible={alertConfig.visible}

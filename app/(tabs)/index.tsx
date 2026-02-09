@@ -1,16 +1,19 @@
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { sendNotificationEmail } from "@/lib/mail";
 import type { Vehicle } from "@/types/vehicle";
+import { safeDate } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as CarModelsAr from "../../config/carModelsAr";
 
@@ -151,7 +154,7 @@ export default function AutosPublicTab() {
     // Exclude sold and unpublished vehicles from the public index
     // Note: If 'owner' or 'favOf' params are present, we might want different behavior, 
     // but generally sold cars shouldn't appear in the main feed.
-    const statusMatch = v.status !== 'sold' && v.published !== false;
+    const statusMatch = v.status !== 'sold' && v.status !== 'deleted' && v.status !== 'blocked' && v.status !== 'rejected' && v.published !== false;
 
     return favMatch && ownerMatch && notMineMatch && brandMatch && modelMatch && provinceMatch && yearMatch && currencyListMatch && priceMatch && kmMatch && finMatch && fuelMatch && statusMatch;
   });
@@ -233,20 +236,25 @@ export default function AutosPublicTab() {
           isFeatured: data.isFeatured,
           userPlan: data.userPlan,
           status: data.status,
+          sellerRating: data.sellerRating,
+          sellerReviewCount: data.sellerReviewCount,
+          sellerTrustLevel: data.sellerTrustLevel,
         };
 
         // Lazy expiration check (7 days) for non-dealers
-        if (mapped.isFeatured && data.featuredAt && mapped.userPlan !== 'pro_dealer') {
+        if (mapped.isFeatured && data.featuredAt && (!mapped.userPlan || !mapped.userPlan.includes('pro_dealer'))) {
           try {
-             const featDate = data.featuredAt?.toDate ? data.featuredAt.toDate() : new Date(data.featuredAt);
-             const now = new Date();
-             const diffTime = Math.abs(now.getTime() - featDate.getTime());
-             const diffDays = diffTime / (1000 * 60 * 60 * 24);
-             
-             if (diffDays > 7) {
-               mapped.isFeatured = false;
-               // Background update to cleanup DB
-               updateDoc(doc.ref, { isFeatured: false }).catch(e => console.log("Auto-expire failed", e));
+             const featDate = safeDate(data.featuredAt);
+             if (featDate) {
+                 const now = new Date();
+                 const diffTime = Math.abs(now.getTime() - featDate.getTime());
+                 const diffDays = diffTime / (1000 * 60 * 60 * 24);
+                 
+                 if (diffDays > 7) {
+                   mapped.isFeatured = false;
+                   // Background update to cleanup DB
+                   updateDoc(doc.ref, { isFeatured: false }).catch(e => console.log("Auto-expire failed", e));
+                 }
              }
           } catch (e) {
             console.log("Error checking expiration", e);
@@ -264,18 +272,18 @@ export default function AutosPublicTab() {
         let score = 0;
         
         // 1. Dealer siempre arriba (Destacado Ilimitado)
-        if (v.userPlan === 'pro_dealer') score += 1000;
+        if (v.userPlan && v.userPlan.includes('pro_dealer')) score += 1000;
         
         // 2. Destacado normal (Pro Monthly / Plus con destacado activo)
-        if (v.isFeatured && v.userPlan !== 'pro_dealer') score += 500;
+        if (v.isFeatured && (!v.userPlan || !v.userPlan.includes('pro_dealer'))) score += 500;
 
         // 3. Weekend Boost (Pro Plus y Pro Dealer)
-        if (isWeekend && (v.userPlan === 'pro_plus' || v.userPlan === 'pro_dealer')) score += 300;
+        if (isWeekend && (v.userPlan?.includes('pro_plus') || v.userPlan?.includes('pro_dealer'))) score += 300;
 
         // 4. Boost Posicionamiento (Pro Plus > Pro Monthly)
         // Pro Plus debe tener mejor base que Monthly
-        if (v.userPlan === 'pro_plus') score += 200;
-        else if (v.userPlan === 'pro_monthly') score += 100;
+        if (v.userPlan?.includes('pro_plus')) score += 200;
+        else if (v.userPlan?.includes('pro_monthly') || v.userPlan?.includes('pro_annual')) score += 100;
 
         return score;
       };
@@ -470,8 +478,10 @@ export default function AutosPublicTab() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1, backgroundColor: theme.background }}>
+      <WebContainer>
       <Header />
+      {Platform.OS === 'web' && <DownloadAppBanner floating />}
 
       <View style={{ paddingHorizontal: 16, paddingTop: 4, flex: 1 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -820,7 +830,26 @@ export default function AutosPublicTab() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : (
-          <FlatList data={filteredVehicles} keyExtractor={(item) => item.id} renderItem={({ item }) => (
+          <FlatList 
+            style={{ flex: 1 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
+            data={filteredVehicles} 
+            keyExtractor={(item) => item.id} 
+            ListHeaderComponent={null}
+            ListEmptyComponent={
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center", marginTop: 40, padding: 20 }}>
+                  <Ionicons name="car-sport-outline" size={48} color={theme.textMuted} />
+                  <Text style={{ color: theme.textMuted, marginTop: 16, textAlign: "center", fontSize: 16 }}>
+                      No se encontraron vehículos.
+                  </Text>
+                  {Platform.OS === 'web' && (
+                      <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
+                          {vehicles.length} vehículos cargados. (Revisá los filtros)
+                      </Text>
+                  )}
+              </View>
+            }
+            renderItem={({ item }) => (
             <CarCard
               vehicle={{ ...item, userName: (item.userId && userNamesCache[item.userId]) ? userNamesCache[item.userId] : item.userName }}
               liked={favoriteIds.has(item.id)}
@@ -871,6 +900,7 @@ export default function AutosPublicTab() {
           onClose={() => setAlertConfig(prev => ({ ...prev, visible: false }))}
         />
       </View>
+      </WebContainer>
     </SafeAreaView>
   );
 }

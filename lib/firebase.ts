@@ -2,9 +2,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import * as firebaseAuth from "firebase/auth";
-import { getAuth, initializeAuth } from "firebase/auth";
+import { browserLocalPersistence, getAuth, initializeAuth, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getVertexAI } from "firebase/vertexai";
 import { Platform } from "react-native";
 
 const firebaseConfig = {
@@ -23,6 +24,10 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 let authInstance: ReturnType<typeof getAuth>;
 if (Platform.OS === "web") {
   authInstance = getAuth(app);
+  // Ensure persistence is set (helps with Safari issues)
+  setPersistence(authInstance, browserLocalPersistence).catch((e) =>
+    console.warn("Auth Persistence Warning:", e)
+  );
 } else {
   const getReactNativePersistence = (firebaseAuth as any).getReactNativePersistence;
   if (getReactNativePersistence) {
@@ -41,3 +46,6 @@ export const db = getFirestore(app);
 
 // 🔹 Storage
 export const storage = getStorage(app);
+
+// 🔹 Vertex AI
+export const vertexAI = getVertexAI(app);

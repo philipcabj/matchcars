@@ -17,17 +17,32 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 let GoogleSignin: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
-} catch {
-  console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+if (Platform.OS !== 'web') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
+  } catch {
+    console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+  }
 }
+
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 
 export default function RegisterScreen() {
   const { theme } = useTheme();
   const { registerWithEmail, loginWithGoogle, loginWithApple } = useAuth();
   const router = useRouter();
+
+  if (Platform.OS === 'web') {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <DownloadAppBanner message="Descargá la App para registrarte" />
+          <TouchableOpacity onPress={() => router.replace("/(tabs)")} style={{ marginTop: 20, padding: 10 }}>
+              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>Volver al inicio</Text>
+          </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");

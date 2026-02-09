@@ -1,18 +1,23 @@
 // app/profile.tsx
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { PriceRecommendation } from "@/components/PriceRecommendation";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db, storage } from "@/lib/firebase";
+import { analyzeMarketPrice } from "@/lib/pricing";
+import { fetchDealerReportData, generateCSV, generatePDF, shareFile } from "@/lib/reporting";
 import { TrustLevel } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ProfileScreen() {
@@ -25,7 +30,13 @@ export default function ProfileScreen() {
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [activeTab, setActiveTab] = useState<"purchases" | "sales">("purchases"); // New: Tab State
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   
+  // Price Suggestion State
+  const [topSuggestion, setTopSuggestion] = useState<any>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [hideDashboardSuggestion, setHideDashboardSuggestion] = useState(false);
+
   // Alert State
   const [alertConfig, setAlertConfig] = useState({ 
     visible: false,
@@ -100,20 +111,75 @@ export default function ProfileScreen() {
   const [review, setReview] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
 
+  const findTopSuggestion = async (vehicles: any[]) => {
+      if (hideDashboardSuggestion) return;
+      setSuggestionLoading(true);
+      let maxDiff = 0;
+      let bestCandidate = null;
+      let bestAnalysis = null;
+      
+      // Filter published vehicles and take last 10 (assuming query order or just random subset)
+      const candidates = vehicles.filter(v => v.status !== 'sold' && v.status !== 'deleted').slice(0, 10);
+
+      for (const v of candidates) {
+          if (!v.brand || !v.model || !v.year || !v.price) continue;
+          
+          try {
+            const analysis = await analyzeMarketPrice(v.brand, v.model, Number(v.year), v.currency || "ARS");
+            if (analysis.avg > 0 && v.price > analysis.avg) {
+                const diff = ((v.price - analysis.avg) / analysis.avg) * 100;
+                // We want at least 5% diff to suggest
+                if (diff > 5 && diff > maxDiff) {
+                    maxDiff = diff;
+                    bestCandidate = v;
+                    bestAnalysis = analysis;
+                }
+            }
+          } catch(e) {}
+      }
+
+      if (bestCandidate && bestAnalysis) {
+          setTopSuggestion({ vehicle: bestCandidate, analysis: bestAnalysis });
+      }
+      setSuggestionLoading(false);
+  };
+
+  const handleDashboardPriceUpdate = async (targetPrice: number) => {
+      if (!topSuggestion) return;
+      try {
+          const ref = doc(db, "vehicles", topSuggestion.vehicle.id);
+          await updateDoc(ref, {
+              price: targetPrice,
+              updatedAt: serverTimestamp()
+          });
+          showAlert("Precio actualizado", "El precio se ha actualizado correctamente.", "success");
+          setTopSuggestion(null); // Remove suggestion after action
+      } catch (e) {
+          console.error(e);
+          showAlert("Error", "No se pudo actualizar el precio.", "error");
+      }
+  };
+
   useEffect(() => {
-    if (user && profile?.plan === 'pro_dealer') {
+    if (user && profile?.plan && profile.plan.includes('pro_dealer')) {
       const fetchStats = async () => {
         try {
           const q = query(collection(db, "vehicles"), where("userId", "==", user.uid));
           const snap = await getDocs(q);
           let totalViews = 0;
           let totalLikes = 0;
+          const vehicles: any[] = [];
+
           snap.forEach(d => {
             const data = d.data();
+            vehicles.push({ id: d.id, ...data });
             totalViews += (data.views || 0);
             totalLikes += (data.likesCount || 0);
           });
           setDealerStats({ cars: snap.size, views: totalViews, likes: totalLikes });
+
+          // Find suggestion
+          findTopSuggestion(vehicles);
         } catch (e) {
           console.error("Error fetching dealer stats", e);
         }
@@ -203,7 +269,51 @@ export default function ProfileScreen() {
             console.log("DEBUG: Sales query success, docs found:", snapSales.size);
             
             const saleItems: any[] = [];
-            snapSales.forEach(d => saleItems.push({ id: d.id, ...d.data() }));
+            const missingBuyerIds = new Set<string>();
+
+            snapSales.forEach(d => {
+                const data = d.data();
+                // Check if buyer name is missing, ID-like, or Email-like
+                const nameIsId = data.buyerName && /^[a-zA-Z0-9]{20,}$/.test(data.buyerName) && !data.buyerName.includes(" ");
+                const nameIsEmail = data.buyerName && data.buyerName.includes("@");
+                
+                if ((!data.buyerName || nameIsId || nameIsEmail) && data.buyerId) {
+                    missingBuyerIds.add(data.buyerId);
+                }
+                saleItems.push({ id: d.id, ...data });
+            });
+
+            // Fetch missing buyer names
+            if (missingBuyerIds.size > 0) {
+                 try {
+                    const buyerPromises = Array.from(missingBuyerIds).map(id => getDoc(doc(db, "users", id)));
+                    const buyerSnaps = await Promise.all(buyerPromises);
+                    const buyerMap = new Map<string, string>();
+                    
+                    buyerSnaps.forEach((s: any) => {
+                        if (s.exists()) {
+                            const u = s.data();
+                            const name = (u.firstName && u.lastName) 
+                                ? `${u.firstName} ${u.lastName}`.trim() 
+                                : (u.firstName || u.displayName || "Comprador");
+                            buyerMap.set(s.id, name);
+                        }
+                    });
+
+                    // Update items with fetched names
+                    saleItems.forEach(item => {
+                        const nameIsId = item.buyerName && /^[a-zA-Z0-9]{20,}$/.test(item.buyerName) && !item.buyerName.includes(" ");
+                        const nameIsEmail = item.buyerName && item.buyerName.includes("@");
+                        
+                        if ((!item.buyerName || nameIsId || nameIsEmail) && item.buyerId && buyerMap.has(item.buyerId)) {
+                            item.buyerName = buyerMap.get(item.buyerId);
+                        }
+                    });
+                } catch (err) {
+                    console.error("Error fetching buyer details:", err);
+                }
+            }
+
             setSales(saleItems);
         } else {
             console.error("DEBUG: Error fetching sales:", salesResult.reason);
@@ -232,6 +342,37 @@ export default function ProfileScreen() {
             rating: rating,
             review: review
         });
+
+        // Recalculate seller rating immediately
+        if (selectedPurchase.sellerId) {
+             try {
+                 const q = query(collection(db, "sales"), where("sellerId", "==", selectedPurchase.sellerId));
+                 const snap = await getDocs(q);
+                 let total = 0;
+                 let count = 0;
+                 snap.forEach(d => {
+                     const data = d.data();
+                     let r = Number(data.rating);
+                     // Ensure we use the new values for the current sale
+                     if (d.id === selectedPurchase.id) r = rating;
+                     
+                     if (!isNaN(r) && r > 0) {
+                         total += r;
+                         count++;
+                     }
+                 });
+                 
+                 if (count > 0) {
+                     const avg = total / count;
+                     await updateDoc(doc(db, "users", selectedPurchase.sellerId), {
+                         sellerRating: avg,
+                         sellerReviewCount: count
+                     });
+                 }
+             } catch (e) {
+                 console.log("Error updating seller rating", e);
+             }
+        }
         
         // Update local state
         setPurchases(prev => prev.map(p => p.id === selectedPurchase.id ? { ...p, rating, review } : p));
@@ -245,7 +386,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleUpdateAvatar = async () => {
+  const handleUpdateAvatar = () => {
     if (!user) return;
     
     showAlert(
@@ -276,6 +417,36 @@ export default function ProfileScreen() {
         },
       ]
     );
+  };
+
+  const handleDownloadReport = async (type: 'pdf' | 'csv') => {
+    if (!user) return;
+    setReportLoading(true);
+    try {
+        const data = await fetchDealerReportData(user.uid);
+        const userName = fullName || "Dealer";
+        
+        let uri = "";
+        let mimeType = "";
+        let filename = "";
+
+        if (type === 'pdf') {
+            uri = await generatePDF(data, userName);
+            mimeType = "application/pdf";
+            filename = "Reporte_Matchcars.pdf";
+        } else {
+            uri = await generateCSV(data, userName);
+            mimeType = "text/csv";
+            filename = "Reporte_Matchcars.csv";
+        }
+
+        await shareFile(uri, mimeType, filename);
+    } catch (e) {
+        console.error(e);
+        showAlert("Error", "No se pudo generar el reporte.", "error");
+    } finally {
+        setReportLoading(false);
+    }
   };
 
   const pickImage = async (mode: "camera" | "gallery") => {
@@ -396,36 +567,44 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-        <Header />
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <Text style={{ color: theme.text, fontSize: 16, textAlign: "center" }}>
-            Para ver tu perfil, iniciá sesión o registrate.
-          </Text>
-          <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
-            <TouchableOpacity onPress={() => router.push("/login")} style={{ backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 }}>
-              <Text style={{ color: theme.buttonText, fontWeight: "700" }}>Iniciar sesión</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/register")} style={{ backgroundColor: theme.accent, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 }}>
-              <Text style={{ color: theme.buttonText, fontWeight: "700" }}>Registrarme</Text>
-            </TouchableOpacity>
+        <WebContainer>
+          <Header />
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <Text style={{ color: theme.text, fontSize: 16, textAlign: "center" }}>
+              Para ver tu perfil, iniciá sesión o registrate.
+            </Text>
+            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+              <TouchableOpacity onPress={() => router.push("/login")} style={{ backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 }}>
+                <Text style={{ color: theme.buttonText, fontWeight: "700" }}>Iniciar sesión</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push("/register")} style={{ backgroundColor: theme.accent, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 }}>
+                <Text style={{ color: theme.buttonText, fontWeight: "700" }}>Registrarme</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </WebContainer>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <Header />
-      <ScrollView ref={scrollViewRef} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <TouchableOpacity onPress={() => router.back()} style={{ borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
-            <Text style={{ color: theme.text, fontSize: 12 }}>← Volver</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => router.push("/(tabs)")} style={{ borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
-            <Ionicons name="home" size={16} color={theme.text} />
-          </TouchableOpacity>
-        </View>
+      <WebContainer>
+        <Header />
+        <ScrollView ref={scrollViewRef} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+          {Platform.OS === 'web' && (
+            <View style={{ marginBottom: 16 }}>
+              <DownloadAppBanner message="Descargá la App para editar tu perfil y gestionar tu cuenta" />
+            </View>
+          )}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <TouchableOpacity onPress={() => router.back()} style={{ borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
+              <Text style={{ color: theme.text, fontSize: 12 }}>← Volver</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push("/(tabs)")} style={{ borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
+              <Ionicons name="home" size={16} color={theme.text} />
+            </TouchableOpacity>
+          </View>
         <View style={{ alignItems: "center", marginTop: 8 }}>
           <TouchableOpacity onPress={handleUpdateAvatar} activeOpacity={0.8} style={{ position: "relative" }}>
             {profile?.photoURL ? (
@@ -497,11 +676,11 @@ export default function ProfileScreen() {
           >
              <Ionicons name="create-outline" size={16} color={theme.text} />
              <Text style={{ color: theme.text, fontWeight: "600", fontSize: 14 }}>
-               {profile?.plan === 'pro_dealer' ? "Configurar Agencia" : "Editar Perfil"}
+               {profile?.plan && profile.plan.includes('pro_dealer') ? "Configurar Agencia" : "Editar Perfil"}
              </Text>
           </TouchableOpacity>
 
-          {profile?.plan === 'pro_dealer' && (
+          {profile?.plan && profile.plan.includes('pro_dealer') && (
              <TouchableOpacity 
                 onPress={() => router.push(`/(screens)/user-profile/${user.uid}` as any)}
                 style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
@@ -513,7 +692,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={{ marginTop: 16, gap: 12 }}>
-          {profile?.plan === 'pro_dealer' && (
+          {profile?.plan && profile.plan.includes('pro_dealer') && (
             <View style={{ backgroundColor: theme.card, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#9013FE' }}>
               <View style={{ backgroundColor: '#9013FE', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                  <Ionicons name="bar-chart" size={20} color="#FFF" />
@@ -535,6 +714,24 @@ export default function ProfileScreen() {
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Likes</Text>
                 </TouchableOpacity>
               </View>
+
+              {topSuggestion && !hideDashboardSuggestion && (
+                  <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                    <Text style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>
+                        Sugerencia para: <Text style={{ fontWeight: '700' }}>{topSuggestion.vehicle.brand} {topSuggestion.vehicle.model}</Text>
+                    </Text>
+                    <PriceRecommendation
+                        currentPrice={Number(topSuggestion.vehicle.price)}
+                        avgPrice={topSuggestion.analysis.avg}
+                        currency={topSuggestion.vehicle.currency || "ARS"}
+                        onLowerPrice={handleDashboardPriceUpdate}
+                        onIgnore={() => {
+                            setHideDashboardSuggestion(true);
+                            setTopSuggestion(null);
+                        }}
+                    />
+                  </View>
+              )}
               
               <View style={{ height: 1, backgroundColor: theme.likeBoxBackground }} />
               
@@ -548,6 +745,31 @@ export default function ProfileScreen() {
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{purchases.length}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Compras</Text>
                 </TouchableOpacity>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: theme.likeBoxBackground }} />
+              
+              <View style={{ padding: 16 }}>
+                 <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8, fontWeight: '600' }}>REPORTES DE RENDIMIENTO</Text>
+                 <View style={{ flexDirection: 'row', gap: 12 }}>
+                   <TouchableOpacity 
+                      onPress={() => handleDownloadReport('pdf')}
+                      disabled={reportLoading}
+                      style={{ flex: 1, backgroundColor: theme.inputBackground, paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                   >
+                      {reportLoading ? <ActivityIndicator color={theme.text} size="small" /> : <Ionicons name="document-text-outline" size={16} color={theme.text} />}
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: 12 }}>PDF</Text>
+                   </TouchableOpacity>
+
+                   <TouchableOpacity 
+                      onPress={() => handleDownloadReport('csv')}
+                      disabled={reportLoading}
+                      style={{ flex: 1, backgroundColor: theme.inputBackground, paddingVertical: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                   >
+                      {reportLoading ? <ActivityIndicator color={theme.text} size="small" /> : <Ionicons name="download-outline" size={16} color={theme.text} />}
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: 12 }}>CSV</Text>
+                   </TouchableOpacity>
+                 </View>
               </View>
 
               <TouchableOpacity onPress={() => router.push("/(tabs)/mycars")} style={{ borderTopWidth: 1, borderTopColor: theme.likeBoxBackground, padding: 12, alignItems: 'center' }}>
@@ -777,83 +999,103 @@ export default function ProfileScreen() {
                     showAlert("Error", "No se pudo eliminar la cuenta. Intentá nuevamente.", "error");
                   }
                 },
-                true,
-                undefined,
-                "Eliminar",
-                "Cancelar"
+                true
               );
             }}
-            activeOpacity={0.8}
-            style={{ padding: 8 }}
+            style={{ padding: 12 }}
           >
-            <Text style={{ color: theme.removeButton, fontWeight: "600", fontSize: 12 }}>Eliminar mi cuenta</Text>
+            <Text style={{ color: theme.error || "#EF4444", fontSize: 14 }}>Eliminar cuenta</Text>
           </TouchableOpacity>
+
+          {Platform.OS === 'web' && (
+            <View style={{ marginTop: 20 }}>
+              <DownloadAppBanner message="Descargá nuestra App para la mejor experiencia" />
+            </View>
+          )}
         </View>
       </ScrollView>
 
-      {/* Rating Modal */}
+      {/* RATING MODAL */}
       <Modal
-        visible={ratingModalVisible}
-        transparent
         animationType="slide"
+        transparent={true}
+        visible={ratingModalVisible}
         onRequestClose={() => setRatingModalVisible(false)}
       >
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 }}>
-            <View style={{ backgroundColor: theme.card, borderRadius: 20, padding: 20 }}>
-                <Text style={{ color: theme.title, fontSize: 18, fontWeight: "700", marginBottom: 16, textAlign: "center" }}>
-                    Calificar al Vendedor
-                </Text>
+            <View style={{ backgroundColor: theme.card, borderRadius: 16, padding: 20, alignItems: "center" }}>
+                <Text style={{ color: theme.text, fontSize: 18, fontWeight: "bold", marginBottom: 16 }}>Calificar Vendedor</Text>
                 
-                <View style={{ flexDirection: "row", justifyContent: "center", marginBottom: 20, gap: 10 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 14, marginBottom: 12 }}>
+                    ¿Cómo fue tu experiencia con {selectedPurchase?.sellerName || "el vendedor"}?
+                </Text>
+
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 20 }}>
                     {[1, 2, 3, 4, 5].map((star) => (
                         <TouchableOpacity key={star} onPress={() => setRating(star)}>
-                            <Text style={{ fontSize: 32, color: star <= rating ? "#F59E0B" : theme.textMuted }}>★</Text>
+                            <Ionicons 
+                                name={star <= rating ? "star" : "star-outline"} 
+                                size={32} 
+                                color="#F59E0B" 
+                            />
                         </TouchableOpacity>
                     ))}
                 </View>
 
                 <TextInput
-                    value={review}
-                    onChangeText={setReview}
-                    style={{
-                        backgroundColor: theme.inputBackground,
-                        color: theme.text,
-                        padding: 12,
-                        borderRadius: 10,
-                        height: 100,
+                    style={{ 
+                        width: "100%", 
+                        backgroundColor: theme.inputBackground, 
+                        color: theme.text, 
+                        borderRadius: 8, 
+                        padding: 12, 
+                        minHeight: 80, 
                         textAlignVertical: "top",
                         marginBottom: 20
                     }}
-                    placeholder="Escribí una reseña sobre tu experiencia..."
+                    placeholder="Escribí un comentario (opcional)..."
                     placeholderTextColor={theme.textMuted}
                     multiline
+                    value={review}
+                    onChangeText={setReview}
                 />
 
-                <View style={{ flexDirection: "row", gap: 12 }}>
+                <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
                     <TouchableOpacity 
                         onPress={() => setRatingModalVisible(false)}
-                        style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: theme.buttonBackground, alignItems: "center" }}
+                        style={{ flex: 1, padding: 12, alignItems: "center", borderRadius: 8, backgroundColor: theme.inputBackground }}
                     >
-                        <Text style={{ color: theme.text, fontWeight: "700" }}>Cancelar</Text>
+                        <Text style={{ color: theme.text, fontWeight: "600" }}>Cancelar</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity 
                         onPress={submitRating}
-                        disabled={submittingRating || rating === 0}
-                        style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: rating > 0 ? theme.accent : theme.textMuted, alignItems: "center" }}
+                        disabled={submittingRating}
+                        style={{ flex: 1, padding: 12, alignItems: "center", borderRadius: 8, backgroundColor: theme.accent }}
                     >
                         {submittingRating ? (
-                            <ActivityIndicator color="#FFF" />
+                            <ActivityIndicator color="#FFF" size="small" />
                         ) : (
-                            <Text style={{ color: "#FFF", fontWeight: "700" }}>Enviar</Text>
+                            <Text style={{ color: "#FFF", fontWeight: "600" }}>Enviar</Text>
                         )}
                     </TouchableOpacity>
                 </View>
             </View>
         </View>
-          </Modal>
+      </Modal>
 
-          <CustomAlert {...alertConfig} />
+      <CustomAlert 
+        visible={alertConfig.visible}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onClose={alertConfig.onClose}
+        showCancel={alertConfig.showCancel}
+        onCancel={alertConfig.onCancel}
+        confirmText={alertConfig.confirmText}
+        cancelText={alertConfig.cancelText}
+        options={alertConfig.options}
+      />
+      </WebContainer>
     </SafeAreaView>
   );
 }

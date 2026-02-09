@@ -47,6 +47,7 @@ export interface UserProfile {
   blockedUsers?: string[]; // IDs of users blocked by this user
 
   // Pro Dealer Profile Fields
+  agencyName?: string;
   bannerUrl?: string;
   businessAddress?: string;
   businessCoordinates?: { latitude: number; longitude: number };
@@ -55,4 +56,9 @@ export interface UserProfile {
   instagram?: string;
   whatsapp?: string;
   highlightedVehicleIds?: string[]; // IDs of vehicles to feature
+
+  // Ratings
+  sellerRating?: number;
+  sellerReviewCount?: number;
+  sellerTrustLevel?: TrustLevel;
 }

@@ -1,17 +1,24 @@
 // components/CarCard.tsx
+import { useCompare } from "@/contexts/CompareContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
 import type { Vehicle } from "@/types/vehicle";
+import { formatTimeAgo } from "@/utils/dateUtils";
+import { getOptimizedImageUrl } from "@/utils/imageUtils";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Pressable, Text, TouchableOpacity, View } from "react-native";
-type Props = { vehicle: Vehicle; liked?: boolean; likeDisabled?: boolean; onToggleLike?: () => void; hideLike?: boolean; showEdit?: boolean; onEdit?: () => void; compact?: boolean; horizontal?: boolean; onMessage?: () => void; showMetrics?: boolean; showPriceAnalysis?: boolean };
+import { Platform, Pressable, Image as RNImage, Text, TouchableOpacity, View } from "react-native";
 
-export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggleLike, hideLike = false, showEdit = false, onEdit, compact = false, horizontal = false, onMessage, showMetrics = false, showPriceAnalysis = false }: Props) {
+type Props = { vehicle: Vehicle; liked?: boolean; likeDisabled?: boolean; onToggleLike?: () => void; hideLike?: boolean; hideCompare?: boolean; showEdit?: boolean; onEdit?: () => void; compact?: boolean; horizontal?: boolean; onMessage?: () => void; showMetrics?: boolean; showPriceAnalysis?: boolean };
+
+export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggleLike, hideLike = false, hideCompare = false, showEdit = false, onEdit, compact = false, horizontal = false, onMessage, showMetrics = false, showPriceAnalysis = false }: Props) {
   const router = useRouter();
   const { theme } = useTheme();
+  const { toggleVehicle, isSelected } = useCompare();
+  
+  const selected = isSelected(vehicle.id);
   
   const priceSuggestion = usePriceSuggestion(
     vehicle?.brand || "", 
@@ -35,15 +42,60 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
 
   const priceQuality = showPriceAnalysis ? getPriceQuality() : null;
 
-  const imageUrl = vehicle.coverImage || (vehicle as any)?.images?.cover || (vehicle as any)?.images?.gallery?.[0] || "https://placehold.co/800x600?text=Auto";
+  const rawImageUrl = vehicle.coverImage || (vehicle as any)?.images?.cover || (vehicle as any)?.images?.gallery?.[0];
+  const imageUrl = getOptimizedImageUrl(rawImageUrl);
+
+  const timeAgo = formatTimeAgo(vehicle.createdAt);
 
   // Helper to render Trust Badge
   const renderTrustBadge = () => {
-      // Assuming vehicle has userName and maybe trustLevel (if denormalized)
-      // If trustLevel is not on vehicle, we might just show "Usuario" for now
-      // Ideally, vehicle documents should be updated to include sellerTrustLevel
-      const trustLevel = (vehicle as any).sellerTrustLevel || "new"; 
+      // Priority: Agency -> Rating -> TrustLevel
+      const isAgency = vehicle.userPlan?.includes('pro_dealer');
+      const rating = vehicle.sellerRating;
+      const reviewCount = vehicle.sellerReviewCount || 0;
+      const trustLevel = vehicle.sellerTrustLevel || "new"; 
       
+      if (isAgency) {
+          return (
+             <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                  <Ionicons name="business" size={14} color={theme.textMuted} />
+                  <Text style={{ fontSize: 12, color: theme.textMuted, flex: 1 }} numberOfLines={1}>
+                      {vehicle.userName || "Agencia"}
+                  </Text>
+                  {compact ? (
+                      <Ionicons name="checkmark-circle" size={14} color="#9013FE" />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: "#9013FE20", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                        <Ionicons name="checkmark-circle" size={10} color="#9013FE" />
+                        <Text style={{ fontSize: 10, color: "#9013FE", fontWeight: "600" }}>Agencia Verificada</Text>
+                    </View>
+                  )}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 2, marginLeft: 4 }}>
+                      <Ionicons name="star" size={12} color="#F5A623" />
+                      <Text style={{ fontSize: 12, color: theme.text, fontWeight: "600" }}>{Number(rating || 0).toFixed(1)}</Text>
+                      <Text style={{ fontSize: 10, color: theme.textMuted }}>({reviewCount})</Text>
+                  </View>
+             </View>
+          );
+      }
+
+      if (rating !== undefined && rating !== null || reviewCount > 0) {
+           return (
+             <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                  <Ionicons name="person-circle-outline" size={16} color={theme.textMuted} />
+                  <Text style={{ fontSize: 12, color: theme.textMuted, flex: 1 }} numberOfLines={1}>
+                      {vehicle.userName || "Usuario"}
+                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                      <Ionicons name="star" size={12} color="#F5A623" />
+                      <Text style={{ fontSize: 12, color: theme.text, fontWeight: "600" }}>{Number(rating || 0).toFixed(1)}</Text>
+                      <Text style={{ fontSize: 10, color: theme.textMuted }}>({reviewCount})</Text>
+                  </View>
+             </View>
+          );
+      }
+
+      // Fallback to Trust Level
       let badgeColor = "#8E8E93"; // new - gray
       let badgeIcon = "leaf-outline";
       let badgeLabel = "Nuevo";
@@ -61,7 +113,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
       return (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
               <Ionicons name="person-circle-outline" size={16} color={theme.textMuted} />
-              <Text style={{ fontSize: 12, color: theme.textMuted }}>
+              <Text style={{ fontSize: 12, color: theme.textMuted, flex: 1 }} numberOfLines={1}>
                   {vehicle.userName || "Usuario"}
               </Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 2, backgroundColor: badgeColor + "20", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
@@ -85,24 +137,65 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
     >
       {horizontal ? (
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <Image
-            source={{ uri: imageUrl }}
-            style={{ width: compact ? 120 : 150, height: compact ? 90 : 110 }}
-            contentFit="cover"
-            transition={200}
-            onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
-          />
+          {Platform.OS === 'web' ? (
+            <View style={{ width: compact ? 120 : 150, height: compact ? 90 : 110, backgroundColor: '#f0f0f0', overflow: 'hidden' }}>
+              <RNImage
+                source={{ uri: imageUrl }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+                onError={(e) => console.log("Web Image Error (Horizontal):", imageUrl, e.nativeEvent)}
+              />
+            </View>
+          ) : (
+            <ExpoImage
+              source={{ uri: imageUrl }}
+              style={{ width: compact ? 120 : 150, height: compact ? 90 : 110 }}
+              contentFit="cover"
+              transition={200}
+              onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
+            />
+          )}
           <View style={{ flex: 1, padding: compact ? 10 : 12 }}>
-            <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700" }}>
-              {(vehicle.brand ?? "")} {(vehicle.model ?? "")}
-            </Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1 }}>
+                  {(vehicle.brand ?? "")} {(vehicle.model ?? "")}
+                </Text>
+                {!showEdit && vehicle.status !== 'sold' && Platform.OS !== 'web' && (
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {!hideCompare && (
+                    <TouchableOpacity 
+                      onPress={(e) => { e.stopPropagation(); toggleVehicle(vehicle); }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="git-compare-outline" size={20} color={selected ? theme.accent : theme.textMuted} />
+                    </TouchableOpacity>
+                    )}
+                    {!hideLike && (
+                      <TouchableOpacity
+                        disabled={likeDisabled}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onToggleLike && onToggleLike();
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons
+                          name={(liked ? "heart" : "heart-outline") as any}
+                          size={20}
+                          color={liked ? theme.favoriteButton : likeDisabled ? theme.textMuted : theme.textMuted}
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+            </View>
             {/* Seller Info for Horizontal Card */}
             {renderTrustBadge()}
             <Text style={{ color: theme.textMuted, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.year ?? ""} • {(vehicle.km != null ? vehicle.km.toLocaleString("es-AR") : "0")} km • {vehicle.fuelType || (vehicle as any).fuel || "Nafta"}
             </Text>
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
-              {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}
+              {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 6 : 8 }}>
               <Text style={{ color: theme.price, fontSize: compact ? 14 : 16, fontWeight: "700" }}>
@@ -143,13 +236,24 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
         </View>
       ) : (
         <>
-          <Image
-            source={{ uri: imageUrl }}
-            style={{ width: "100%", height: compact ? 130 : 200 }}
-            contentFit="cover"
-            transition={200}
-            onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
-          />
+          {Platform.OS === 'web' ? (
+            <View style={{ width: "100%", height: compact ? 130 : 200, backgroundColor: '#f0f0f0', overflow: 'hidden' }}>
+              <RNImage
+                source={{ uri: imageUrl }}
+                style={{ width: "100%", height: "100%" }}
+                resizeMode="cover"
+                onError={(e) => console.log("Web Image Error (Vertical):", imageUrl, e.nativeEvent)}
+              />
+            </View>
+          ) : (
+            <ExpoImage
+              source={{ uri: imageUrl }}
+              style={{ width: "100%", height: compact ? 130 : 200 }}
+              contentFit="cover"
+              transition={200}
+              onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
+            />
+          )}
           {vehicle.status === 'sold' && (
              <View style={{ 
                position: 'absolute', 
@@ -170,7 +274,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1, flexWrap: 'wrap' }}>
                 {(vehicle.brand ?? "")} {(vehicle.model ?? "")} {(vehicle.version ?? "")}
               </Text>
-               {vehicle.userPlan === 'pro_dealer' && (
+               {vehicle.userPlan && vehicle.userPlan.includes('pro_dealer') && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#9013FE', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 4, alignSelf: 'flex-start' }}>
                     <Ionicons name="checkmark-circle" size={10} color="#FFF" />
                     <Text style={{ fontSize: 9, color: '#FFF', fontWeight: '800' }}>AGENCIA</Text>
@@ -183,7 +287,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               {vehicle.year ?? ""} • {(vehicle.km != null ? vehicle.km.toLocaleString("es-AR") : "0")} km • {vehicle.fuelType || (vehicle as any).fuel || "Nafta"}
             </Text>
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
-              {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}
+              {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}
             </Text>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 6 : 8 }}>
               <Text style={{ color: theme.price, fontSize: compact ? 14 : 16, fontWeight: "700" }}>
@@ -250,7 +354,23 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
         </View>
       ) : (
         <View style={{ position: "absolute", top: 12, right: 12, flexDirection: "row", gap: 8 }}>
-          {!hideLike && (
+          {!showEdit && vehicle.status !== 'sold' && !horizontal && Platform.OS !== 'web' && !hideCompare && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={(e) => {
+                e.stopPropagation();
+                toggleVehicle(vehicle);
+              }}
+              style={{
+                backgroundColor: selected ? theme.accent : "#00000066",
+                borderRadius: 999,
+                padding: 6,
+              }}
+            >
+              <Ionicons name="git-compare-outline" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
+          {!hideLike && !horizontal && Platform.OS !== 'web' && (
             <TouchableOpacity
               activeOpacity={0.8}
               disabled={likeDisabled}

@@ -105,7 +105,7 @@ export default function BoostScreen() {
 
   // Precio a mostrar (mock si no hay paquete)
   const pkg = currentOffering?.availablePackages.find(p => p.identifier === "matchcars_boost_7days");
-  const priceString = pkg?.product.priceString || "USD $4.99";
+  const priceString = pkg?.product.priceString || "USD $2.99";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>

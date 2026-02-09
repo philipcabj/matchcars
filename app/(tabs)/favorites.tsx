@@ -1,6 +1,8 @@
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
@@ -9,7 +11,7 @@ import type { Vehicle } from "@/types/vehicle";
 import { useRouter } from "expo-router";
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function FavoritesTab() {
@@ -246,12 +248,18 @@ export default function FavoritesTab() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <Header />
-      <View style={{ padding: 16, flex: 1 }}>
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 }}>
-          <Text style={{ color: theme.textMuted }}>Te quedan {likesRemaining} likes hoy</Text>
-        </View>
-        {!user ? (
+      <WebContainer>
+        <Header />
+        <View style={{ padding: 16, flex: 1 }}>
+          {Platform.OS === 'web' && (
+            <View style={{ marginBottom: 16 }}>
+              <DownloadAppBanner message="Descargá la App para gestionar tus favoritos" />
+            </View>
+          )}
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 8 }}>
+            <Text style={{ color: theme.textMuted }}>Te quedan {likesRemaining} likes hoy</Text>
+          </View>
+          {!user ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
             <Text style={{ color: theme.text, fontSize: 16, textAlign: "center" }}>
               Para ver tus favoritos, iniciá sesión o registrate.
@@ -293,6 +301,7 @@ export default function FavoritesTab() {
         type={alertConfig.type}
         onClose={closeAlert}
       />
+      </WebContainer>
     </SafeAreaView>
   );
 }

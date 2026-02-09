@@ -1,10 +1,14 @@
 // app/(screens)/add-car.tsx
 import { CustomAlert } from "@/components/CustomAlert";
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { SelectionModal } from "@/components/SelectionModal";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { db, storage } from "@/lib/firebase";
+import { db, storage, vertexAI } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ResizeMode, Video } from "expo-av";
 import Constants from "expo-constants";
 import * as FileSystemLegacy from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -12,16 +16,18 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { addDoc, arrayUnion, collection, doc, getCountFromServer, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
+import { getGenerativeModel } from "firebase/vertexai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardTypeOptions } from "react-native";
 import {
-  Image,
-  Keyboard,
-  Platform,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Image,
+    Keyboard,
+    Platform,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -108,6 +114,17 @@ export default function AddCarScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
 
+  if (Platform.OS === 'web') {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <DownloadAppBanner message="Descargá la App para publicar tu auto" />
+          <TouchableOpacity onPress={() => router.replace("/(tabs)")} style={{ marginTop: 20, padding: 10 }}>
+              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>Volver al inicio</Text>
+          </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   const userId = user?.uid || "anon";
   const userName = (profile?.firstName && profile?.lastName) 
     ? `${profile.firstName} ${profile.lastName}`
@@ -129,8 +146,14 @@ export default function AddCarScreen() {
   const [coverLocalUri, setCoverLocalUri] = useState<string>("");
   const [coverUploading, setCoverUploading] = useState<boolean>(false);
   const [coverProgress, setCoverProgress] = useState<number>(0);
+
+  const [videoUri, setVideoUri] = useState("");
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+
   const [gallery, setGallery] = useState<{ localUri: string; base64?: string; url?: string; uploading: boolean; progress?: number }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingAI, setLoadingAI] = useState(false);
   
   const [makesRemote, setMakesRemote] = useState<string[]>([]);
   const [yearOpen, setYearOpen] = useState(false);
@@ -199,9 +222,141 @@ export default function AddCarScreen() {
   const [acceptsTradeIn, setAcceptsTradeIn] = useState(true); // Default true based on previous logic
   const priceSuggestion = usePriceSuggestion(brand, model, year, currency);
 
+  // Draft System
+  const DRAFT_KEY = `@add_car_draft_${user?.uid || "anon"}`;
+  const isRestoring = useRef(false);
+  
+  // Load draft on mount
+  useEffect(() => {
+    const checkDraft = async () => {
+        try {
+            const savedDraft = await AsyncStorage.getItem(DRAFT_KEY);
+            if (savedDraft) {
+                const draft = JSON.parse(savedDraft);
+                // Basic validation to ensure draft isn't empty
+                if (!draft.brand && !draft.coverLocalUri) {
+                   await AsyncStorage.removeItem(DRAFT_KEY);
+                   return;
+                }
+
+                showAlert(
+                    "Borrador encontrado",
+                    "Tenés una publicación sin terminar. ¿Querés continuarla?",
+                    "info",
+                    {
+                        showCancel: true,
+                        confirmText: "Continuar",
+                        cancelText: "Descartar",
+                        onConfirm: () => {
+                            console.log("Restoring draft for user:", user?.uid);
+                            isRestoring.current = true;
+                            
+                            // Restore all fields
+                            setBrand(draft.brand || "");
+                            setModel(draft.model || "");
+                            setVersion(draft.version || "");
+                            setYear(draft.year || "");
+                            setPrice(draft.price || "");
+                            setCurrency(draft.currency || "ARS");
+                            setKm(draft.km || "");
+                            setProvince(draft.province || "");
+                            setCity(draft.city || "");
+                            setCoverImage(draft.coverImage || "");
+                            setCoverLocalUri(draft.coverLocalUri || "");
+                            setGallery(draft.gallery || []);
+                            setFuelType(draft.fuelType || "");
+                            setGearbox(draft.gearbox || "");
+                            setAcceptsFinancing(draft.acceptsFinancing || false);
+                            setFinRate(draft.finRate || "");
+                            setFinMonths(draft.finMonths || "");
+                            setFinInitialPercent(draft.finInitialPercent || "");
+                            setSingleOwner(draft.singleOwner || false);
+                            setServiceRecords(draft.serviceRecords || false);
+                            setVtvValid(draft.vtvValid || false);
+                            setPapersUpToDate(draft.papersUpToDate || false);
+                            setWarranty(draft.warranty || false);
+                            setDetails(draft.details || "");
+                            setSellingReason(draft.sellingReason || "");
+                            setNegotiablePrice(draft.negotiablePrice || false);
+                            setImmediateDelivery(draft.immediateDelivery || false);
+                            setAcceptsTradeIn(draft.acceptsTradeIn ?? true);
+                            setVideoUri(draft.videoUri || "");
+                            
+                            // Load dependent lists if needed
+                            if (draft.brand) loadModels(draft.brand);
+                            
+                            // Allow auto-save again after state settles
+                            setTimeout(() => {
+                                isRestoring.current = false;
+                            }, 2000);
+                        },
+                        onCancel: async () => {
+                            console.log("Discarding draft...");
+                            try {
+                                await AsyncStorage.removeItem(DRAFT_KEY);
+                                // Force UI update/reset if needed, though state is already empty
+                                showAlert("Borrador eliminado", "Se ha descartado el borrador anterior.", "info");
+                            } catch (e) {
+                                console.error("Error discarding draft:", e);
+                            }
+                        }
+                    }
+                );
+            }
+        } catch (e) {
+            console.error("Error reading draft", e);
+        }
+    };
+    checkDraft();
+  }, [user?.uid]);
+
+  // Auto-save draft
+  useEffect(() => {
+    if (loading || isRestoring.current) return; // Don't save while publishing or restoring
+    
+    // Only save if at least brand is selected to avoid empty drafts on initial load
+    if (!brand && !coverLocalUri) return;
+
+    const saveDraft = async () => {
+        const draftData = {
+            brand, model, version, year, price, currency, km, province, city,
+            coverImage, coverLocalUri, gallery, fuelType, gearbox,
+            acceptsFinancing, finRate, finMonths, finInitialPercent,
+            singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
+            details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
+            videoUri
+        };
+        try {
+            await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
+        } catch (e) {
+            console.error("Error saving draft", e);
+        }
+    };
+    
+    const timeout = setTimeout(saveDraft, 1000); // Debounce 1s
+    return () => clearTimeout(timeout);
+  }, [
+    brand, model, version, year, price, currency, km, province, city,
+    coverImage, coverLocalUri, gallery, fuelType, gearbox,
+    acceptsFinancing, finRate, finMonths, finInitialPercent,
+    singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
+    details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
+    videoUri
+  ]);
+
+  // Clear draft on success (called in handlePublish)
+  const clearDraft = async () => {
+    try {
+        await AsyncStorage.removeItem(DRAFT_KEY);
+    } catch (e) {
+        console.error("Error clearing draft", e);
+    }
+  };
+
   const priceRef = useRef<TextInput>(null);
   const MODELS_AR: CarArItem[] = useMemo(() => Array.isArray(CAR_MODELS_AR) ? CAR_MODELS_AR : [], []);
 
+  const [successAction, setSuccessAction] = useState<(() => void) | null>(null);
   const [alertConfig, setAlertConfig] = useState<{ 
     visible: boolean; 
     title: string; 
@@ -211,8 +366,64 @@ export default function AddCarScreen() {
     onCancel?: () => void;
     confirmText?: string;
     cancelText?: string;
+    onConfirm?: () => void;
   }>({ visible: false, title: "", message: "", type: "info" });
-  const [successAction, setSuccessAction] = useState<(() => void) | null>(null);
+  
+  const showAlert = (
+    title: string, 
+    message: string, 
+    type: "error" | "success" | "info", 
+    arg4?: { 
+        showCancel?: boolean, 
+        confirmText?: string, 
+        cancelText?: string, 
+        onConfirm?: () => void, 
+        onCancel?: () => void 
+    } | (() => void),
+    arg5?: {
+        showCancel?: boolean, 
+        confirmText?: string, 
+        cancelText?: string, 
+        onConfirm?: () => void, 
+        onCancel?: () => void 
+    }
+  ) => {
+    let onConfirm: (() => void) | undefined;
+    let options: any = {};
+
+    if (typeof arg4 === 'function') {
+        onConfirm = arg4;
+        if (arg5 && typeof arg5 === 'object') {
+            options = arg5;
+        }
+    } else if (arg4 && typeof arg4 === 'object') {
+        options = arg4;
+        onConfirm = options.onConfirm;
+    }
+
+    setAlertConfig({ 
+        visible: true, 
+        title, 
+        message, 
+        type, 
+        showCancel: options?.showCancel, 
+        confirmText: options?.confirmText, 
+        cancelText: options?.cancelText, 
+        onConfirm: onConfirm, 
+        onCancel: options?.onCancel 
+    });
+  };
+
+  const handleConfirm = () => {
+      setAlertConfig(prev => ({ ...prev, visible: false }));
+      if (alertConfig.onConfirm) alertConfig.onConfirm();
+      else if (successAction) successAction();
+  };
+
+  const handleCancel = () => {
+      setAlertConfig(prev => ({ ...prev, visible: false }));
+      if (alertConfig.onCancel) alertConfig.onCancel();
+  };
 
   // Levenshtein distance for fuzzy matching
   const levenshteinDistance = (a: string, b: string): number => {
@@ -302,28 +513,7 @@ export default function AddCarScreen() {
     }
   };
 
-  const showAlert = (
-    title: string, 
-    message: string, 
-    type: "error" | "success" | "info" = "error", 
-    onOk?: () => void,
-    options?: { showCancel?: boolean; onCancel?: () => void; confirmText?: string; cancelText?: string }
-  ) => {
-    setSuccessAction(() => onOk || null);
-    setAlertConfig({ 
-      visible: true, 
-      title, 
-      message, 
-      type,
-      showCancel: options?.showCancel,
-      onCancel: () => {
-        if (options?.onCancel) options.onCancel();
-        setAlertConfig((prev) => ({ ...prev, visible: false }));
-      },
-      confirmText: options?.confirmText,
-      cancelText: options?.cancelText
-    });
-  };
+
 
   const hideAlert = () => {
     setAlertConfig((prev) => ({ ...prev, visible: false }));
@@ -543,14 +733,15 @@ export default function AddCarScreen() {
     blob?: Blob,
     base64?: string,
     onProgress?: (p: number) => void,
-    storagePath?: string
+    storagePath?: string,
+    contentType: string = "image/jpeg"
   ) => {
     if (blob) {
       try {
         console.log("Starting uploadBytesResumable to:", storageRef.fullPath);
         // Forzamos un objeto Blob nuevo para evitar problemas de tipos
         const cleanBlob = blob; // En Expo el blob ya viene bien del XHR
-        const task = uploadBytesResumable(storageRef, cleanBlob, { contentType: "image/jpeg" });
+        const task = uploadBytesResumable(storageRef, cleanBlob, { contentType });
         task.on("state_changed", (snap) => {
           if (onProgress) {
             const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
@@ -567,7 +758,7 @@ export default function AddCarScreen() {
         // fallback sin progreso
         try {
             console.log("Falling back to uploadBytes");
-            await uploadBytes(storageRef, blob, { contentType: "image/jpeg" });
+            await uploadBytes(storageRef, blob, { contentType });
             const url = await getDownloadURL(storageRef);
             if (onProgress) onProgress(100);
             return url;
@@ -585,7 +776,7 @@ export default function AddCarScreen() {
           const rnStorage = require("@react-native-firebase/storage").default;
           if (rnStorage && storagePath) {
             const nativeRef = rnStorage().ref(storagePath);
-            const task = nativeRef.putString(base64, "base64", { contentType: "image/jpeg" });
+            const task = nativeRef.putString(base64, "base64", { contentType });
             task.on("state_changed", (snap: any) => {
               if (onProgress) {
                 const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
@@ -598,14 +789,14 @@ export default function AddCarScreen() {
           }
         } catch {}
       }
-      const dataUrl = `data:image/jpeg;base64,${base64}`;
+      const dataUrl = `data:${contentType};base64,${base64}`;
       await uploadString(storageRef, dataUrl, "data_url");
       const url = await getDownloadURL(storageRef);
       if (onProgress) onProgress(100);
       return url;
     }
     if (!blob) throw new Error("No image content provided");
-    const task = uploadBytesResumable(storageRef, blob, { contentType: "image/jpeg" });
+    const task = uploadBytesResumable(storageRef, blob, { contentType });
     task.on("state_changed", (snap) => {
       if (onProgress) {
         const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
@@ -795,6 +986,101 @@ export default function AddCarScreen() {
     setGallery((prev) => prev.filter((_, i) => i !== index));
   };
 
+  async function pickVideoAndUpload() {
+    if (!user) return;
+    
+    // Check Plan
+    const plan = profile?.plan as string | undefined;
+    const isPro = plan?.includes('pro');
+    if (!isPro) {
+        showAlert("Función Premium", "El video walkaround es exclusivo para usuarios PRO. Suscribite para desbloquearlo.", "info", () => router.push("/(screens)/subscribe"));
+        return;
+    }
+
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      showAlert("Permiso requerido", "Necesitamos acceso a tu galería.", "info");
+      return;
+    }
+
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['videos'],
+      quality: 1, // Ignored for videos in some versions, but good practice
+      videoQuality: 1, // Medium quality (0=low, 1=medium, 2=high) - Reduces file size significantly
+      allowsMultipleSelection: false,
+    });
+
+    if (res.canceled || !res.assets?.[0]?.uri) return;
+
+    const asset = res.assets[0];
+    
+    // Check duration (limit to 60s for example) if possible, or size
+    if (asset.duration && asset.duration > 60000) {
+        showAlert("Video muy largo", "El video no puede durar más de 60 segundos.", "info");
+        return;
+    }
+
+    setVideoUploading(true);
+    setVideoProgress(0);
+
+    try {
+        let finalUri = asset.uri;
+
+        // Handle iOS ph:// assets (ensure we have a file:// URI)
+        if (Platform.OS === 'ios' && (finalUri.startsWith('ph://') || finalUri.startsWith('assets-library://'))) {
+             try {
+                 const cacheDir = FileSystemLegacy.cacheDirectory + 'video_temp/';
+                 const dirInfo = await FileSystemLegacy.getInfoAsync(cacheDir);
+                 if (!dirInfo.exists) {
+                     await FileSystemLegacy.makeDirectoryAsync(cacheDir, { intermediates: true });
+                 }
+                 const tempUri = cacheDir + `${Date.now()}.mp4`;
+                 await FileSystemLegacy.copyAsync({ from: finalUri, to: tempUri });
+                 finalUri = tempUri;
+             } catch (err) {
+                 console.log("Error handling iOS video asset:", err);
+             }
+        }
+
+        const blob = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.onload = function () {
+              resolve(xhr.response);
+            };
+            xhr.onerror = function (e) {
+              reject(new TypeError("Network request failed"));
+            };
+            xhr.responseType = "blob";
+            xhr.open("GET", finalUri, true);
+            xhr.send(null);
+        }) as Blob;
+
+        const filename = `${Date.now()}_video.mp4`;
+        const path = `uploads/${userId}/videos/${filename}`;
+        const storageRef = ref(storage, path);
+
+        const url = await uploadImage(
+            storageRef,
+            blob,
+            undefined,
+            (p) => setVideoProgress(p),
+            path,
+            "video/mp4"
+        );
+        setVideoUri(url);
+    } catch (e: any) {
+        console.error("Upload video error", e);
+        showAlert("Error", "No se pudo subir el video.", "error");
+    } finally {
+        setVideoUploading(false);
+    }
+  }
+
+  const removeVideo = () => {
+      setVideoUri("");
+      setVideoProgress(0);
+  };
+
   async function handleSubmit() {
     if (!user) {
       showAlert("Sesión requerida", "Iniciá sesión para publicar.", "info");
@@ -802,7 +1088,7 @@ export default function AddCarScreen() {
     }
 
     // Verificar límite para usuarios GRATUITOS
-    if (profile?.plan === 'free') {
+    if (!profile?.plan || profile.plan === 'free') {
       try {
         const q = query(collection(db, "vehicles"), where("userId", "==", userId));
         const snapshot = await getCountFromServer(q);
@@ -887,6 +1173,7 @@ export default function AddCarScreen() {
           cover: coverImage || "https://placehold.co/800x600?text=Auto",
           gallery: gallery.map((g) => g.url).filter(Boolean),
         },
+        video: videoUri || null,
         acceptsFinancing,
         negotiablePrice,
         immediateDelivery,
@@ -903,8 +1190,8 @@ export default function AddCarScreen() {
         published: false,
         status: "pending", // Moderation queue
         likedBy: [],
-        isFeatured: profile?.plan === 'pro_dealer',
-        featuredAt: profile?.plan === 'pro_dealer' ? serverTimestamp() : null,
+        isFeatured: profile?.plan?.includes('pro_dealer') || false,
+        featuredAt: profile?.plan?.includes('pro_dealer') ? serverTimestamp() : null,
         views: 0,
         likesCount: 0,
         flags: {
@@ -952,7 +1239,8 @@ export default function AddCarScreen() {
 
       // Actualizar nivel de confianza del usuario (por si pasa de Nuevo a Activo)
       await refreshTrustLevel();
-
+      await clearDraft();
+      
       showAlert("Publicación Pendiente", "Tu auto ha sido enviado a moderación. Te avisaremos cuando sea aprobado.", "success", () => router.push("/(tabs)/mycars"));
     } catch (e: any) {
       // console.error(e);
@@ -962,20 +1250,82 @@ export default function AddCarScreen() {
     }
   }
 
+  const generateDescription = async () => {
+    if (!brand || !model || !year || !km) {
+      showAlert("Faltan datos", "Completá marca, modelo, año y kilómetros para generar una descripción.", "info");
+      return;
+    }
+
+    setLoadingAI(true);
+    try {
+      const fuel = fuelType ? `motor ${fuelType.toLowerCase()}` : "";
+      const gear = gearbox ? `caja ${gearbox.toLowerCase()}` : "";
+      const extras = [
+        singleOwner ? "único dueño" : "",
+        serviceRecords ? "services oficiales" : "",
+        vtvValid ? "VTV al día" : "",
+        papersUpToDate ? "papeles al día" : "",
+        warranty ? "en garantía" : "",
+        acceptsFinancing ? "acepta financiación" : "",
+      ].filter(Boolean).join(", ");
+
+      const prompt = `
+        Actúa como un vendedor de autos experto. Escribe una descripción de venta atractiva y profesional para este vehículo, usando español de Argentina.
+        
+        Datos del auto:
+        - Marca: ${brand}
+        - Modelo: ${model} ${version || ""}
+        - Año: ${year}
+        - Kilómetros: ${Number(km).toLocaleString("es-AR")} km
+        - Ubicación: ${city ? city + ", " : ""}${province || ""}
+        - Precio: ${currency} ${Number(price).toLocaleString("es-AR")}
+        ${fuel ? `- ${fuel}` : ""}
+        ${gear ? `- ${gear}` : ""}
+        ${extras ? `- Destacados: ${extras}` : ""}
+        
+        Instrucciones:
+        1. Sé persuasivo pero honesto.
+        2. Resalta los puntos fuertes (km, estado, documentación).
+        3. Usa un tono cercano pero profesional.
+        4. No pongas títulos como "Descripción:" ni saludos iniciales.
+        5. Máximo 2 párrafos cortos.
+      `;
+
+      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-1.5-flash" });
+      const result = await modelAI.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      
+      setDetails(text.trim());
+    } catch (error: any) {
+      console.error("Error generando descripción con IA:", error);
+      const msg = error.message || (typeof error === 'string' ? error : "Intenta nuevamente.");
+      showAlert("Error", `No se pudo generar la descripción. ${msg}`, "error");
+    } finally {
+      setLoadingAI(false);
+    }
+  };
+
   const canSubmit = !loading && !coverUploading && gallery.every((g) => !g.uploading) && !!brand && !!model && !!year && !!price;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-      <KeyboardAwareScrollView 
-        style={{ flex: 1 }} 
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 }}
-        keyboardShouldPersistTaps="handled"
-        enableOnAndroid={true}
-        extraScrollHeight={Platform.OS === "ios" ? 100 : 0}
-        enableAutomaticScroll={true}
-        keyboardDismissMode="on-drag"
-      >
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+      <WebContainer>
+        <KeyboardAwareScrollView 
+          style={{ flex: 1 }} 
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 }}
+          keyboardShouldPersistTaps="handled"
+          enableOnAndroid={true}
+          extraScrollHeight={Platform.OS === "ios" ? 100 : 0}
+          enableAutomaticScroll={true}
+          keyboardDismissMode="on-drag"
+        >
+            {Platform.OS === ('web' as any) && (
+              <View style={{ marginBottom: 16 }}>
+                <DownloadAppBanner message="Descargá la App para publicar más fácil y subir fotos desde tu celular" />
+              </View>
+            )}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <TouchableOpacity onPress={() => { Keyboard.dismiss(); router.back(); }} activeOpacity={0.8} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <Ionicons name={"arrow-back" as any} size={22} color={theme.text} />
               <Text style={{ color: theme.text, fontWeight: "700" }}>Volver</Text>
@@ -1145,7 +1495,23 @@ export default function AddCarScreen() {
             />
 
             <View style={{ marginBottom: 12 }}>
-              <Text style={{ color: theme.text, marginBottom: 4, fontSize: 14 }}>Detalles</Text>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <Text style={{ color: theme.text, fontSize: 14 }}>Detalles</Text>
+                <TouchableOpacity 
+                    onPress={generateDescription}
+                    disabled={loadingAI}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.accent + "20", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}
+                >
+                    {loadingAI ? (
+                        <ActivityIndicator size="small" color={theme.accent} />
+                    ) : (
+                        <Ionicons name="sparkles" size={12} color={theme.accent} />
+                    )}
+                    <Text style={{ color: theme.accent, fontSize: 10, fontWeight: "700" }}>
+                        {loadingAI ? "Generando..." : "Generar con IA"}
+                    </Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 value={details}
                 onChangeText={setDetails}
@@ -1517,6 +1883,62 @@ export default function AddCarScreen() {
                 ))}
               </View>
             </View>
+
+            {/* Video Walkaround Section */}
+            <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: theme.likeBoxBackground, paddingTop: 16 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={{ color: theme.text, fontSize: 15, fontWeight: "600" }}>Video Walkaround</Text>
+                    {!videoUri && (
+                         <View style={{ backgroundColor: theme.badgeBackground, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}>
+                            <Text style={{ color: theme.accent, fontSize: 10, fontWeight: "700" }}>PRO</Text>
+                        </View>
+                    )}
+                </View>
+                
+                {!videoUri ? (
+                <TouchableOpacity
+                    onPress={pickVideoAndUpload}
+                    disabled={videoUploading}
+                    style={{
+                        borderWidth: 1,
+                        borderColor: theme.likeBoxBackground,
+                        borderStyle: 'dashed',
+                        backgroundColor: theme.inputBackground,
+                        paddingVertical: 24,
+                        alignItems: 'center',
+                        borderRadius: 10,
+                    }}
+                >
+                    {videoUploading ? (
+                         <ActivityIndicator size="large" color={theme.accent} />
+                    ) : (
+                         <Ionicons name="videocam-outline" size={32} color={theme.textMuted} />
+                    )}
+                    <Text style={{ color: theme.textMuted, marginTop: 8, fontWeight: "500" }}>
+                        {videoUploading ? `Subiendo video... ${videoProgress}%` : "Subir video (máx 60s)"}
+                    </Text>
+                </TouchableOpacity>
+            ) : (
+                <View style={{ width: '100%', height: 200, borderRadius: 10, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+                     <Video
+                        source={{ uri: videoUri }}
+                        style={{ width: '100%', height: '100%' }}
+                        useNativeControls
+                        resizeMode={ResizeMode.COVER}
+                        isLooping={false}
+                        shouldPlay={true}
+                        isMuted={true}
+                     />
+                     
+                     <TouchableOpacity 
+                        onPress={removeVideo}
+                        style={{ position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 4, zIndex: 10 }}
+                    >
+                        <Ionicons name="close" size={20} color="#FFF" />
+                    </TouchableOpacity>
+                </View>
+            )}
+            </View>
           </View>
 
 
@@ -1572,16 +1994,17 @@ export default function AddCarScreen() {
           </View>
         ) : null}
         </KeyboardAwareScrollView>
+      </WebContainer>
       <CustomAlert
         visible={alertConfig.visible}
         title={alertConfig.title}
         message={alertConfig.message}
         type={alertConfig.type}
         showCancel={alertConfig.showCancel}
-        onCancel={alertConfig.onCancel}
+        onCancel={handleCancel}
         confirmText={alertConfig.confirmText}
         cancelText={alertConfig.cancelText}
-        onClose={hideAlert}
+        onClose={handleConfirm}
       />
     </SafeAreaView>
   );
