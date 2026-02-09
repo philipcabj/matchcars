@@ -6,6 +6,8 @@ import { Linking, Platform, Text, TouchableOpacity, View } from 'react-native';
 export const DownloadAppBanner = ({ compact = false, message = "Para contactar al vendedor", floating = false }: { compact?: boolean, message?: string, floating?: boolean }) => {
   const { theme } = useTheme();
 
+  if (Platform.OS === 'web' && !floating) return null;
+
   const openStore = () => {
     // Replace with your actual store links
     const androidUrl = 'https://play.google.com/store/apps/details?id=com.matchcars.app';
