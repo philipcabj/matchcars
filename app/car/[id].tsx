@@ -1190,6 +1190,7 @@ export default function CarDetailsScreen() {
         </View>
       ) : null}
 
+      {Platform.OS !== 'web' && (
       <TouchableOpacity
         onPress={() => router.push({ pathname: "/report/[id]", params: { id: vehicle.id, type: "vehicle" } })}
         style={{ marginTop: 24, alignSelf: "center", padding: 8 }}
@@ -1198,6 +1199,7 @@ export default function CarDetailsScreen() {
           Reportar publicación
         </Text>
       </TouchableOpacity>
+      )}
     </View>
   );
   };
