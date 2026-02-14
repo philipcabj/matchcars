@@ -95,7 +95,6 @@ export default function ProfileScreen() {
 
   const scrollToTransactions = (tab: "purchases" | "sales") => {
     setActiveTab(tab);
-    console.log("Attempting to scroll to transactions. Y:", transactionsY);
     if (scrollViewRef.current && transactionsY > 0) {
         // Scroll with offset to ensure header visibility
         scrollViewRef.current.scrollTo({ y: transactionsY - 100, animated: true }); 
@@ -980,6 +979,29 @@ export default function ProfileScreen() {
               >
                 <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Favoritos</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.push("/(screens)/recently-viewed" as any)}
+                style={{ backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
+              >
+                <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Historial</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+onPress={() => router.push("/(screens)/alerts" as any)}
+                style={{ backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
+              >
+                <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Alertas</Text>
+              </TouchableOpacity>
+
+              {(profile?.plan?.includes("pro_dealer") || profile?.role === "admin") && (
+                  <TouchableOpacity
+                    onPress={() => router.push("/(screens)/bulk-import" as any)}
+                    style={{ backgroundColor: theme.accent, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
+                  >
+                    <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Importar Stock</Text>
+                  </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>

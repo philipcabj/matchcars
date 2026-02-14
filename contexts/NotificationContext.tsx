@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 
@@ -7,6 +7,7 @@ type NotificationContextType = {
   unreadMessagesCount: number;
   unreadLikesCount: number; // For "Interesados"
   unreadMatchesCount: number; // For "Matches"
+  unreadPriceAlertsCount: number; // For "Alertas"
   totalUnreadCount: number;
   markNotificationsAsSeen: () => Promise<void>; // Deprecated or mapped to markAsRead
   markNotificationsAsRead: () => Promise<void>; // New: updates notificationsReadAt
@@ -21,6 +22,7 @@ const NotificationContext = createContext<NotificationContextType>({
   unreadMessagesCount: 0,
   unreadLikesCount: 0,
   unreadMatchesCount: 0,
+  unreadPriceAlertsCount: 0,
   totalUnreadCount: 0,
   markNotificationsAsSeen: async () => {},
   markNotificationsAsRead: async () => {},
@@ -36,6 +38,7 @@ export const useNotifications = () => useContext(NotificationContext);
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const [unreadPriceAlertsCount, setUnreadPriceAlertsCount] = useState(0);
   // Removed explicit state for derived counts to avoid redeclaration error
   const [totalLikesCount, setTotalLikesCount] = useState(0);
   const [totalMatchesCount, setTotalMatchesCount] = useState(0);
@@ -77,7 +80,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const q = query(collection(db, "conversations"), where("members", "array-contains", user.uid));
     const unsub = onSnapshot(q, (snap) => {
       let count = 0;
-      snap.forEach((d) => {
+      snap.forEach((d: any) => {
         const data = d.data() as any;
         if (data.deletedBy && Array.isArray(data.deletedBy) && data.deletedBy.includes(user.uid)) return;
 
@@ -89,6 +92,22 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       });
       setUnreadMessagesCount(count);
     }, () => setUnreadMessagesCount(0));
+    return () => unsub();
+  }, [user]);
+
+  // 4. Listen to Price Alert Notifications
+  useEffect(() => {
+    if (!user) {
+        setUnreadPriceAlertsCount(0);
+        return;
+    }
+    const q = query(
+        collection(db, "users", user.uid, "price_alert_notifications"),
+        where("read", "==", false)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+        setUnreadPriceAlertsCount(snap.size);
+    });
     return () => unsub();
   }, [user]);
 
@@ -105,7 +124,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const favRef = collection(db, "users", user.uid, "favorites");
     const unsubFav = onSnapshot(favRef, (snap) => {
       const owners = new Map<string, Set<string>>();
-      snap.forEach((d) => {
+      snap.forEach((d: any) => {
         const data = d.data() as any;
         const ownerUid = data?.vehicleOwnerId;
         const vid = data?.vehicleId || d.id;
@@ -128,7 +147,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         const likers = new Map<string, Set<string>>();
         let likesCount = 0;
         
-        snap.forEach((d) => {
+        snap.forEach((d: any) => {
             const data: any = d.data();
             const likedBy: string[] = Array.isArray(data?.likedBy) ? data.likedBy : [];
             // Filter out self-likes just in case, though UI prevents it
@@ -178,8 +197,20 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const markNotificationsAsRead = async () => {
     if (!user) return;
     try {
+      // 1. Update global timestamp
       await setDoc(doc(db, "users", user.uid), { notificationsLastSeenAt: serverTimestamp() }, { merge: true });
       setLastSeenAt({ toMillis: () => Date.now() }); 
+      
+      // 2. Mark all unread price alerts as read
+      const q = query(collection(db, "users", user.uid, "price_alert_notifications"), where("read", "==", false));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+          const batch = writeBatch(db);
+          snap.forEach((d: any) => {
+              batch.update(d.ref, { read: true });
+          });
+          await batch.commit();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -219,13 +250,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const unreadLikesCount = Math.max(0, totalLikesCount - seenLikesCount);
   const unreadMatchesCount = Math.max(0, totalMatchesCount - seenMatchesCount);
   
-  const totalUnreadCount = unreadMessagesCount + unreadLikesCount + unreadMatchesCount;
+  const totalUnreadCount = unreadMessagesCount + unreadLikesCount + unreadMatchesCount + unreadPriceAlertsCount;
 
   return (
     <NotificationContext.Provider value={{
       unreadMessagesCount,
       unreadLikesCount,
       unreadMatchesCount,
+      unreadPriceAlertsCount,
       totalUnreadCount,
       markNotificationsAsSeen,
       markNotificationsAsRead,

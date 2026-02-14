@@ -28,10 +28,13 @@ export interface Theme {
   favoriteButtonDefault: string;
   removeButton: string;
   badgeBackground: string;
+  badgeText: string;
   badgeBorder: string;
   subtext: string;
   error: string;
+  success: string;
   input: string;
+  border: string;
   statusBarStyle: "light-content" | "dark-content";
 }
 
@@ -64,10 +67,13 @@ export const darkTheme: Theme = {
   favoriteButtonDefault: "#4B5563",
   removeButton: "#EF4444",
   badgeBackground: "#1F2933",
+  badgeText: "#F97316",
   badgeBorder: "#4B5563",
   subtext: "#9CA3AF",
   error: "#F87171",
+  success: "#4ADE80",
   input: "#111827",
+  border: "#1F2933",
   statusBarStyle: "light-content",
 };
 
@@ -100,9 +106,12 @@ export const lightTheme: Theme = {
   favoriteButtonDefault: "#6B7280",
   removeButton: "#DC2626",
   badgeBackground: "#E5E7EB",
+  badgeText: "#1F2933",
   badgeBorder: "#9CA3AF",
   subtext: "#6B7280",
   error: "#B91C1C",
+  success: "#22C55E",
   input: "#FFFFFF",
+  border: "#E5E7EB",
   statusBarStyle: "dark-content",
 };

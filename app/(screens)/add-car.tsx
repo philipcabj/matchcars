@@ -14,7 +14,7 @@ import * as FileSystemLegacy from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { addDoc, arrayUnion, collection, doc, getCountFromServer, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
 import { getGenerativeModel } from "firebase/vertexai";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -989,10 +989,11 @@ export default function AddCarScreen() {
   async function pickVideoAndUpload() {
     if (!user) return;
     
-    // Check Plan
-    const plan = profile?.plan as string | undefined;
-    const isPro = plan?.includes('pro');
-    if (!isPro) {
+    // Check Plan for Video
+    const plan = profile?.plan || 'free';
+    const hasVideoAccess = ['pro', 'pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => plan.startsWith(p));
+    
+    if (!hasVideoAccess) {
         showAlert("Función Premium", "El video walkaround es exclusivo para usuarios PRO. Suscribite para desbloquearlo.", "info", () => router.push("/(screens)/subscribe"));
         return;
     }
@@ -1004,7 +1005,7 @@ export default function AddCarScreen() {
     }
 
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['videos'],
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       quality: 1, // Ignored for videos in some versions, but good practice
       videoQuality: 1, // Medium quality (0=low, 1=medium, 2=high) - Reduces file size significantly
       allowsMultipleSelection: false,
@@ -1087,16 +1088,46 @@ export default function AddCarScreen() {
       return;
     }
 
-    // Verificar límite para usuarios GRATUITOS
-    if (!profile?.plan || profile.plan === 'free') {
+    // Verificar límites de publicación según plan
+    const plan = profile?.plan || 'free';
+    let limit = 1; // Default Free
+    
+    if (plan.includes('dealer_pro_plus')) limit = Infinity;
+    else if (plan.includes('pro_dealer')) limit = 30;
+    else if (plan.includes('pro_plus')) limit = 7;
+    else if (plan.includes('pro')) limit = 3;
+
+    if (limit !== Infinity) {
       try {
-        const q = query(collection(db, "vehicles"), where("userId", "==", userId));
-        const snapshot = await getCountFromServer(q);
-        const count = snapshot.data().count;
-        if (count >= 2) {
+        // Count ACTIVE vehicles (not rejected/deleted)
+        // We filter by status != 'deleted' to be safe, though usually we might just count all non-deleted
+        const q = query(
+            collection(db, "vehicles"), 
+            where("userId", "==", userId),
+            where("status", "!=", "deleted") 
+        );
+        // Note: Firestore requires an index for != queries sometimes, or we can just count all and filter client side if small number, 
+        // but getCountFromServer is efficient. 
+        // Safer approach for now: Count all documents for user that are NOT deleted. 
+        // However, 'status' field might be 'published', 'paused', 'sold', 'pending'. 
+        // Let's assume we count all except 'deleted' or 'rejected'? 
+        // User said "Autos activos". Usually means 'published' + 'pending' + 'paused' (occupying a slot). 
+        // Let's count everything that is not 'deleted' and not 'rejected'.
+        // Simplified: Count all docs where userId == uid. Then subtract deleted? 
+        // Actually, let's just use the existing logic but with correct limits.
+        
+        // Use a simpler query to avoid complex index requirements if possible
+        const qAll = query(collection(db, "vehicles"), where("userId", "==", userId));
+        const snapshot = await getDocs(qAll);
+        const activeCount = snapshot.docs.filter(d => {
+            const data = d.data();
+            return data.status !== 'deleted' && data.status !== 'rejected';
+        }).length;
+
+        if (activeCount >= limit) {
           showAlert(
             "Límite alcanzado", 
-            "Tu plan gratuito solo permite 2 autos. Pasate a PRO para ilimitados.", 
+            `Tu plan actual permite hasta ${limit} autos activos. Tenés ${activeCount}. Actualizá tu plan para publicar más.`, 
             "info",
             () => router.push("/(screens)/subscribe")
           );
@@ -1104,7 +1135,7 @@ export default function AddCarScreen() {
         }
       } catch (e) {
         console.error("Error checking limit", e);
-        // Fail open (allow posting if check fails)
+        // Fail open or closed? Let's log and maybe allow if it's a transient error, but better to be safe.
       }
     }
 
@@ -1291,7 +1322,7 @@ export default function AddCarScreen() {
         5. Máximo 2 párrafos cortos.
       `;
 
-      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-1.5-flash" });
+      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-2.0-flash" });
       const result = await modelAI.generateContent(prompt);
       const response = result.response;
       const text = response.text();
@@ -1300,7 +1331,16 @@ export default function AddCarScreen() {
     } catch (error: any) {
       console.error("Error generando descripción con IA:", error);
       const msg = error.message || (typeof error === 'string' ? error : "Intenta nuevamente.");
-      showAlert("Error", `No se pudo generar la descripción. ${msg}`, "error");
+      
+      if (msg.includes("AI/api-not-enabled") || msg.includes("Firebase AI API")) {
+        showAlert(
+          "API No Habilitada", 
+          "La API de Inteligencia Artificial no está habilitada en Firebase. Por favor, contactá al administrador para habilitar 'Vertex AI in Firebase'.", 
+          "error"
+        );
+      } else {
+        showAlert("Error", `No se pudo generar la descripción. ${msg}`, "error");
+      }
     } finally {
       setLoadingAI(false);
     }

@@ -377,11 +377,27 @@ export default function MessagesTab() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : chats.length === 0 ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32 }}>
-            <Ionicons name="chatbubbles-outline" size={64} color={theme.textMuted} />
-            <Text style={{ color: theme.textMuted, marginTop: 16, textAlign: "center" }}>
-              No tenés conversaciones activas.
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
+            <Ionicons name="chatbubbles-outline" size={64} color={theme.textMuted} style={{ marginBottom: 16, opacity: 0.5 }} />
+            <Text style={{ color: theme.text, fontSize: 18, fontWeight: "600", marginBottom: 8, textAlign: "center" }}>
+              No tenés conversaciones
             </Text>
+            <Text style={{ color: theme.textMuted, textAlign: "center", marginBottom: 24, fontSize: 14, lineHeight: 20 }}>
+              Cuando te interese un auto, contactá al vendedor y tus chats aparecerán acá.
+            </Text>
+            <TouchableOpacity 
+              onPress={() => router.push("/")}
+              style={{ 
+                backgroundColor: theme.accent, 
+                paddingVertical: 12, 
+                paddingHorizontal: 24, 
+                borderRadius: 999 
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+                Buscar autos
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <FlatList

@@ -8,6 +8,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { sendNotificationEmail } from "@/lib/mail";
 import type { Vehicle } from "@/types/vehicle";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
@@ -278,7 +279,28 @@ export default function FavoritesTab() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : favVehicles.length === 0 ? (
-          <Text style={{ color: theme.textMuted }}>Todavía no tenés favoritos.</Text>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
+            <Ionicons name="heart-outline" size={64} color={theme.textMuted} style={{ marginBottom: 16, opacity: 0.5 }} />
+            <Text style={{ color: theme.text, fontSize: 18, fontWeight: "600", marginBottom: 8, textAlign: "center" }}>
+              Todavía no tenés favoritos
+            </Text>
+            <Text style={{ color: theme.textMuted, textAlign: "center", marginBottom: 24, fontSize: 14, lineHeight: 20 }}>
+              Guardá los autos que más te gusten para compararlos o verlos más tarde.
+            </Text>
+            <TouchableOpacity 
+              onPress={() => router.push("/")}
+              style={{ 
+                backgroundColor: theme.accent, 
+                paddingVertical: 12, 
+                paddingHorizontal: 24, 
+                borderRadius: 999 
+              }}
+            >
+              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
+                Explorar autos
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <FlatList
             data={favVehicles}

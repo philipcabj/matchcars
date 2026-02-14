@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 type PlanDefinition = {
   id: string; // Base ID (e.g., 'pro', 'pro_plus')
   title: string;
+  subtitle?: string; // e.g. "Recomendado", "Para agencias"
   features: string[];
   color: string;
   recommended?: boolean;
@@ -22,44 +23,47 @@ type PlanDefinition = {
   fallbackPriceMonthly: number;
   fallbackPriceAnnual: number;
   hasTrial?: boolean;
+  comingSoon?: boolean; // New flag for future plans
 };
 
 const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro",
-    title: "PRO",
+    title: "Plan PRO",
+    subtitle: "Ideal para vendedores particulares activos",
     packageIdMonthly: "matchcars_pro_mensual",
     packageIdAnnual: "matchcars_pro_anual",
-    fallbackPriceMonthly: 4.99,
-    fallbackPriceAnnual: 34.99,
+    fallbackPriceMonthly: 9.99,
+    fallbackPriceAnnual: 79.99,
     features: [
-      "⭐ 3 destacados por mes (7 días c/u)",
+      "🚗 Hasta 3 autos activos simultáneamente",
+      "⭐ 2 destacados por mes (7 días c/u)",
       "🚀 Posicionamiento mejorado",
-      "📊 Vistas y Likes en tus autos",
+      "📊 Métricas básicas (Vistas y Likes)",
       "🏷️ Badge PRO",
       "📹 Video Walkaround",
-      "🚗 Autos ilimitados",
     ],
     color: "#4A90E2",
     hasTrial: true,
   },
   {
     id: "pro_plus",
-    title: "PRO Plus",
+    title: "Plan PRO Plus",
+    subtitle: "Para quienes quieren vender más rápido",
     packageIdMonthly: "matchcars_pro_plus_mensual",
     packageIdAnnual: "matchcars_pro_plus_anual",
-    fallbackPriceMonthly: 9.99,
-    fallbackPriceAnnual: 69.99,
+    fallbackPriceMonthly: 19.99,
+    fallbackPriceAnnual: 169.99,
     features: [
-      "⭐ 6 destacados por mes (7 días c/u)",
-      "🚀 Posicionamiento + Fines de semana",
+      "🚗 Hasta 7 autos activos simultáneamente",
+      "⭐ 5 destacados por mes (7 días c/u)",
+      "🚀 Boost automático los fines de semana",
       "📈 Análisis de Precio de Mercado",
-      "📄 Ficha PDF con QR para imprimir",
-      "📊 Vistas y Likes",
-      "🏷️ Badge PRO",
-      "📹 Video Walkaround",
+      "📄 Ficha PDF con QR",
       "📩 Contacto prioritario",
-      "🚗 Autos ilimitados",
+      "🔔 Alertas de interesados en tiempo real",
+      "📹 Video Walkaround",
+      "🏷️ Badge PRO",
     ],
     color: "#50E3C2",
     recommended: true,
@@ -67,25 +71,44 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   },
   {
     id: "pro_dealer",
-    title: "PRO Dealer",
+    title: "Plan PRO Dealer",
+    subtitle: "Solución profesional para Agencias",
     packageIdMonthly: "matchcars_dealer_mensual",
     packageIdAnnual: "matchcars_dealer_anual",
-    fallbackPriceMonthly: 19.99,
-    fallbackPriceAnnual: 143.99,
+    fallbackPriceMonthly: 59.99,
+    fallbackPriceAnnual: 499.99,
     features: [
-      "⭐ Destacados ilimitados (7 días c/u)",
+      "🚗 Hasta 30 autos activos simultáneamente",
+      "⭐ Destacados ilimitados (en stock activo)",
+      "💻 Acceso Web y Carga Masiva (CSV)",
       "🚀 Posicionamiento Máximo",
-      "📈 Análisis de Precio y Sugerencias",
-      "📊 Reportes de Rendimiento",
-      "📄 Ficha PDF con QR para imprimir",
       "✅ Badge Agencia Verificada",
-      "📹 Video Walkaround",
+      "📊 Reportes avanzados de rendimiento",
       "👥 Gestión multi-auto",
-      "📩 Contacto prioritario",
-      "🚗 Autos ilimitados",
+      "📞 Soporte prioritario",
+      "📹 Video Walkaround",
     ],
     color: "#9013FE",
     hasTrial: true,
+  },
+  {
+    id: "dealer_pro_plus",
+    title: "Dealer PRO Plus",
+    subtitle: "Para agencias con alto volumen (Opcional)",
+    packageIdMonthly: "matchcars_dealer_pro_plus_mensual",
+    packageIdAnnual: "matchcars_dealer_pro_plus_anual",
+    fallbackPriceMonthly: 99,
+    fallbackPriceAnnual: 899,
+    features: [
+      "🚗 Autos activos ilimitados",
+      "🚀 Prioridad absoluta en resultados",
+      "📈 Estadísticas de mercado por zona",
+      "🏠 Presencia destacada en Home",
+      "📢 Mayor visibilidad en notificaciones",
+    ],
+    color: "#555555",
+    comingSoon: true,
+    hasTrial: false,
   },
 ];
 
@@ -369,41 +392,50 @@ export default function SubscribeScreen() {
             const period = billingCycle === "monthly" ? "/ mes" : "/ año";
             
             // Si es admin, siempre habilitado. Si es usuario, depende de si hay paquete RC.
-            const isButtonEnabled = isAdmin || !!rcPackage;
+            // Para "Coming Soon", deshabilitamos.
+            const isButtonEnabled = (isAdmin || !!rcPackage) && !planDef.comingSoon;
             
             // Decidir si mostramos el badge de trial
             // Mostramos si RevenueCat dice que hay trial, O si estamos en modo fallback y la definición dice que hay trial
             const showTrialBadge = hasFreeTrial || (!rcPackage && planDef.hasTrial);
 
+            const isCurrentPlan = profile?.plan?.startsWith(planDef.id);
+
             return (
-              <View
-                key={planDef.id}
-                style={{
-                  backgroundColor: theme.card,
-                  borderRadius: 16,
-                  borderWidth: 2,
-                  borderColor: planDef.recommended ? planDef.color : "transparent",
-                  overflow: "hidden",
-                  elevation: 4,
-                  shadowColor: "#000",
-                  shadowOpacity: 0.1,
-                  shadowRadius: 8,
-                  shadowOffset: { width: 0, height: 4 },
-                  opacity: isButtonEnabled ? 1 : 0.6, 
+              <View 
+                key={planDef.id} 
+                style={{ 
+                  backgroundColor: theme.card, 
+                  borderRadius: 24, 
+                  padding: 24, 
+                  borderWidth: isCurrentPlan ? 2 : 1, 
+                  borderColor: isCurrentPlan ? planDef.color : theme.badgeBorder,
+                  position: "relative",
+                  opacity: planDef.comingSoon ? 0.7 : 1,
                 }}
               >
                 {planDef.recommended && (
-                  <View style={{ backgroundColor: planDef.color, paddingVertical: 4, alignItems: "center" }}>
-                    <Text style={{ color: "#000", fontSize: 12, fontWeight: "800", textTransform: "uppercase" }}>
-                      Recomendado
-                    </Text>
+                  <View style={{ position: "absolute", top: -12, right: 24, backgroundColor: planDef.color, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>RECOMENDADO</Text>
                   </View>
                 )}
-                <View style={{ padding: 20 }}>
-                  <Text style={{ color: planDef.color, fontSize: 14, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>
+                
+                {planDef.comingSoon && (
+                  <View style={{ position: "absolute", top: -12, right: 24, backgroundColor: "#555", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
+                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>PRÓXIMAMENTE</Text>
+                  </View>
+                )}
+
+                <View>
+                  <Text style={{ color: planDef.color, fontWeight: "800", fontSize: 24, textTransform: "uppercase" }}>
                     {planDef.title}
                   </Text>
-                  {showTrialBadge && (
+                  {planDef.subtitle && (
+                    <Text style={{ color: theme.textMuted, fontSize: 14, marginTop: 4 }}>
+                      {planDef.subtitle}
+                    </Text>
+                  )}
+                  {showTrialBadge && !planDef.comingSoon && (
                     <View style={{ alignSelf: "flex-start", marginTop: 4, backgroundColor: "#E8F5E9", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
                         <Text style={{ color: "#2E7D32", fontSize: 10, fontWeight: "700" }}>
                             PRUEBA {hasFreeTrial ? trialDurationText.toUpperCase() : "7 DÍAS"} GRATIS
@@ -413,13 +445,15 @@ export default function SubscribeScreen() {
                   <View style={{ marginTop: 4 }}>
                       <View style={{ flexDirection: "row", alignItems: "baseline" }}>
                         <Text style={{ color: theme.text, fontSize: 28, fontWeight: "800" }}>
-                          {priceString}
+                          {planDef.comingSoon ? "Consultar" : priceString}
                         </Text>
-                        <Text style={{ color: theme.textMuted, fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
-                          {period}
-                        </Text>
+                        {!planDef.comingSoon && (
+                          <Text style={{ color: theme.textMuted, fontSize: 14, fontWeight: "600", marginLeft: 4 }}>
+                            {period}
+                          </Text>
+                        )}
                       </View>
-                      {showTrialBadge && (
+                      {showTrialBadge && !planDef.comingSoon && (
                           <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
                               Después de la prueba, se renovará automáticamente.
                           </Text>
@@ -450,12 +484,14 @@ export default function SubscribeScreen() {
                         <ActivityIndicator color="#FFF" />
                     ) : (
                         <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 16 }}>
-                        {!isButtonEnabled 
-                            ? "No disponible" 
-                            : (isAdmin 
-                                ? "Asignar Gratis (Admin)" 
-                                : (showTrialBadge ? "Comenzar Prueba Gratis" : "Suscribirme")
-                              )
+                        {planDef.comingSoon 
+                           ? "Próximamente"
+                           : !isButtonEnabled 
+                             ? "No disponible" 
+                             : (isAdmin 
+                                 ? "Asignar Gratis (Admin)" 
+                                 : (showTrialBadge ? "Comenzar Prueba Gratis" : "Suscribirme")
+                               )
                         }
                         </Text>
                     )}

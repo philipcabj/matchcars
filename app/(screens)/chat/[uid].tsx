@@ -250,14 +250,7 @@ export default function ChatWithUserScreen() {
         // Mark as read by current user when entering
         commonData.readBy = arrayUnion(user.uid);
 
-        if (!cSnap.exists()) {
-          await setDoc(cRef, { 
-            ...commonData, 
-            createdAt: serverTimestamp(),
-            // When creating, only I have read it (implicitly)
-            readBy: [user.uid]
-          });
-        } else {
+        if (cSnap.exists()) {
           const data = cSnap.data() as any;
           const members: string[] = Array.isArray(data?.members) ? data.members : [];
           const ensureMembers = Array.from(new Set([...(members || []), user.uid, peerUid]));

@@ -5,7 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
-import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Linking, Modal, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -196,6 +196,8 @@ export default function AdminDashboardScreen() {
   const [rejectionModalVisible, setRejectionModalVisible] = useState(false);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [processingRejection, setProcessingRejection] = useState(false);
+  const [rejectionError, setRejectionError] = useState("");
 
   // --- Effects ---
 
@@ -360,28 +362,35 @@ export default function AdminDashboardScreen() {
   const openRejectionModal = (vehicleId: string) => {
     setSelectedVehicleId(vehicleId);
     setRejectionReason("");
+    setRejectionError("");
     setRejectionModalVisible(true);
   };
 
   const confirmRejection = async () => {
     if (!selectedVehicleId) return;
+    setRejectionError("");
+    
     if (!rejectionReason.trim()) {
-      showAlert("Atención", "Por favor ingresá un motivo de rechazo para que el usuario sepa qué corregir.", "warning");
+      setRejectionError("Por favor ingresá un motivo de rechazo.");
       return;
     }
 
+    setProcessingRejection(true);
     try {
-      await updateDoc(doc(db, "vehicles", selectedVehicleId), {
-        status: "rejected",
-        published: false,
-        rejectedAt: serverTimestamp(),
-        rejectionReason: rejectionReason.trim()
-      });
+      // User requested to DELETE the vehicle on rejection
+      await deleteDoc(doc(db, "vehicles", selectedVehicleId));
+      
       setRejectionModalVisible(false);
-      showAlert("Rechazado", "El vehículo ha sido rechazado y se notificó el motivo.", "success");
+      // Wait a bit for modal to close before showing alert to avoid conflict
+      setTimeout(() => {
+        showAlert("Eliminado", "La publicación ha sido eliminada permanentemente.", "success");
+      }, 300);
     } catch (e: any) {
       console.error(e);
-      showAlert("Error", "No se pudo rechazar. Verificá tus permisos.", "error");
+      // Keep modal open, show error inline or via native Alert
+      setRejectionError("No se pudo eliminar. Verificá tus permisos o tu conexión.");
+    } finally {
+      setProcessingRejection(false);
     }
   };
 
@@ -572,7 +581,7 @@ export default function AdminDashboardScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={{ marginBottom: 24 }}>
-              <CarCard vehicle={item} />
+              <CarCard vehicle={item} hideLike={true} hideCompare={true} />
               <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, marginTop: -8 }}>
                 <TouchableOpacity
                   onPress={() => openRejectionModal(item.id)}
@@ -793,9 +802,18 @@ export default function AdminDashboardScreen() {
               Indicá el motivo del rechazo para que el usuario pueda corregirlo.
             </Text>
 
+            {rejectionError ? (
+                <Text style={{ color: "#EF4444", marginBottom: 10, fontWeight: "bold" }}>
+                    {rejectionError}
+                </Text>
+            ) : null}
+
             <TextInput
               value={rejectionReason}
-              onChangeText={setRejectionReason}
+              onChangeText={(text) => {
+                  setRejectionReason(text);
+                  if (rejectionError) setRejectionError("");
+              }}
               multiline
               placeholder="Ej: Las fotos están borrosas..."
               placeholderTextColor={theme.textMuted}
@@ -813,16 +831,21 @@ export default function AdminDashboardScreen() {
             <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12 }}>
               <TouchableOpacity 
                 onPress={() => setRejectionModalVisible(false)}
-                style={{ padding: 10 }}
+                disabled={processingRejection}
+                style={{ padding: 10, opacity: processingRejection ? 0.5 : 1 }}
               >
                 <Text style={{ color: theme.textMuted, fontWeight: "bold" }}>Cancelar</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 onPress={confirmRejection}
-                style={{ backgroundColor: "#EF4444", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+                disabled={processingRejection}
+                style={{ backgroundColor: "#EF4444", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 8, opacity: processingRejection ? 0.7 : 1 }}
               >
-                <Text style={{ color: "white", fontWeight: "bold" }}>Confirmar Rechazo</Text>
+                {processingRejection && <ActivityIndicator size="small" color="white" />}
+                <Text style={{ color: "white", fontWeight: "bold" }}>
+                    {processingRejection ? "Procesando..." : "Confirmar Rechazo"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

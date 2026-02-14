@@ -7,12 +7,18 @@ import { SelectionModal } from "@/components/SelectionModal";
 import { WebContainer } from "@/components/WebContainer";
 import type { Theme } from "@/config/theme";
 import { useAuth } from "@/contexts/AuthContext";
+import { useHistory } from "@/contexts/HistoryContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
 import { db, storage } from "@/lib/firebase";
+import { shareVehicle } from "@/lib/share";
+import { playLikeSound } from "@/lib/sounds";
+import { formatNumber, parseNumber } from "@/utils/format";
 import { getOptimizedImageUrl } from "@/utils/imageUtils";
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Haptics from "expo-haptics";
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Linking from 'expo-linking';
@@ -22,8 +28,10 @@ import * as Sharing from 'expo-sharing';
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Dimensions, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Dimensions, Image, InputAccessoryView, Keyboard, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from "react-native-safe-area-context";
+
 type CarDetailsTabs = "resumen" | "ficha" | "financiacion" | "fotos" | "video";
 
 // Por ahora usamos any para no pelearnos con el tipo Vehicle
@@ -53,6 +61,7 @@ export default function CarDetailsScreen() {
   const router = useRouter();
   const { user, profile, initializing } = useAuth();
   const { theme } = useTheme();
+  const { addToHistory } = useHistory();
   const styles = createStyles(theme);
 
   const [vehicle, setVehicle] = useState<VehicleDoc | null>(null);
@@ -93,9 +102,13 @@ export default function CarDetailsScreen() {
     windowsAuto: "",
     wheelType: "",
     engine: "",
+    // AI Description State
+    aiLoading: false,
+    
     // Images
     cover: "",
     gallery: [] as string[],
+    video: "",
     imagesUploading: false,
   } as any);
 
@@ -126,8 +139,37 @@ export default function CarDetailsScreen() {
   // Hero Items State (Images + Video)
    const [heroItems, setHeroItems] = useState<{ type: 'image' | 'video', uri: string }[]>([]);
    const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
    useEffect(() => {
+    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardVisible(false));
+    return () => {
+        showSub.remove();
+        hideSub.remove();
+    };
+   }, []);
+
+   // Price Alert State
+   const [subscribed, setSubscribed] = useState(false);
+   const [alertLoading, setAlertLoading] = useState(false);
+  
+   useEffect(() => {
+    if (!user || !id) return;
+    const vehicleId = Array.isArray(id) ? id[0] : id;
+    const unsub = onSnapshot(doc(db, "vehicles", vehicleId, "price_alerts", user.uid), (doc) => {
+        setSubscribed(doc.exists());
+    });
+    return () => unsub();
+   }, [user, id]);
+
+   useEffect(() => {
+    if (id) {
+        addToHistory(Array.isArray(id) ? id[0] : id);
+    }
+  }, [id]);
+
+  useEffect(() => {
     if (!user) {
         setFavoriteIds([]);
         return;
@@ -147,6 +189,14 @@ export default function CarDetailsScreen() {
         return;
     }
     if (!vehicle) return;
+
+    // Play sound and haptics
+    playLikeSound().catch(() => {});
+    try {
+      if (Platform.OS !== 'web') {
+         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch {}
 
     const vehicleId = vehicle.id;
     const ref = doc(db, "users", user.uid, "favorites", vehicleId);
@@ -464,6 +514,7 @@ export default function CarDetailsScreen() {
             // Images
             cover: data.images?.cover ?? data.coverImage ?? data.cover ?? "",
             gallery: Array.isArray(data.images?.gallery) ? data.images.gallery : (Array.isArray(data.additionalImages) ? data.additionalImages : []),
+            video: data.video ?? "",
           }));
         } else {
           setVehicle(null);
@@ -758,9 +809,182 @@ export default function CarDetailsScreen() {
       }
   };
 
+  const handlePickVideo = async () => {
+    // Check Plan for video upload
+    const plan = profile?.plan as string | undefined;
+    const isPro = plan === 'pro' || plan === 'pro_plus' || plan === 'pro_dealer'; // Explicit plan check
+    if (!isPro) {
+        showAlert("Función Premium", "El video walkaround es exclusivo para usuarios PRO. Suscribite para desbloquearlo.", "info", () => router.push("/(screens)/subscribe"));
+        return;
+    }
+
+    try {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+            showAlert("Permiso requerido", "Necesitamos acceso a tus videos.", "info");
+            return;
+        }
+
+        const res = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+            allowsEditing: false,
+            videoExportPreset: ImagePicker.VideoExportPreset.Passthrough,
+        });
+
+        if (res.canceled || !res.assets.length) return;
+
+        setEditState((prev: any) => ({ ...prev, imagesUploading: true }));
+
+        const asset = res.assets[0];
+        let finalUri = asset.uri;
+
+        // Handle iOS ph:// assets (ensure we have a file:// URI)
+        if (Platform.OS === 'ios' && (finalUri.startsWith('ph://') || finalUri.startsWith('assets-library://'))) {
+             try {
+                 const cacheDir = FileSystem.cacheDirectory + 'video_temp/';
+                 const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+                 if (!dirInfo.exists) {
+                     await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+                 }
+                 const tempUri = cacheDir + `${Date.now()}.mp4`;
+                 await FileSystem.copyAsync({ from: finalUri, to: tempUri });
+                 finalUri = tempUri;
+             } catch (err) {
+                 console.log("Error handling iOS video asset:", err);
+             }
+        }
+
+        // Safe video handling: Copy to cache to ensure we have a valid file:// URI
+        // This solves PHPhotosErrorDomain error 3164 (iCloud assets) and restricted URIs
+        const cacheDir = FileSystem.cacheDirectory + 'uploads/';
+        const cacheUri = cacheDir + `video_upload_${Date.now()}.mp4`;
+
+        // Ensure directory exists
+        const dirInfo = await FileSystem.getInfoAsync(cacheDir);
+        if (!dirInfo.exists) {
+            await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+        }
+
+        // Copy file
+        await FileSystem.copyAsync({
+            from: finalUri,
+            to: cacheUri
+        });
+
+        // Fetch from local cache (guaranteed file:// URI)
+        const response = await fetch(cacheUri);
+        const blob = await response.blob();
+
+        // Upload
+        const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}.mp4`;
+        const path = `vehicles/${vehicle.id}/${filename}`;
+        const storageRef = ref(storage, path);
+        
+        const task = uploadBytesResumable(storageRef, blob, { contentType: "video/mp4" });
+        await new Promise<void>((resolve, reject) => {
+            task.on("state_changed", undefined, reject, resolve);
+        });
+        const url = await getDownloadURL(task.snapshot.ref);
+
+        // Cleanup cache
+        await FileSystem.deleteAsync(cacheUri, { idempotent: true });
+
+        setEditState((prev: any) => ({ 
+            ...prev, 
+            video: url,
+            imagesUploading: false 
+        }));
+
+    } catch (e: any) {
+        console.error("Upload error:", e);
+        const errorMsg = e.message || JSON.stringify(e);
+        if (errorMsg.includes("3164") || errorMsg.includes("PHPhotosErrorDomain")) {
+            showAlert("Video en iCloud", "El video seleccionado está en iCloud y no se pudo descargar. Por favor, abre tu galería de Fotos, reproduce el video para que se descargue en tu dispositivo, e inténtalo de nuevo.", "info");
+        } else {
+            showAlert("Error", "No se pudo subir el video. Intenta con otro archivo.", "error");
+        }
+        setEditState((prev: any) => ({ ...prev, imagesUploading: false }));
+    }
+  };
+
+  const handleDeleteVideo = () => {
+      setEditState((prev: any) => ({ ...prev, video: "" }));
+  };
+
+  const sendPriceDropNotifications = async (newPrice: number, oldPrice: number, currency: string) => {
+    if (!vehicle || !user) return;
+    
+    try {
+        console.log("Checking price drop for notifications: ", oldPrice, "->", newPrice);
+        
+        const subscribersRef = collection(db, "vehicles", vehicle.id, "price_alerts");
+        const snap = await getDocs(subscribersRef);
+        
+        console.log("Found subscribers: ", snap.size);
+        
+        if (!snap.empty) {
+            const notificationsBatch: Promise<void>[] = [];
+            const now = Timestamp.now();
+            
+            snap.forEach(subDoc => {
+                const subData = subDoc.data();
+                const subscriberId = subData.userId;
+                
+                // Don't notify the owner (current user)
+                if (subscriberId && subscriberId !== user.uid) {
+                    const notifRef = doc(collection(db, "users", subscriberId, "price_alert_notifications"));
+                    notificationsBatch.push(setDoc(notifRef, {
+                        type: "price_drop",
+                        title: "¡Bajó de precio!",
+                        message: `El ${vehicle.brand} ${vehicle.model} que te interesa bajó a ${currency} ${formatNumber(newPrice)}.`,
+                        vehicleId: vehicle.id,
+                        newPrice: `${currency} ${formatNumber(newPrice)}`,
+                        brand: vehicle.brand,
+                        model: vehicle.model,
+                        vehicleData: {
+                            brand: vehicle.brand,
+                            model: vehicle.model,
+                            price: newPrice,
+                            currency: currency,
+                            coverImage: vehicle.images?.cover || null
+                        },
+                        read: false,
+                        createdAt: now
+                    }));
+                }
+            });
+            
+            await Promise.all(notificationsBatch);
+            console.log("Notifications sent to", notificationsBatch.length, "users");
+            if (notificationsBatch.length > 0) {
+                // Notify the owner (current user) that alerts were sent, for feedback
+                showAlert("Notificaciones Enviadas", `Se avisó a ${notificationsBatch.length} interesados sobre la baja de precio.`, "success");
+            } else {
+                // If there were subscribers but they were all the owner (shouldn't happen with correct logic but good for safety)
+                console.log("No valid subscribers found (filtered out owner)");
+            }
+        } else {
+            console.log("No subscribers found for price alert");
+        }
+    } catch (error: any) {
+        console.error("Error sending price drop notifications", error);
+        if (error.code === 'permission-denied') {
+             showAlert("Error de Permisos", "No tienes permiso para enviar notificaciones. Verifica las reglas de Firestore.", "error");
+        } else {
+             showAlert("Error", "No se pudieron enviar las notificaciones de precio. " + (error.message || ""), "error");
+        }
+    }
+  };
+
   const handleQuickPriceUpdate = async (targetPrice: number) => {
     if (!vehicle) return;
     try {
+        // Check for price drop
+        const currentPrice = Number(vehicle.price);
+        if (targetPrice < currentPrice) {
+            await sendPriceDropNotifications(targetPrice, currentPrice, vehicle.currency || "ARS");
+        }
+
         const ref = doc(db, "vehicles", vehicle.id);
         await updateDoc(ref, {
             price: targetPrice,
@@ -798,6 +1022,14 @@ export default function CarDetailsScreen() {
 
     const ref = doc(db, "vehicles", vehicle.id);
     const priceNum = editState.price ? Number(editState.price) : null;
+    
+    // Check for price drop and notify subscribers
+    const currentPrice = Number(vehicle.price);
+    if (user && priceNum && currentPrice && priceNum < currentPrice) {
+        const currency = editState.currency || vehicle.currency || "ARS";
+        await sendPriceDropNotifications(priceNum, currentPrice, currency);
+    }
+
     const kmNum = editState.km ? Number(editState.km) : null;
     const rateNum = editState.finRate ? Number(editState.finRate) : null;
     const monthsNum = editState.finMonths ? Number(editState.finMonths) : null;
@@ -842,6 +1074,7 @@ export default function CarDetailsScreen() {
       negotiablePrice: !!editState.negotiablePrice,
       immediateDelivery: !!editState.immediateDelivery,
       "flags.tradeIn": !!editState.acceptsTradeIn,
+      video: editState.video || null,
       images: {
           cover: editState.cover || null,
           gallery: editState.gallery || []
@@ -853,24 +1086,65 @@ export default function CarDetailsScreen() {
 
   // --- Contenidos de cada pestaña ---
 
+  const handlePriceAlertToggle = async () => {
+    if (!user) {
+        showAlert("Inicia sesión", "Debes estar logueado para suscribirte a alertas.", "info", () => router.push("/login"));
+        return;
+    }
+    if (alertLoading) return;
+
+    setAlertLoading(true);
+    try {
+        const vehicleId = Array.isArray(id) ? id[0] : id;
+        console.log("Toggling alert for vehicle:", vehicleId, "User:", user.uid);
+        
+        const ref = doc(db, "vehicles", vehicleId, "price_alerts", user.uid);
+        const userAlertRef = doc(db, "users", user.uid, "price_alerts", vehicleId);
+
+        if (subscribed) {
+            console.log("Removing alert...");
+            await deleteDoc(ref);
+            await deleteDoc(userAlertRef);
+        } else {
+            console.log("Adding alert...");
+            const alertData = {
+                userId: user.uid,
+                initialPrice: vehicle?.price || 0,
+                createdAt: serverTimestamp()
+            };
+            await setDoc(ref, alertData);
+            // Denormalize data for "My Alerts" screen
+            await setDoc(userAlertRef, {
+                ...alertData,
+                vehicleId,
+                brand: vehicle?.brand || "",
+                model: vehicle?.model || "",
+                year: vehicle?.year || "",
+                coverImage: vehicle?.images?.cover || vehicle?.coverImage || null,
+                currency: vehicle?.currency || "$",
+                currentPrice: vehicle?.price || 0
+            });
+            
+            // Auto-like when subscribing to price alert
+            if (vehicle && !favoriteIds.includes(vehicle.id)) {
+                 await toggleFavorite();
+            }
+
+            console.log("Alert added successfully");
+            showAlert("¡Listo!", "Te avisaremos si este auto baja de precio.", "success");
+        }
+    } catch (error) {
+        console.error("Error toggling price alert", error);
+        showAlert("Error", "No se pudo actualizar la alerta.", "error");
+    } finally {
+        setAlertLoading(false);
+    }
+  };
+
   const handleShareVehicle = async () => {
     if (!vehicle) return;
     try {
-      const webLink = `https://matchcars.app/car/${vehicle.id}`;
-      const downloadLinks = "\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393";
-      const message = `¡Mirá este ${vehicle.brand} ${vehicle.model} en MatchCars! 🚗💨`;
-
-      if (Platform.OS === 'ios') {
-        await Share.share({
-          message: message + downloadLinks,
-          url: webLink,
-        });
-      } else {
-        await Share.share({
-          message: `${message}\n${webLink}${downloadLinks}`,
-          title: 'MatchCars',
-        });
-      }
+      await shareVehicle(vehicle);
     } catch (error) {
       console.error(error);
     }
@@ -937,6 +1211,37 @@ export default function CarDetailsScreen() {
       )}
 
       <Text style={styles.sectionTitle}>Resumen</Text>
+
+      {user && user.uid !== vehicle.userId && (
+        <TouchableOpacity 
+            onPress={handlePriceAlertToggle}
+            disabled={alertLoading}
+            style={{ 
+                flexDirection: 'row', 
+                alignItems: 'center', 
+                gap: 8, 
+                backgroundColor: subscribed ? theme.inputBackground : theme.card, 
+                padding: 10, 
+                borderRadius: 8, 
+                marginBottom: 16,
+                borderWidth: 1,
+                borderColor: subscribed ? theme.accent : theme.likeBoxBackground,
+                opacity: alertLoading ? 0.7 : 1
+            }}
+        >
+            {alertLoading ? (
+                <ActivityIndicator size="small" color={theme.text} />
+            ) : (
+                <Ionicons name={subscribed ? "notifications" : "notifications-outline"} size={20} color={subscribed ? theme.accent : theme.text} />
+            )}
+            <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 14 }}>
+                    {subscribed ? "Suscrito a alertas de precio" : "Avísame si baja de precio"}
+                </Text>
+                {!subscribed && <Text style={{ color: theme.textMuted, fontSize: 12 }}>Te notificaremos si el vendedor reduce el valor.</Text>}
+            </View>
+        </TouchableOpacity>
+      )}
 
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
         {isDealer && (
@@ -1190,7 +1495,6 @@ export default function CarDetailsScreen() {
         </View>
       ) : null}
 
-      {Platform.OS !== 'web' && (
       <TouchableOpacity
         onPress={() => router.push({ pathname: "/report/[id]", params: { id: vehicle.id, type: "vehicle" } })}
         style={{ marginTop: 24, alignSelf: "center", padding: 8 }}
@@ -1199,7 +1503,6 @@ export default function CarDetailsScreen() {
           Reportar publicación
         </Text>
       </TouchableOpacity>
-      )}
     </View>
   );
   };
@@ -1317,6 +1620,7 @@ export default function CarDetailsScreen() {
                     keyboardType="numeric"
                     placeholder="Ej: 5.000.000"
                     returnKeyType="done"
+                    inputAccessoryViewID="doneAccessory"
                     onSubmitEditing={Keyboard.dismiss}
                 />
                   <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
@@ -1425,6 +1729,51 @@ export default function CarDetailsScreen() {
     }
   };
 
+  const handleGenerateDescription = async () => {
+    if (!profile?.plan?.includes('pro')) {
+        showAlert("Función Premium", "La generación de descripción con IA es exclusiva para usuarios Pro. ¡Mejorá tu plan para acceder!", "info", () => router.push("/(screens)/subscribe"));
+        return;
+    }
+
+    // Use vehicle data if editState is missing it (fallback)
+    const brand = editState.brand || vehicle?.brand;
+    const model = editState.model || vehicle?.model;
+    const year = editState.year || vehicle?.year;
+
+    if (!brand || !model || !year) {
+        showAlert("Datos incompletos", "Necesitamos al menos Marca, Modelo y Año para generar la descripción.", "warning");
+        return;
+    }
+
+    setEditState({ ...editState, aiLoading: true });
+    try {
+        // Mock AI generation for now - In a real app this would call an API
+        // Using a comprehensive template based on available data
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate network delay
+        
+        const specs = [
+            editState.version || vehicle?.version ? `Versión ${editState.version || vehicle?.version}` : '',
+            editState.engine || vehicle?.engine ? `Motor ${editState.engine || vehicle?.engine}` : '',
+            editState.gearbox || vehicle?.gearbox ? `Caja ${editState.gearbox || vehicle?.gearbox}` : '',
+            editState.fuelType || vehicle?.fuelType ? `Combustible ${editState.fuelType || vehicle?.fuelType}` : '',
+            (editState.km || vehicle?.km) ? `${formatNumber(editState.km || vehicle?.km)} km` : ''
+        ].filter(Boolean).join(' - ');
+
+        const features = editState.featuresText || vehicle?.features?.join(', ')
+            ? `\n\nEquipamiento destacado:\n${(editState.featuresText || vehicle?.features?.join(', ')).split(',').map((f: string) => `• ${f.trim()}`).join('\n')}`
+            : '';
+
+        const generatedDesc = `¡Imperdible ${brand} ${model} ${year}!\n\n${specs}\n${features}\n\nEl vehículo se encuentra en excelentes condiciones. Papeles al día, listo para transferir.`;
+        
+        setEditState({ ...editState, description: generatedDesc, aiLoading: false });
+        showAlert("Descripción Generada", "Se ha generado una nueva descripción con IA. Podés editarla si lo deseas.", "success");
+    } catch (error) {
+        console.error("Error generating description:", error);
+        showAlert("Error", "No se pudo generar la descripción.", "error");
+        setEditState({ ...editState, aiLoading: false });
+    }
+  };
+
   const renderEditActiveTab = () => {
     switch (activeTab) {
       case "resumen":
@@ -1432,22 +1781,61 @@ export default function CarDetailsScreen() {
             <View style={styles.sectionCard}>
                 <Text style={styles.sectionTitle}>Editar Resumen</Text>
                 
+                <Text style={styles.specLabel}>Descripción Detallada</Text>
+                <View style={{ marginBottom: 12 }}>
+                    <TouchableOpacity 
+                        onPress={handleGenerateDescription}
+                        style={{ 
+                            flexDirection: 'row', 
+                            alignItems: 'center', 
+                            backgroundColor: theme.card, 
+                            padding: 8, 
+                            borderRadius: 8, 
+                            borderWidth: 1, 
+                            borderColor: theme.accent,
+                            alignSelf: 'flex-start',
+                            marginBottom: 8
+                        }}
+                    >
+                        {editState.aiLoading ? (
+                            <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 6 }} />
+                        ) : (
+                            <Ionicons name="sparkles" size={16} color={theme.accent} style={{ marginRight: 6 }} />
+                        )}
+                        <Text style={{ color: theme.accent, fontWeight: '600', fontSize: 12 }}>
+                            {editState.aiLoading ? "Generando..." : "Generar con IA (Pro)"}
+                        </Text>
+                    </TouchableOpacity>
+                    <TextInput
+                        style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
+                        value={editState.description}
+                        onChangeText={(t) => setEditState({...editState, description: t})}
+                        multiline
+                        placeholder="Descripción completa del vehículo..."
+                        inputAccessoryViewID="doneAccessory"
+                    />
+                </View>
+
                 <Text style={styles.specLabel}>Precio</Text>
                 <TextInput
                     style={styles.input}
-                    value={editState.price}
-                    onChangeText={(t) => setEditState({...editState, price: t})}
+                    value={formatNumber(editState.price)}
+                    onChangeText={(t) => setEditState({...editState, price: parseNumber(t)})}
                     keyboardType="numeric"
                     placeholder="Precio"
+                    inputAccessoryViewID="doneAccessory"
+                    returnKeyType="done"
                 />
 
                 <Text style={[styles.specLabel, { marginTop: 12 }]}>Kilómetros</Text>
                 <TextInput
                     style={styles.input}
-                    value={editState.km}
-                    onChangeText={(t) => setEditState({...editState, km: t})}
+                    value={formatNumber(editState.km)}
+                    onChangeText={(t) => setEditState({...editState, km: parseNumber(t)})}
                     keyboardType="numeric"
                     placeholder="KM"
+                    inputAccessoryViewID="doneAccessory"
+                    returnKeyType="done"
                 />
 
                 <Text style={[styles.specLabel, { marginTop: 12 }]}>Ubicación</Text>
@@ -1544,15 +1932,6 @@ export default function CarDetailsScreen() {
                         />
                     </View>
                 ))}
-
-                <Text style={[styles.specLabel, { marginTop: 12 }]}>Descripción</Text>
-                <TextInput
-                    style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
-                    value={editState.description}
-                    onChangeText={(t) => setEditState({...editState, description: t})}
-                    multiline
-                    placeholder="Descripción del vehículo"
-                />
             </View>
         );
       case "ficha":
@@ -1594,6 +1973,7 @@ export default function CarDetailsScreen() {
                     value={editState.engine}
                     onChangeText={(t) => setEditState({...editState, engine: t})}
                     placeholder="Ej: 1.6 16v"
+                    inputAccessoryViewID="doneAccessory"
                 />
 
                 <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
@@ -1605,6 +1985,7 @@ export default function CarDetailsScreen() {
                             onChangeText={(t) => setEditState({...editState, airbags: t})}
                             keyboardType="numeric"
                             placeholder="Cant."
+                            inputAccessoryViewID="doneAccessory"
                         />
                     </View>
                     <View style={{ flex: 1 }}>
@@ -1615,6 +1996,7 @@ export default function CarDetailsScreen() {
                             onChangeText={(t) => setEditState({...editState, windowsAuto: t})}
                             keyboardType="numeric"
                             placeholder="Cant."
+                            inputAccessoryViewID="doneAccessory"
                         />
                     </View>
                 </View>
@@ -1625,6 +2007,7 @@ export default function CarDetailsScreen() {
                     value={editState.wheelType}
                     onChangeText={(t) => setEditState({...editState, wheelType: t})}
                     placeholder="Ej: Asistida, Hidráulica"
+                    inputAccessoryViewID="doneAccessory"
                 />
 
                 <Text style={[styles.specLabel, { marginTop: 12 }]}>Equipamiento (separado por comas)</Text>
@@ -1634,6 +2017,7 @@ export default function CarDetailsScreen() {
                     onChangeText={(t) => setEditState({...editState, featuresText: t})}
                     multiline
                     placeholder="Ej: Aire acondicionado, Dirección asistida, ..."
+                    inputAccessoryViewID="doneAccessory"
                 />
             </View>
         );
@@ -1660,6 +2044,7 @@ export default function CarDetailsScreen() {
                             onChangeText={(t) => setEditState({...editState, finRate: t})}
                             keyboardType="numeric"
                             placeholder="Ej: 25"
+                            inputAccessoryViewID="doneAccessory"
                         />
                         <Text style={[styles.specLabel, { marginTop: 12 }]}>Plazo (meses)</Text>
                         <TextInput
@@ -1668,6 +2053,7 @@ export default function CarDetailsScreen() {
                             onChangeText={(t) => setEditState({...editState, finMonths: t})}
                             keyboardType="numeric"
                             placeholder="Ej: 24"
+                            inputAccessoryViewID="doneAccessory"
                         />
                     </>
                 )}
@@ -1735,6 +2121,47 @@ export default function CarDetailsScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
                         <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 8 }} />
                         <Text style={{ color: theme.textMuted }}>Subiendo imágenes...</Text>
+                    </View>
+                )}
+            </View>
+        );
+      case "video":
+        return (
+            <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Administrar Video</Text>
+                
+                {editState.video ? (
+                    <View style={{ alignItems: 'center' }}>
+                        <View style={{ borderRadius: 12, overflow: 'hidden', backgroundColor: '#000', width: '65%', aspectRatio: 9/16, marginBottom: 12 }}>
+                            <ReplayableVideo
+                                uri={editState.video}
+                                style={{ width: '100%', height: '100%' }}
+                                useNativeControls
+                                resizeMode={ResizeMode.CONTAIN}
+                                shouldPlay={false}
+                                isMuted={true}
+                            />
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
+                            <TouchableOpacity onPress={handlePickVideo} style={[styles.input, { flex: 1, alignItems: 'center' }]}>
+                                <Text style={{ color: theme.text }}>Cambiar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleDeleteVideo} style={[styles.input, { flex: 1, alignItems: 'center', borderColor: theme.error }]}>
+                                <Text style={{ color: theme.error }}>Eliminar</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                ) : (
+                    <TouchableOpacity onPress={handlePickVideo} style={[styles.mapPlaceholder, { height: 200 }]}>
+                        <Ionicons name="videocam" size={32} color={theme.textMuted} />
+                        <Text style={styles.mapPlaceholderText}>Subir video</Text>
+                    </TouchableOpacity>
+                )}
+                
+                {editState.imagesUploading && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+                        <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 8 }} />
+                        <Text style={{ color: theme.textMuted }}>Subiendo video...</Text>
                     </View>
                 )}
             </View>
@@ -1953,7 +2380,7 @@ export default function CarDetailsScreen() {
     const webLink = `https://matchcars.app/car/${vehicle.id}`;
     
     const headline = displayTitle;
-    const downloadLinks = `\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393`;
+    const downloadLinks = `\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6757968664`;
     const message = `¡Mirá este auto en MatchCars!\n\n${headline}\n${priceText}\n\nVer publicación: ${webLink}`;
 
     try {
@@ -1975,6 +2402,15 @@ export default function CarDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {Platform.OS === 'ios' && (
+          <InputAccessoryView nativeID="doneAccessory">
+            <View style={{ backgroundColor: theme.card, flexDirection: 'row', justifyContent: 'flex-end', padding: 10, borderTopWidth: 1, borderColor: theme.border }}>
+               <TouchableOpacity onPress={() => Keyboard.dismiss()} style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+                   <Text style={{ color: theme.accent, fontWeight: "600", fontSize: 16 }}>Listo</Text>
+               </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+      )}
       <WebContainer>
       <View style={styles.topActions}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backPill}>
@@ -1987,9 +2423,11 @@ export default function CarDetailsScreen() {
 
             {user && user.uid === vehicle.userId && (
                 <>
-                    <TouchableOpacity onPress={handleDeleteVehicle} style={[styles.homePill, { backgroundColor: theme.error + '20' }]}>
-                        <Ionicons name="trash-outline" size={18} color={theme.error} />
-                    </TouchableOpacity>
+                    {editing && (
+                        <TouchableOpacity onPress={handleDeleteVehicle} style={[styles.homePill, { backgroundColor: theme.error + '20' }]}>
+                            <Ionicons name="trash-outline" size={18} color={theme.error} />
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity onPress={handleGeneratePDF} style={styles.homePill}>
                         <Ionicons name="document-outline" size={18} color={theme.text} />
                     </TouchableOpacity>
@@ -2001,12 +2439,15 @@ export default function CarDetailsScreen() {
         </View>
       </View>
 
-      <KeyboardAvoidingView 
-            style={{ flex: 1 }} 
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            keyboardVerticalOffset={Platform.OS === "ios" ? 160 : 20}
-          >
-      <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={{ flex: 1 }}>
+      <KeyboardAwareScrollView 
+          style={styles.scrollArea} 
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={{ paddingBottom: 100 }}
+          enableOnAndroid={true}
+          extraScrollHeight={Platform.OS === 'ios' ? 20 : 0}
+          keyboardShouldPersistTaps="handled"
+      >
           <View style={styles.heroContainer}>
               {heroItems.length > 0 ? (
                   <ScrollView 
@@ -2156,8 +2597,8 @@ export default function CarDetailsScreen() {
           )}
           
           <View style={{ height: 40 }} />
-      </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
+      </View>
 
       {editing && (
           <View style={{ padding: 12, borderTopWidth: 1, borderColor: theme.badgeBorder, backgroundColor: theme.card }}>

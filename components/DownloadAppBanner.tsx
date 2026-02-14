@@ -3,15 +3,25 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Linking, Platform, Text, TouchableOpacity, View } from 'react-native';
 
-export const DownloadAppBanner = ({ compact = false, message = "Para contactar al vendedor", floating = false }: { compact?: boolean, message?: string, floating?: boolean }) => {
+export const DownloadAppBanner = ({ compact = false, message = "Para contactar al vendedor", floating = false, deepLink }: { compact?: boolean, message?: string, floating?: boolean, deepLink?: string }) => {
   const { theme } = useTheme();
 
-  if (Platform.OS === 'web' && !floating) return null;
+  const openApp = async () => {
+    if (deepLink) {
+        const scheme = `matchcars://${deepLink}`;
+        const canOpen = await Linking.canOpenURL(scheme);
+        if (canOpen) {
+            Linking.openURL(scheme);
+            return;
+        }
+    }
+    openStore();
+  };
 
   const openStore = () => {
     // Replace with your actual store links
     const androidUrl = 'https://play.google.com/store/apps/details?id=com.matchcars.app';
-    const iosUrl = 'https://apps.apple.com/ar/app/matchcars/id6739093393'; // Replace if you have the ID
+    const iosUrl = 'https://apps.apple.com/ar/app/matchcars/id6757968664'; // Replace if you have the ID
     
     if (Platform.OS === 'ios') {
       Linking.openURL(iosUrl); 
@@ -40,7 +50,7 @@ export const DownloadAppBanner = ({ compact = false, message = "Para contactar a
             maxWidth: 300
         }}>
              <TouchableOpacity 
-                onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6739093393')} 
+                onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6757968664')} 
                 style={{ 
                     backgroundColor: '#000', 
                     paddingHorizontal: 16, 
@@ -84,7 +94,7 @@ export const DownloadAppBanner = ({ compact = false, message = "Para contactar a
   if (compact) {
     return (
         <TouchableOpacity 
-            onPress={openStore} 
+            onPress={openApp} 
             activeOpacity={0.8}
             style={{ 
                 backgroundColor: theme.primary, 
@@ -137,6 +147,26 @@ export const DownloadAppBanner = ({ compact = false, message = "Para contactar a
       </Text>
       
       <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+         {deepLink && (
+             <TouchableOpacity 
+                onPress={openApp}
+                style={{ 
+                    backgroundColor: theme.accent, 
+                    paddingHorizontal: 16, 
+                    paddingVertical: 12, 
+                    borderRadius: 12, 
+                    flexDirection: 'row', 
+                    alignItems: 'center', 
+                    gap: 8,
+                    minWidth: 200,
+                    justifyContent: 'center'
+                }}
+             >
+                <Ionicons name="open-outline" size={24} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Abrir en la App</Text>
+             </TouchableOpacity>
+         )}
+
          <TouchableOpacity 
             onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.matchcars.app')} 
             style={{ 
@@ -157,7 +187,7 @@ export const DownloadAppBanner = ({ compact = false, message = "Para contactar a
          </TouchableOpacity>
          
          <TouchableOpacity 
-            onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6739093393')} 
+            onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6757968664')} 
             style={{ 
                 backgroundColor: '#000', 
                 paddingHorizontal: 16, 

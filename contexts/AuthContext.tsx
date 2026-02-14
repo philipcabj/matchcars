@@ -10,6 +10,8 @@ import React, {
 import * as Facebook from "expo-auth-session/providers/facebook";
 import * as WebBrowser from "expo-web-browser";
 
+import { ONBOARDING_KEY } from "@/components/Onboarding";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     FacebookAuthProvider,
     GoogleAuthProvider,
@@ -511,6 +513,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Logout
   const logout = async () => {
+    try {
+        await AsyncStorage.removeItem(ONBOARDING_KEY);
+    } catch (e) {
+        console.error("Error clearing onboarding status:", e);
+    }
     await signOut(auth);
   };
 

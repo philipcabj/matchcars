@@ -1,16 +1,22 @@
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { Tabs } from "expo-router";
 import React from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 import { Platform } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabsLayout() {
   const { theme } = useTheme();
   const { unreadMessagesCount, unreadLikesCount, unreadMatchesCount } = useNotifications();
   const insets = useSafeAreaInsets();
+
+  const handleTabPress = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+  };
 
   return (
     <Tabs
@@ -19,11 +25,11 @@ export default function TabsLayout() {
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarLabelStyle: {
-          fontSize: Platform.OS === 'web' ? 10 : 9,
+          fontSize: 9,
           marginBottom: 4,
-          ...(Platform.OS === 'web' ? { width: 90, textAlign: 'center' } : {}),
+          textAlign: 'center',
         },
-        tabBarItemStyle: Platform.OS === 'web' ? { minWidth: 90 } : undefined,
+        tabBarItemStyle: undefined,
         tabBarStyle: {
           backgroundColor: theme.tabBackground,
           borderTopColor: "#00000033",
@@ -36,6 +42,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="index"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Autos",
           tabBarIcon: ({ color, size }) => (
@@ -45,6 +52,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="favorites"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Favoritos",
           tabBarIcon: ({ color, size }) => (
@@ -54,6 +62,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="matches"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Matches",
           tabBarBadge: unreadMatchesCount > 0 ? unreadMatchesCount : undefined,
@@ -64,6 +73,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="interesados"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Interesados",
           tabBarBadge: unreadLikesCount > 0 ? unreadLikesCount : undefined,
@@ -74,6 +84,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="messages"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Mensajes",
           tabBarBadge: unreadMessagesCount > 0 ? unreadMessagesCount : undefined,
@@ -84,6 +95,7 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="mycars"
+        listeners={{ tabPress: handleTabPress }}
         options={{
           title: "Mis autos",
           tabBarIcon: ({ color, size }) => (

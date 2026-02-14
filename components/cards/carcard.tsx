@@ -2,10 +2,12 @@
 import { useCompare } from "@/contexts/CompareContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
+import { playLikeSound } from "@/lib/sounds";
 import type { Vehicle } from "@/types/vehicle";
 import { formatTimeAgo } from "@/utils/dateUtils";
 import { getOptimizedImageUrl } from "@/utils/imageUtils";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import React from "react";
@@ -19,6 +21,21 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
   const { toggleVehicle, isSelected } = useCompare();
   
   const selected = isSelected(vehicle.id);
+  
+  const handleLikePress = async (e: any) => {
+    e.stopPropagation();
+    if (likeDisabled) return;
+    
+    // Play sound and haptics
+    playLikeSound().catch(() => {});
+    try {
+      if (Platform.OS !== 'web') {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch {}
+    
+    onToggleLike && onToggleLike();
+  };
   
   const priceSuggestion = usePriceSuggestion(
     vehicle?.brand || "", 
@@ -42,7 +59,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
 
   const priceQuality = showPriceAnalysis ? getPriceQuality() : null;
 
-  const rawImageUrl = vehicle.coverImage || (vehicle as any)?.images?.cover || (vehicle as any)?.images?.gallery?.[0];
+  const rawImageUrl = vehicle.coverImage || (vehicle as any)?.images?.cover || (vehicle as any)?.images?.gallery?.[0] || (Array.isArray((vehicle as any)?.images) ? (vehicle as any).images[0] : null);
   const imageUrl = getOptimizedImageUrl(rawImageUrl);
 
   const timeAgo = formatTimeAgo(vehicle.createdAt);
@@ -173,10 +190,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                     {!hideLike && (
                       <TouchableOpacity
                         disabled={likeDisabled}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          onToggleLike && onToggleLike();
-                        }}
+                        onPress={handleLikePress}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
                         <Ionicons
@@ -267,6 +281,51 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                zIndex: 10
              }}>
                 <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 24, transform: [{ rotate: '-15deg' }], borderWidth: 4, borderColor: '#FFF', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}>VENDIDO</Text>
+             </View>
+          )}
+          {vehicle.status === 'pending' && (
+             <View style={{ 
+               position: 'absolute', 
+               left: 0, 
+               top: 0, 
+               right: 0,
+               height: compact ? 130 : 200, 
+               backgroundColor: 'rgba(0,0,0,0.4)', 
+               alignItems: 'center', 
+               justifyContent: 'center',
+               zIndex: 10
+             }}>
+                <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>EN REVISIÓN</Text>
+             </View>
+          )}
+          {vehicle.status === 'rejected' && (
+             <View style={{ 
+               position: 'absolute', 
+               left: 0, 
+               top: 0, 
+               right: 0,
+               height: compact ? 130 : 200, 
+               backgroundColor: 'rgba(0,0,0,0.5)', 
+               alignItems: 'center', 
+               justifyContent: 'center',
+               zIndex: 10
+             }}>
+                <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>RECHAZADO</Text>
+             </View>
+          )}
+          {vehicle.status === 'blocked' && (
+             <View style={{ 
+               position: 'absolute', 
+               left: 0, 
+               top: 0, 
+               right: 0,
+               height: compact ? 130 : 200, 
+               backgroundColor: 'rgba(0,0,0,0.5)', 
+               alignItems: 'center', 
+               justifyContent: 'center',
+               zIndex: 10
+             }}>
+                <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>BLOQUEADO</Text>
              </View>
           )}
           <View style={{ padding: compact ? 10 : 12 }}>
@@ -374,10 +433,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             <TouchableOpacity
               activeOpacity={0.8}
               disabled={likeDisabled}
-              onPress={(e) => {
-                e.stopPropagation();
-                onToggleLike && onToggleLike();
-              }}
+              onPress={handleLikePress}
               style={{
                 backgroundColor: "#00000066",
                 borderRadius: 999,
@@ -397,5 +453,32 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
       
       
     </Pressable>
+  );
+}
+
+export function CarCardSkeleton() {
+  const { theme, themeName } = useTheme();
+  const skeletonColor = themeName === 'dark' ? '#1f2937' : '#e5e7eb';
+  
+  return (
+    <View style={{
+        backgroundColor: theme.card,
+        borderRadius: 12,
+        overflow: 'hidden',
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: theme.badgeBorder,
+        height: 280,
+    }}>
+        <View style={{ height: 180, backgroundColor: skeletonColor }} />
+        <View style={{ padding: 12, gap: 8 }}>
+            <View style={{ height: 20, width: '70%', backgroundColor: skeletonColor, borderRadius: 4 }} />
+            <View style={{ height: 16, width: '40%', backgroundColor: skeletonColor, borderRadius: 4 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                 <View style={{ height: 16, width: '20%', backgroundColor: skeletonColor, borderRadius: 4 }} />
+                 <View style={{ height: 16, width: '20%', backgroundColor: skeletonColor, borderRadius: 4 }} />
+            </View>
+        </View>
+    </View>
   );
 }

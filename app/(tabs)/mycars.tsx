@@ -6,6 +6,7 @@ import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { shareProfile } from "@/lib/share";
 import type { SaleRecord } from "@/types/commerce";
 import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +20,6 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  Share,
   Text,
   TextInput,
   TouchableOpacity,
@@ -95,23 +95,27 @@ export default function MyCarsTab() {
   
   const getFeaturedLimit = () => {
     const p = profile?.plan || "free";
+    if (p.includes("dealer_pro_plus")) return Infinity;
     if (p.includes("pro_dealer")) return Infinity;
-    if (p.includes("pro_plus")) return 6;
-    if (p.includes("pro")) return 3; // Covers pro_monthly and pro_annual
+    if (p.includes("pro_plus")) return 5;
+    if (p.includes("pro")) return 2;
     return 0;
   };
 
   const getPublicationLimit = () => {
     const p = profile?.plan || "free";
-    if (p !== 'free') return Infinity;
-    return 2;
+    if (p.includes("dealer_pro_plus")) return Infinity;
+    if (p.includes("pro_dealer")) return 30;
+    if (p.includes("pro_plus")) return 7;
+    if (p.includes("pro")) return 3;
+    return 1;
   };
 
   const handleShareProfile = async () => {
+    if (!user) return;
     try {
-      await Share.share({
-        message: `¡Mirá mis autos en MatchCars! 🚗💨\n\nDescargá la app y buscame para ver mi inventario completo.\n\n📲 Android: https://play.google.com/store/apps/details?id=com.matchcars.app\n🍏 iOS: https://apps.apple.com/app/id6739093393`,
-      });
+      const name = profile?.agencyName || (profile?.firstName ? `${profile.firstName} ${profile.lastName || ""}`.trim() : "Usuario");
+      await shareProfile(user.uid, name);
     } catch (error) {
       console.error(error);
     }
@@ -347,54 +351,21 @@ export default function MyCarsTab() {
     const unsub = onSnapshot(ref, (snap) => {
       const items: Vehicle[] = [];
       snap.forEach((doc) => {
-        const data: any = doc.data();
-        const mapped: Vehicle = {
-          id: doc.id,
-          brand: data.brand,
-          model: data.model,
-          version: data.version ?? undefined,
-          year: data.year,
-          price: data.price,
-          currency: data.currency,
-          km: data.km,
-          coverImage: data.coverImage ?? data.images?.cover ?? undefined,
-          additionalImages: data.additionalImages ?? data.images?.gallery ?? undefined,
-          city: data.location?.city ?? data.city,
-          province: data.location?.province ?? data.province,
-          location: data.location ? {
-            latitude: data.location.latitude ?? undefined,
-            longitude: data.location.longitude ?? undefined,
-            address: data.location.address ?? undefined,
-            city: data.location.city ?? undefined,
-            province: data.location.province ?? undefined,
-          } : undefined,
-          userId: data.userId,
-          userName: data.userName,
-          createdAt: data.createdAt,
-          published: data.published,
-          status: data.status,
-          rejectionReason: data.rejectionReason,
-          isFeatured: data.isFeatured,
-        } as any;
-        if (mapped.status !== 'deleted') {
-          items.push(mapped);
-        }
+        const data = doc.data() as Vehicle;
+        // Filter out rejected or deleted vehicles from view
+        if (data.status === 'rejected' || data.status === 'deleted') return;
+        items.push({ ...data, id: doc.id });
       });
+      // Sort: Pending first, then Active, then Sold
       items.sort((a, b) => {
-        // Sold items at the bottom
-        if (a.status === 'sold' && b.status !== 'sold') return 1;
-        if (a.status !== 'sold' && b.status === 'sold') return -1;
-        
-        // Secondary sort by createdAt (newest first)
-        const dateA = a.createdAt?.seconds || 0;
-        const dateB = b.createdAt?.seconds || 0;
-        return dateB - dateA;
+          if (a.status === 'pending' && b.status !== 'pending') return -1;
+          if (b.status === 'pending' && a.status !== 'pending') return 1;
+          if (a.status === 'sold' && b.status !== 'sold') return 1;
+          if (b.status === 'sold' && a.status !== 'sold') return -1;
+          // Then by date
+          return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
       });
       setMyVehicles(items);
-      setLoading(false);
-    }, (error) => {
-      console.error("Error fetching my cars:", error);
-      showAlert("Error", "No se pudieron cargar tus autos. Revisá tu conexión.", "error");
       setLoading(false);
     });
     return () => unsub();

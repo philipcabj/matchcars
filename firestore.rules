@@ -22,6 +22,13 @@ service cloud.firestore {
       allow create: if request.auth != null;
       allow update, delete: if isOwner(userId) || isStaff();
       
+      // Allow others to send price drop notifications
+      match /price_alert_notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if request.auth != null;
+        allow update, delete: if isOwner(userId);
+      }
+
       match /{document=**} {
         allow read, write: if isOwner(userId) || isStaff();
       }
@@ -56,6 +63,13 @@ service cloud.firestore {
         request.auth.uid == resource.data.uid ||
         isStaff()
       );
+      
+      // Allow users to manage their own price alerts
+      // Also allow the vehicle owner to read alerts (to send notifications)
+      match /price_alerts/{userId} {
+        allow read: if isOwner(userId) || (request.auth != null && get(/databases/$(database)/documents/vehicles/$(vehicleId)).data.userId == request.auth.uid);
+        allow write: if isOwner(userId);
+      }
     }
 
     // Reglas para el catálogo

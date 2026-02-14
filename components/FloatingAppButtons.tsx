@@ -16,7 +16,7 @@ export const FloatingAppButtons = () => {
       </TouchableOpacity>
       
       <TouchableOpacity 
-        onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6739093393')} 
+        onPress={() => Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6757968664')} 
         style={styles.button}
         activeOpacity={0.8}
       >

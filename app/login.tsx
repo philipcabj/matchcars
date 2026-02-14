@@ -67,17 +67,6 @@ export default function LoginScreen() {
   const router = useRouter();
   const { loginWithEmail, loginWithApple, resetPassword } = useAuth();
 
-  if (Platform.OS === 'web') {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <DownloadAppBanner message="Descargá la App para iniciar sesión" />
-          <TouchableOpacity onPress={() => router.replace("/(tabs)")} style={{ marginTop: 20, padding: 10 }}>
-              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>Volver al inicio</Text>
-          </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);

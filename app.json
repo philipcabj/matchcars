@@ -2,7 +2,7 @@
   "expo": {
     "name": "Matchcars",
     "slug": "matchcars",
-    "version": "1.1.7",
+    "version": "1.1.8",
     "orientation": "portrait",
     "icon": "./assets/images/icono.png",
     "scheme": "matchcars",
@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.matchcars.app",
       "associatedDomains": ["applinks:matchcars.app"],
-      "buildNumber": "1.1.7",
+      "buildNumber": "1.1.8",
       "googleServicesFile": "./GoogleService-Info.plist",
       "newArchEnabled": true,
       "infoPlist": {
@@ -43,13 +43,23 @@
               "scheme": "https",
               "host": "matchcars.app",
               "pathPrefix": "/user-profile"
+            },
+            {
+              "scheme": "https",
+              "host": "matchcars.app",
+              "pathPrefix": "/chat"
+            },
+            {
+              "scheme": "https",
+              "host": "matchcars.app",
+              "pathPrefix": "/"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ],
       "newArchEnabled": true,
-      "versionCode": 17,
+      "versionCode": 18,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/icono.png",

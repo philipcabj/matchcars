@@ -2,6 +2,7 @@ import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { Onboarding } from "@/components/Onboarding";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -13,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as CarModelsAr from "../../config/carModelsAr";
 
@@ -57,6 +58,27 @@ export default function AutosPublicTab() {
   const [kmMaxOpen, setKmMaxOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
   const [filterCurrency, setFilterCurrency] = useState<"ARS" | "USD" | undefined>(undefined);
+  // Reset onboarding when user logs in if needed? No, user requested "every login"
+  // so we can force a key reset if user is present. But Onboarding component handles it by key.
+  
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+        await loadMakes();
+        if (brandFilter) {
+            await loadModels(brandFilter);
+        }
+        // Simulate a delay to show the spinner, as onSnapshot is real-time
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setRefreshing(false);
+    }
+  }, [brandFilter]);
+
   const [alertConfig, setAlertConfig] = useState({ 
     visible: false, 
     title: "", 
@@ -831,7 +853,10 @@ export default function AutosPublicTab() {
           </View>
         ) : (
           <FlatList 
-            style={{ flex: 1 }}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2563eb" />
+                    }
+                    style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
             data={filteredVehicles} 
             keyExtractor={(item) => item.id} 
@@ -901,6 +926,7 @@ export default function AutosPublicTab() {
         />
       </View>
       </WebContainer>
+      <Onboarding />
     </SafeAreaView>
   );
 }

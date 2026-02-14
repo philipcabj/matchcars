@@ -5,7 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,9 +21,10 @@ export default function NotificationsScreen() {
   const { markNotificationsAsRead, clearNotifications, lastSeenAt, clearedAt } = useNotifications();
   const { filter } = useLocalSearchParams<{ filter?: string }>();
 
-  const [activeTab, setActiveTab] = useState<"messages" | "likes" | "matches">("messages");
+  const [activeTab, setActiveTab] = useState<"messages" | "likes" | "matches" | "alerts">("messages");
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [priceAlerts, setPriceAlerts] = useState<any[]>([]); // New state for price alerts
   const [likesReceived, setLikesReceived] = useState<Map<string, number>>(new Map());
   const [profiles, setProfiles] = useState<Map<string, { name: string; initials: string; avatarColor: string; photoUrl?: string }>>(new Map());
   const [likersOfMine, setLikersOfMine] = useState<Map<string, Set<string>>>(new Map());
@@ -96,10 +97,42 @@ export default function NotificationsScreen() {
     return () => unsub();
   }, [user]);
 
+  const handlePriceAlertPress = async (item: any) => {
+    if (!user) return;
+    try {
+        if (!item.read) {
+             await setDoc(doc(db, "users", user.uid, "price_alert_notifications", item.id), { read: true }, { merge: true });
+        }
+    } catch (e) {
+        console.error("Error marking alert as read", e);
+    }
+    router.push(`/car/${item.vehicleId}`);
+  };
+
+  // Listen for Price Alerts
+  useEffect(() => {
+      if (!user) return;
+      const q = query(
+          collection(db, "users", user.uid, "price_alert_notifications")
+      );
+      const unsub = onSnapshot(q, (snap) => {
+          const alerts: any[] = [];
+          snap.forEach(d => alerts.push({ id: d.id, ...d.data() }));
+          // Sort in memory to avoid index issues
+          alerts.sort((a, b) => {
+              const tA = a.createdAt?.seconds || 0;
+              const tB = b.createdAt?.seconds || 0;
+              return tB - tA;
+          });
+          setPriceAlerts(alerts);
+      });
+      return () => unsub();
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
-    const ownRef = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-    const unsubOwn = onSnapshot(ownRef, (snap) => {
+    const q = query(collection(db, "likes"), where("ownerId", "==", user.uid));
+    const unsubOwn = onSnapshot(q, (snap) => {
       const likers = new Map<string, number>();
       snap.forEach((d) => {
         const data: any = d.data();
@@ -265,8 +298,8 @@ export default function NotificationsScreen() {
       <View style={{ flex: 1 }}>
         {/* Custom Tabs */}
         <View style={{ flexDirection: "row", backgroundColor: theme.card, padding: 4, margin: 16, borderRadius: 12 }}>
-          {(["messages", "likes", "matches"] as const).map((tab) => {
-             const labels = { messages: "Mensajes", likes: "Likes", matches: "Matches" };
+          {(["messages", "likes", "matches", "alerts"] as const).map((tab) => {
+             const labels = { messages: "Mensajes", likes: "Likes", matches: "Matches", alerts: "Alertas" };
              const isActive = activeTab === tab;
              return (
                <TouchableOpacity
@@ -287,6 +320,9 @@ export default function NotificationsScreen() {
                  }}>
                    {labels[tab]}
                  </Text>
+                 {tab === "alerts" && priceAlerts.some((a) => !a.read) && (
+                   <View style={{ position: "absolute", top: 6, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: "#EF4444" }} />
+                 )}
                </TouchableOpacity>
              );
           })}
@@ -298,6 +334,48 @@ export default function NotificationsScreen() {
           </View>
         ) : (
           <View style={{ flex: 1, paddingHorizontal: 16 }}>
+            {activeTab === "alerts" && (
+              <FlatList
+                data={priceAlerts}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity 
+                    onPress={() => handlePriceAlertPress(item)}
+                    style={{ 
+                      backgroundColor: theme.card, 
+                      padding: 16, 
+                      marginBottom: 1, 
+                      flexDirection: 'row', 
+                      alignItems: 'center',
+                      opacity: item.read ? 0.7 : 1
+                    }}
+                  >
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <Ionicons name="pricetag" size={24} color={theme.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: 16 }}>¡Bajó de precio!</Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 14 }}>
+                         {item.brand} {item.model} bajó a {item.newPrice}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
+                        {new Date(item.createdAt?.seconds * 1000).toLocaleDateString()}
+                      </Text>
+                    </View>
+                    {!item.read && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.accent }} />}
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  <View style={{ padding: 32, alignItems: 'center' }}>
+                    <Ionicons name="notifications-off-outline" size={48} color={theme.textMuted} />
+                    <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 16 }}>
+                      No tienes alertas de precio por ahora.
+                    </Text>
+                  </View>
+                }
+              />
+            )}
+
             {activeTab === "messages" && (
               <>
                 {filteredConversations.length === 0 ? (

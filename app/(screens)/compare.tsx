@@ -14,8 +14,26 @@ const HEADER_HEIGHT = 180;
 
 export default function CompareScreen() {
   const { selectedVehicles, toggleVehicle, clearSelection } = useCompare();
-  const { theme } = useTheme();
+  const { theme, themeName } = useTheme();
   const router = useRouter();
+
+  // Calculate Best Values
+  const bestValues = React.useMemo(() => {
+    if (selectedVehicles.length < 2) return null;
+
+    const currencies = new Set(selectedVehicles.map(v => v.currency));
+    const sameCurrency = currencies.size === 1;
+
+    const prices = selectedVehicles.map(v => Number(v.price)).filter(p => !isNaN(p) && p > 0);
+    const years = selectedVehicles.map(v => Number(v.year)).filter(y => !isNaN(y) && y > 0);
+    const kms = selectedVehicles.map(v => Number(v.km)).filter(k => !isNaN(k));
+
+    return {
+        minPrice: sameCurrency && prices.length > 0 ? Math.min(...prices) : null,
+        maxYear: years.length > 0 ? Math.max(...years) : null,
+        minKm: kms.length > 0 ? Math.min(...kms) : null
+    };
+  }, [selectedVehicles]);
 
   if (selectedVehicles.length === 0) {
     return (
@@ -63,7 +81,7 @@ export default function CompareScreen() {
   );
 
   // Helper to render a data cell
-  const renderDataCell = (content: React.ReactNode, isHeader = false) => (
+  const renderDataCell = (content: React.ReactNode, isHeader = false, isBest = false) => (
     <View style={{ 
         width: COL_WIDTH, 
         height: isHeader ? HEADER_HEIGHT : ROW_HEIGHT, 
@@ -73,7 +91,8 @@ export default function CompareScreen() {
         borderBottomWidth: 1, 
         borderBottomColor: theme.badgeBorder,
         borderRightWidth: 1,
-        borderRightColor: theme.badgeBorder
+        borderRightColor: theme.badgeBorder,
+        backgroundColor: isBest ? (themeName === 'dark' ? '#064e3b' : '#dcfce7') : undefined
     }}>
         {content}
     </View>
@@ -150,10 +169,12 @@ export default function CompareScreen() {
                     {renderDataCell(
                         <Text style={{ color: theme.price, fontWeight: '700' }}>
                             {vehicle.currency && vehicle.price ? `${vehicle.currency} ${vehicle.price.toLocaleString("es-AR")}` : "Consultar"}
-                        </Text>
+                        </Text>,
+                        false,
+                        bestValues?.minPrice !== null && Number(vehicle.price) === bestValues.minPrice
                     )}
-                    {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.year}</Text>)}
-                    {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.km ? `${vehicle.km.toLocaleString("es-AR")} km` : "-"}</Text>)}
+                    {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.year}</Text>, false, bestValues?.maxYear !== null && Number(vehicle.year) === bestValues.maxYear)}
+                    {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.km ? `${vehicle.km.toLocaleString("es-AR")} km` : "-"}</Text>, false, bestValues?.minKm !== null && Number(vehicle.km) === bestValues.minKm)}
                     {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.fuelType || "-"}</Text>)}
                     {renderDataCell(<Text style={{ color: theme.text }}>{vehicle.gearbox || "-"}</Text>)}
                     {renderDataCell(<Text style={{ color: theme.text, textAlign: 'center' }} numberOfLines={2}>{vehicle.location?.province || vehicle.province || "-"}</Text>)}
