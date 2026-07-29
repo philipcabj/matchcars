@@ -3,10 +3,14 @@ import { Header } from "@/components/Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { ENTITLEMENT_ID, useRevenueCat } from "@/contexts/RevenueCatContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { Analytics } from "@/lib/analytics";
+import { db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { addDoc, collection } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { PurchasesPackage } from "react-native-purchases";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -30,13 +34,13 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro",
     title: "Plan PRO",
-    subtitle: "Ideal para vendedores particulares activos",
+    subtitle: "Ideal para particulares activos",
     packageIdMonthly: "matchcars_pro_mensual",
     packageIdAnnual: "matchcars_pro_anual",
     fallbackPriceMonthly: 9.99,
     fallbackPriceAnnual: 79.99,
     features: [
-      "🚗 Hasta 3 autos activos simultáneamente",
+      "🚗 Hasta 3 autos activos",
       "⭐ 2 destacados por mes (7 días c/u)",
       "🚀 Posicionamiento mejorado",
       "📊 Métricas básicas (Vistas y Likes)",
@@ -49,21 +53,20 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro_plus",
     title: "Plan PRO Plus",
-    subtitle: "Para quienes quieren vender más rápido",
+    subtitle: "Todo lo de PRO + más potencia",
     packageIdMonthly: "matchcars_pro_plus_mensual",
     packageIdAnnual: "matchcars_pro_plus_anual",
     fallbackPriceMonthly: 19.99,
     fallbackPriceAnnual: 169.99,
     features: [
-      "🚗 Hasta 7 autos activos simultáneamente",
-      "⭐ 5 destacados por mes (7 días c/u)",
-      "🚀 Boost automático los fines de semana",
+      "🚗 Hasta 7 autos activos",
+      "⭐ 5 destacados por mes",
+      "🚀 Boost automático fines de semana",
       "📈 Análisis de Precio de Mercado",
       "📄 Ficha PDF con QR",
-      "📩 Contacto prioritario",
-      "🔔 Alertas de interesados en tiempo real",
       "📹 Video Walkaround",
-      "🏷️ Badge PRO",
+      "🏷️ Badge PRO Plus",
+      "✨ Herramientas de edición IA (Mejorar foto / Tapar patente)",
     ],
     color: "#50E3C2",
     recommended: true,
@@ -72,21 +75,20 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro_dealer",
     title: "Plan PRO Dealer",
-    subtitle: "Solución profesional para Agencias",
+    subtitle: "Solución para Agencias",
     packageIdMonthly: "matchcars_dealer_mensual",
     packageIdAnnual: "matchcars_dealer_anual",
     fallbackPriceMonthly: 59.99,
     fallbackPriceAnnual: 499.99,
     features: [
-      "🚗 Hasta 30 autos activos simultáneamente",
-      "⭐ Destacados ilimitados (en stock activo)",
+      "🚗 Hasta 30 autos activos",
+      "⭐ Destacados ilimitados",
       "💻 Acceso Web y Carga Masiva (CSV)",
-      "🚀 Posicionamiento Máximo",
+      "📞 CRM de Leads integrado",
+      "🤝 Gestión de cierre de ventas",
       "✅ Badge Agencia Verificada",
-      "📊 Reportes avanzados de rendimiento",
-      "👥 Gestión multi-auto",
-      "📞 Soporte prioritario",
-      "📹 Video Walkaround",
+      "📊 Reportes avanzados",
+      "✨ Herramientas de edición IA",
     ],
     color: "#9013FE",
     hasTrial: true,
@@ -94,23 +96,87 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "dealer_pro_plus",
     title: "Dealer PRO Plus",
-    subtitle: "Para agencias con alto volumen (Opcional)",
+    subtitle: "Máxima Exposición",
     packageIdMonthly: "matchcars_dealer_pro_plus_mensual",
     packageIdAnnual: "matchcars_dealer_pro_plus_anual",
     fallbackPriceMonthly: 99,
     fallbackPriceAnnual: 899,
     features: [
-      "🚗 Autos activos ilimitados",
-      "🚀 Prioridad absoluta en resultados",
+      "🚗 Autos activos ILIMITADOS",
+      "🚀 Prioridad absoluta en búsquedas",
       "📈 Estadísticas de mercado por zona",
       "🏠 Presencia destacada en Home",
-      "📢 Mayor visibilidad en notificaciones",
+      "📢 Notificaciones push segmentadas",
+      "📞 CRM de Leads integrado",
+      "✨ Herramientas de edición IA",
     ],
-    color: "#555555",
-    comingSoon: true,
+    color: "#FFD700",
+    comingSoon: true, // Volvemos a ponerlo como Coming Soon (Consultar)
     hasTrial: false,
   },
 ];
+
+const COMPARISON_ROWS = [
+  { label: "Autos activos",     free: "1",        pro: "3",        proPlus: "7",         dealer: "30",      dealerPro: "∞" },
+  { label: "Destacados / mes",  free: "—",        pro: "2",        proPlus: "5",         dealer: "∞",       dealerPro: "∞" },
+  { label: "Métricas",          free: "—",        pro: "Básicas",  proPlus: "Avanzadas", dealer: "Avanzadas", dealerPro: "Avanzadas" },
+  { label: "Boost fin de sem.", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Video walkaround",  free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Herr. IA",          free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "CRM de Leads",      free: "—",        pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Carga masiva CSV",  free: "—",        pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
+];
+
+function ComparisonTable({ theme }: { theme: any }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const cols = ["Gratis", "PRO", "PRO+", "Dealer", "D.Pro+"];
+  const colColors = ["#888", "#4A90E2", "#50E3C2", "#9013FE", "#FFD700"];
+
+  return (
+    <View style={{ marginBottom: 24 }}>
+      <TouchableOpacity
+        onPress={() => setExpanded((p) => !p)}
+        style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10 }}
+      >
+        <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={16} color={theme.accent} />
+        <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 13 }}>
+          {expanded ? "Ocultar comparativa" : "Ver comparativa de planes"}
+        </Text>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={{ backgroundColor: theme.card, borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: theme.badgeBorder }}>
+          {/* Header row */}
+          <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: theme.badgeBorder }}>
+            <View style={{ flex: 2, padding: 8 }} />
+            {cols.map((col, i) => (
+              <View key={col} style={{ flex: 1.5, padding: 8, alignItems: "center" }}>
+                <Text style={{ color: colColors[i], fontSize: 10, fontWeight: "800" }} numberOfLines={1}>{col}</Text>
+              </View>
+            ))}
+          </View>
+          {/* Data rows */}
+          {COMPARISON_ROWS.map((row, ri) => (
+            <View
+              key={row.label}
+              style={{ flexDirection: "row", backgroundColor: ri % 2 === 0 ? "transparent" : `${theme.accent}08`, borderBottomWidth: ri < COMPARISON_ROWS.length - 1 ? 1 : 0, borderBottomColor: theme.badgeBorder }}
+            >
+              <View style={{ flex: 2, padding: 8, justifyContent: "center" }}>
+                <Text style={{ color: theme.text, fontSize: 11 }}>{row.label}</Text>
+              </View>
+              {[row.free, row.pro, row.proPlus, row.dealer, row.dealerPro].map((val, i) => (
+                <View key={i} style={{ flex: 1.5, padding: 8, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ color: val === "—" ? theme.textMuted : val === "✓" ? "#2ECC71" : colColors[i], fontSize: 11, fontWeight: val !== "—" ? "700" : "400" }}>
+                    {val}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function SubscribeScreen() {
   const { theme } = useTheme();
@@ -188,6 +254,82 @@ export default function SubscribeScreen() {
     }
   };
 
+  const [consultingPlan, setConsultingPlan] = useState<string | null>(null);
+  const [consultationText, setConsultationText] = useState("");
+  const [sendingConsultation, setSendingConsultation] = useState(false);
+
+  const handleConsultation = async () => {
+    if (!user || !consultingPlan) return;
+    
+    // Track consultation interest
+    try {
+      Analytics.logEvent('consultation_inquiry', {
+        plan_id: consultingPlan,
+        user_id: user.uid,
+        current_plan: profile?.plan || 'free',
+      });
+    } catch (e) {
+      logger.warn('[Subscribe] Error logging consultation:', e);
+    }
+    
+    setSendingConsultation(true);
+    try {
+      // Create a document in the 'mail' collection which is already configured with Trigger Email extension
+      // and likely has correct permissions for authenticated users.
+      const mailDoc = {
+        to: ["francodavid.guarino@gmail.com"],
+        from: "Matchcars <noreply@matchcars.app>",
+        message: {
+          subject: `Nueva consulta de Plan: ${consultingPlan}`,
+          text: `El usuario ${user.email} está interesado en el plan ${consultingPlan}.\n\nNombre: ${profile?.firstName ? `${profile.firstName} ${profile.lastName}` : user.displayName || "Usuario"}\nID Usuario: ${user.uid}\nMensaje: ${consultationText}`,
+          html: `
+            <h3>Nueva consulta de Plan PRO</h3>
+            <p>El usuario <b>${user.email}</b> está interesado en el plan <b>${consultingPlan}</b>.</p>
+            <p><b>Nombre:</b> ${profile?.firstName ? `${profile.firstName} ${profile.lastName}` : user.displayName || "Usuario"}</p>
+            <p><b>ID Usuario:</b> ${user.uid}</p>
+            <p><b>Mensaje:</b> ${consultationText}</p>
+          `
+        },
+        createdAt: new Date(),
+        // Also keep a record in a separate collection if possible, but let's prioritize the email first
+        metadata: {
+          userId: user.uid,
+          userEmail: user.email,
+          type: "plan_consultation",
+          planId: consultingPlan
+        }
+      };
+
+      await addDoc(collection(db, "mail"), mailDoc);
+
+      // Close the modal FIRST
+      setConsultingPlan(null);
+      setConsultationText("");
+
+      // Then show the success alert
+      setTimeout(() => {
+        showAlert(
+          "Consulta enviada", 
+          "Tu interés ha sido registrado. Un asesor se pondrá en contacto con vos a la brevedad para brindarte más información sobre el plan Dealer PRO Plus.",
+          "success"
+        );
+      }, 100);
+    } catch (e: any) {
+      console.error(e);
+      showAlert("Error", "No pudimos enviar tu consulta en este momento. Por favor intentá más tarde.", "error");
+    } finally {
+      setSendingConsultation(false);
+    }
+  };
+
+  const handleConsultationButtonClick = (planId: string) => {
+    if (!user) {
+        router.push("/login");
+        return;
+    }
+    setConsultingPlan(planId);
+  };
+
   const handleSubscribe = async (pack: PurchasesPackage | undefined, planId: string) => {
     if (!user) {
       router.push("/login");
@@ -206,6 +348,11 @@ export default function SubscribeScreen() {
           try {
             setPurchasing(true);
             const internalPlanId = `${planId}_${billingCycle}` as any;
+            
+            // Track admin assignment as conversion
+            const currentPlan = profile?.plan || 'free';
+            Analytics.logPlanConversion(currentPlan, planId, 'admin_assign', billingCycle);
+            
             await updatePlan(internalPlanId, billingCycle);
             showAlert("Admin", "Plan asignado correctamente.", "success", () => router.back());
           } catch (e) {
@@ -226,8 +373,20 @@ export default function SubscribeScreen() {
     if (!pack) return; // Should not happen given UI logic, but safety check
 
     setPurchasing(true);
+    
+    // Track conversion attempt (before the purchase to capture intent)
+    try {
+      const currentPlan = profile?.plan || 'free';
+      Analytics.logPlanConversion(currentPlan, planId, 'subscribe_screen', billingCycle);
+    } catch (e) {
+      logger.warn('[Subscribe] Error logging plan conversion:', e);
+    }
+    
     try {
       const { customerInfo } = await purchasePackage(pack);
+      
+      // Track Purchase in Meta Analytics
+      Analytics.logPurchasePro(planId, pack.product.price, pack.product.currencyCode);
 
       // Sincronizar con Firestore
       // Determinamos el ID interno según la lógica de tipos actual
@@ -320,6 +479,64 @@ export default function SubscribeScreen() {
           {isAdmin ? "MODO ADMIN ACTIVADO: Selección directa habilitada" : "Elegí el plan que mejor se adapte a tus necesidades y potenciá tus ventas."}
         </Text>
 
+        {/* Modal de Consulta */}
+        <Modal
+          visible={!!consultingPlan}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setConsultingPlan(null)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+            <View style={{ backgroundColor: theme.card, borderRadius: 20, padding: 24, width: '100%', maxWidth: 400 }}>
+                <Text style={{ color: theme.text, fontSize: 20, fontWeight: '800', marginBottom: 8 }}>Solicitar Información</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 14, marginBottom: 20 }}>
+                    Dejanos un mensaje y un asesor te contactará para brindarte detalles exclusivos sobre el plan {PLAN_DEFINITIONS.find(p => p.id === consultingPlan)?.title}.
+                </Text>
+                
+                <TextInput
+                    value={consultationText}
+                    onChangeText={setConsultationText}
+                    placeholder="Escribí tu mensaje aquí (opcional)..."
+                    placeholderTextColor={theme.textMuted}
+                    multiline
+                    numberOfLines={4}
+                    style={{
+                        backgroundColor: theme.inputBackground,
+                        color: theme.text,
+                        borderRadius: 12,
+                        padding: 12,
+                        height: 120,
+                        textAlignVertical: 'top',
+                        marginBottom: 20,
+                        borderWidth: 1,
+                        borderColor: theme.badgeBorder
+                    }}
+                />
+
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <TouchableOpacity 
+                        onPress={() => setConsultingPlan(null)}
+                        style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: theme.inputBackground }}
+                    >
+                        <Text style={{ color: theme.text, fontWeight: '700' }}>Cancelar</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                        onPress={handleConsultation}
+                        disabled={sendingConsultation}
+                        style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: theme.accent }}
+                    >
+                        {sendingConsultation ? (
+                            <ActivityIndicator color="#FFF" />
+                        ) : (
+                            <Text style={{ color: "#FFF", fontWeight: '700' }}>Enviar Consulta</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* Toggle Mensual / Anual */}
         <View style={{ flexDirection: "row", justifyContent: "center", marginBottom: 24 }}>
           <View style={{ flexDirection: "row", backgroundColor: theme.card, borderRadius: 20, padding: 4, borderWidth: 1, borderColor: theme.badgeBorder }}>
@@ -353,6 +570,9 @@ export default function SubscribeScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Tabla Comparativa */}
+        <ComparisonTable theme={theme} />
 
         <View style={{ gap: 20 }}>
           {PLAN_DEFINITIONS.map((planDef) => {
@@ -391,38 +611,48 @@ export default function SubscribeScreen() {
 
             const period = billingCycle === "monthly" ? "/ mes" : "/ año";
             
-            // Si es admin, siempre habilitado. Si es usuario, depende de si hay paquete RC.
-            // Para "Coming Soon", deshabilitamos.
-            const isButtonEnabled = (isAdmin || !!rcPackage) && !planDef.comingSoon;
-            
-            // Decidir si mostramos el badge de trial
-            // Mostramos si RevenueCat dice que hay trial, O si estamos en modo fallback y la definición dice que hay trial
-            const showTrialBadge = hasFreeTrial || (!rcPackage && planDef.hasTrial);
+            // Strip billing cycle suffix before comparing so "pro_monthly" matches planDef.id "pro"
+            // but "pro_plus_monthly" does NOT match planDef.id "pro"
+            const planBase = (profile?.plan || "").replace(/_monthly$|_annual$/, "");
+            const isCurrentPlan = !!profile?.plan && planBase === planDef.id;
 
-            const isCurrentPlan = profile?.plan?.startsWith(planDef.id);
+            // Decidir si mostramos el badge de trial
+            const showTrialBadge = hasFreeTrial || (!rcPackage && planDef.hasTrial);
 
             return (
               <View 
                 key={planDef.id} 
-                style={{ 
-                  backgroundColor: theme.card, 
-                  borderRadius: 24, 
-                  padding: 24, 
-                  borderWidth: isCurrentPlan ? 2 : 1, 
+                style={{
+                  backgroundColor: theme.card,
+                  borderRadius: 24,
+                  padding: 24,
+                  borderWidth: isCurrentPlan ? 2.5 : 1,
                   borderColor: isCurrentPlan ? planDef.color : theme.badgeBorder,
                   position: "relative",
-                  opacity: planDef.comingSoon ? 0.7 : 1,
+                  opacity: planDef.comingSoon ? 0.7 : isCurrentPlan ? 1 : 0.72,
+                  shadowColor: isCurrentPlan ? planDef.color : "transparent",
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: isCurrentPlan ? 0.35 : 0,
+                  shadowRadius: isCurrentPlan ? 12 : 0,
+                  elevation: isCurrentPlan ? 6 : 0,
                 }}
               >
-                {planDef.recommended && (
+                {isCurrentPlan && (
+                  <View style={{ position: "absolute", top: -12, left: 24, backgroundColor: "#2ECC71", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Ionicons name="checkmark-circle" size={12} color="#FFF" />
+                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>TU PLAN ACTUAL</Text>
+                  </View>
+                )}
+
+                {planDef.recommended && !isCurrentPlan && (
                   <View style={{ position: "absolute", top: -12, right: 24, backgroundColor: planDef.color, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
                     <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>RECOMENDADO</Text>
                   </View>
                 )}
-                
+
                 {planDef.comingSoon && (
                   <View style={{ position: "absolute", top: -12, right: 24, backgroundColor: "#555", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 }}>
-                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>PRÓXIMAMENTE</Text>
+                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 12 }}>CONSULTAR</Text>
                   </View>
                 )}
 
@@ -470,28 +700,34 @@ export default function SubscribeScreen() {
                   </View>
 
                   <TouchableOpacity
-                    disabled={purchasing || !isButtonEnabled}
-                    onPress={() => handleSubscribe(rcPackage, planDef.id)}
+                    disabled={purchasing || isCurrentPlan}
+                    onPress={() => {
+                        if (planDef.comingSoon || !rcPackage) {
+                            handleConsultationButtonClick(planDef.id);
+                        } else {
+                            handleSubscribe(rcPackage, planDef.id);
+                        }
+                    }}
                     style={{
-                      backgroundColor: (!isButtonEnabled) ? theme.textMuted : planDef.color,
+                      backgroundColor: isCurrentPlan ? "#2ECC71" : planDef.color,
                       borderRadius: 12,
                       paddingVertical: 14,
                       marginTop: 20,
                       alignItems: "center",
+                      opacity: isCurrentPlan ? 0.85 : 1,
                     }}
                   >
                     {purchasing ? (
                         <ActivityIndicator color="#FFF" />
                     ) : (
                         <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 16 }}>
-                        {planDef.comingSoon 
-                           ? "Próximamente"
-                           : !isButtonEnabled 
-                             ? "No disponible" 
-                             : (isAdmin 
-                                 ? "Asignar Gratis (Admin)" 
-                                 : (showTrialBadge ? "Comenzar Prueba Gratis" : "Suscribirme")
-                               )
+                        {isCurrentPlan
+                           ? "✓ Tu plan actual"
+                           : isAdmin && rcPackage
+                             ? "Asignar Gratis (Admin)"
+                             : planDef.comingSoon || !rcPackage
+                               ? "Solicitar cambio de plan"
+                               : showTrialBadge ? "Comenzar Prueba Gratis" : "Suscribirme"
                         }
                         </Text>
                     )}

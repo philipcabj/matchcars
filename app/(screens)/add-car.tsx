@@ -5,16 +5,22 @@ import { SelectionModal } from "@/components/SelectionModal";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { db, storage, vertexAI } from "@/lib/firebase";
+import { notifyAdminNewVehicle } from "@/lib/admin-notifications";
+import { detectCar, detectLicensePlate, type BoundingBox } from "@/lib/ai";
+import { Analytics } from "@/lib/analytics";
+import { app, db, storage, vertexAI } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
+import { analyzeMarketPrice } from "@/lib/pricing";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ResizeMode, Video } from "expo-av";
 import Constants from "expo-constants";
-import * as FileSystemLegacy from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
 import { getGenerativeModel } from "firebase/vertexai";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -24,13 +30,18 @@ import {
     Image,
     Keyboard,
     Platform,
+    StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View
 } from "react-native";
+import { Directions, Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { G, Path, Svg } from "react-native-svg";
+import { captureRef } from "react-native-view-shot";
 import { CAR_MODELS_AR } from "../../config/carModelsAr";
 type InputProps = {
   label: string;
@@ -91,6 +102,134 @@ const Input = ({
               )}
     </View>
   );
+}
+
+
+const StickerMask = ({
+  box,
+  onUpdate,
+  containerWidth,
+  containerHeight,
+  type = 'image',
+}: {
+  box: BoundingBox;
+  onUpdate: (newBox: BoundingBox) => void;
+  containerWidth: number;
+  containerHeight: number;
+  type?: 'image' | 'solid';
+}) => {
+  // Convert relative coordinates (0-1) to pixel values for the gesture handler
+  const x = useSharedValue(box.xmin * containerWidth);
+  const y = useSharedValue(box.ymin * containerHeight);
+  const w = useSharedValue((box.xmax - box.xmin) * containerWidth);
+  const h = useSharedValue((box.ymax - box.ymin) * containerHeight);
+
+  // Sync when props change (e.g. initial load or external update)
+  useEffect(() => {
+    if (containerWidth > 0 && containerHeight > 0) {
+      x.value = box.xmin * containerWidth;
+      y.value = box.ymin * containerHeight;
+      w.value = (box.xmax - box.xmin) * containerWidth;
+      h.value = (box.ymax - box.ymin) * containerHeight;
+    }
+  }, [box, containerWidth, containerHeight]);
+
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const startW = useSharedValue(0);
+  const startH = useSharedValue(0);
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      startX.value = x.value;
+      startY.value = y.value;
+    })
+    .onUpdate((e) => {
+      x.value = startX.value + e.translationX;
+      y.value = startY.value + e.translationY;
+    })
+    .onEnd(() => {
+      // Normalize back to 0-1 and update parent
+      const newBox = {
+        xmin: x.value / containerWidth,
+        ymin: y.value / containerHeight,
+        xmax: (x.value + w.value) / containerWidth,
+        ymax: (y.value + h.value) / containerHeight,
+      };
+      runOnJS(onUpdate)(newBox);
+    });
+
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => {
+      startW.value = w.value;
+      startH.value = h.value;
+      startX.value = x.value;
+      startY.value = y.value;
+    })
+    .onUpdate((e) => {
+      // Scale from center
+      const newW = startW.value * e.scale;
+      const newH = startH.value * e.scale;
+      
+      // Center adjustment
+      const dw = newW - startW.value;
+      const dh = newH - startH.value;
+      
+      w.value = newW;
+      h.value = newH;
+      x.value = startX.value - dw / 2;
+      y.value = startY.value - dh / 2;
+    })
+    .onEnd(() => {
+      const newBox = {
+        xmin: x.value / containerWidth,
+        ymin: y.value / containerHeight,
+        xmax: (x.value + w.value) / containerWidth,
+        ymax: (y.value + h.value) / containerHeight,
+      };
+      runOnJS(onUpdate)(newBox);
+    });
+    
+  // Combined gesture for simultaneous drag and resize (pinch)
+  const gesture = Gesture.Simultaneous(panGesture, pinchGesture);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    position: 'absolute',
+    left: x.value,
+    top: y.value,
+    width: w.value,
+    height: h.value,
+    transform: [{ translateX: 0 }, { translateY: 0 }], // Reset transform as we use left/top directly
+  }));
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.View
+        style={[
+          animatedStyle,
+          {
+            justifyContent: 'center',
+            alignItems: 'center',
+            overflow: 'hidden',
+            borderRadius: 8,
+            borderWidth: 0, // No border for cleaner look
+            backgroundColor: '#000000', // Solid black to cover plate
+            zIndex: 100,
+          },
+        ]}
+      >
+        {type === 'image' && (
+          <Image
+            source={require('../../assets/images/icon.png')}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="stretch" // Stretch logo to completely cover the plate area
+          />
+        )}
+        {/* Resize handle hint */}
+        <View style={{ position: 'absolute', bottom: 4, right: 4, width: 12, height: 12, borderRadius: 6, backgroundColor: 'white', opacity: 0.8, borderWidth: 1, borderColor: '#ccc' }} />
+      </Animated.View>
+    </GestureDetector>
+  );
 };
 
 const DEFAULT_MODELS_BY_MAKE: Record<string, string[]> = {
@@ -107,28 +246,46 @@ const DEFAULT_MODELS_BY_MAKE: Record<string, string[]> = {
 };
 
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
+import { canUploadVideo, canUseAITools, getMaxCars, isDealerPlan } from "@/lib/planChecks";
+import { CITY_OPTIONS_BY_PROVINCE, PROVINCES } from "@/config/locations";
 
 export default function AddCarScreen() {
   const router = useRouter();
   const { user, profile, refreshTrustLevel } = useAuth();
-  const { theme } = useTheme();
+  const { theme, themeName } = useTheme();
   const insets = useSafeAreaInsets();
 
-  if (Platform.OS === 'web') {
+  if (Platform.OS === "web") {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <DownloadAppBanner message="Descargá la App para publicar tu auto" />
-          <TouchableOpacity onPress={() => router.replace("/(tabs)")} style={{ marginTop: 20, padding: 10 }}>
-              <Text style={{ color: theme.accent, fontSize: 16, fontWeight: '600' }}>Volver al inicio</Text>
-          </TouchableOpacity>
+      <SafeAreaView
+        style={{
+          flex: 1,
+          backgroundColor: theme.background,
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 20,
+        }}
+      >
+        <DownloadAppBanner message="Descargá la App para publicar tu auto" />
+        <TouchableOpacity
+          onPress={() => router.replace("/(tabs)")}
+          style={{ marginTop: 20, padding: 10 }}
+        >
+          <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600" }}>
+            Volver al inicio
+          </Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   const userId = user?.uid || "anon";
-  const userName = (profile?.firstName && profile?.lastName) 
-    ? `${profile.firstName} ${profile.lastName}`
-    : user?.displayName || user?.email || "Usuario";
+  const isDealer = isDealerPlan(profile?.plan);
+  const defaultUserName =
+    profile?.firstName && profile?.lastName
+      ? `${profile.firstName} ${profile.lastName}`
+      : user?.displayName || user?.email || "Usuario";
+  const userName = isDealer && profile?.agencyName ? profile.agencyName : defaultUserName;
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
@@ -142,8 +299,14 @@ export default function AddCarScreen() {
   const [cityOpen, setCityOpen] = useState(false);
   const [citiesList, setCitiesList] = useState<string[]>([]);
 
+  const [valuationResult, setValuationResult] = useState<{
+    conditionLabel: string; conditionScore: number; issues: string[]; priceMin: number; priceMax: number; priceRationale: string;
+  } | null>(null);
+  const [valuationLoading, setValuationLoading] = useState(false);
+
   const [coverImage, setCoverImage] = useState("");
   const [coverLocalUri, setCoverLocalUri] = useState<string>("");
+  const [coverOriginalUri, setCoverOriginalUri] = useState<string>("");
   const [coverUploading, setCoverUploading] = useState<boolean>(false);
   const [coverProgress, setCoverProgress] = useState<number>(0);
 
@@ -151,7 +314,79 @@ export default function AddCarScreen() {
   const [videoUploading, setVideoUploading] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
 
-  const [gallery, setGallery] = useState<{ localUri: string; base64?: string; url?: string; uploading: boolean; progress?: number }[]>([]);
+  const [gallery, setGallery] = useState<{ localUri: string; originalUri?: string; base64?: string; url?: string; uploading: boolean; progress?: number }[]>([]);
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [editorTarget, setEditorTarget] = useState<{ type: "cover" | "gallery"; index: number | null } | null>(null);
+  const [editorOriginalUri, setEditorOriginalUri] = useState<string | null>(null);
+  const [editorWorkingUri, setEditorWorkingUri] = useState<string | null>(null);
+  const [editorTab, setEditorTab] = useState<"basic" | "pro">("basic");
+  const [editorMode, setEditorMode] = useState<"standard" | "crop" | "draw" | "paint">("standard");
+  const [editorAutoMasks, setEditorAutoMasks] = useState<(BoundingBox & { type?: 'image' | 'solid' })[]>([]);
+  const [editorPaths, setEditorPaths] = useState<{ path: string; color: string; width: number }[]>([]);
+  const [currentPath, setCurrentPath] = useState<string | null>(null);
+  const activePath = useSharedValue("");
+  const [targetRatio, setTargetRatio] = useState<number>(1);
+  const [imageRatio, setImageRatio] = useState<number>(4 / 3);
+  const [editorLayout, setEditorLayout] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const uri = editorWorkingUri || editorOriginalUri;
+    if (uri) {
+      Image.getSize(uri, (w, h) => {
+        if (w && h) setImageRatio(w / h);
+      });
+    }
+  }, [editorWorkingUri, editorOriginalUri]);
+  const editorLayoutRef = useRef({ width: 0, height: 0 });
+  const [editorBusy, setEditorBusy] = useState(false);
+  const editorViewRef = useRef<View>(null); // For captureRef of the main editor view
+  
+  // Shared values for Crop Mode
+  const cropScale = useSharedValue(1);
+  const cropTranslateX = useSharedValue(0);
+  const cropTranslateY = useSharedValue(0);
+  const savedScale = useSharedValue(1);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const resetCropValues = () => {
+    cropScale.value = 1;
+    cropTranslateX.value = 0;
+    cropTranslateY.value = 0;
+    savedScale.value = 1;
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  };
+
+  const cropAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: cropTranslateX.value },
+      { translateY: cropTranslateY.value },
+      { scale: cropScale.value },
+    ],
+  }));
+
+  const cropGesture = Gesture.Simultaneous(
+    Gesture.Pinch()
+      .onUpdate((e) => {
+        cropScale.value = savedScale.value * e.scale;
+      })
+      .onEnd(() => {
+        savedScale.value = cropScale.value;
+      }),
+    Gesture.Pan()
+      .onUpdate((e) => {
+        cropTranslateX.value = savedTranslateX.value + e.translationX;
+        cropTranslateY.value = savedTranslateY.value + e.translationY;
+      })
+      .onEnd(() => {
+        savedTranslateX.value = cropTranslateX.value;
+        savedTranslateY.value = cropTranslateY.value;
+      })
+  );
+
+
+
   const [loading, setLoading] = useState(false);
   const [loadingAI, setLoadingAI] = useState(false);
   
@@ -169,9 +404,6 @@ export default function AddCarScreen() {
   const [fuelOpen, setFuelOpen] = useState(false);
   const [gearboxOpen, setGearboxOpen] = useState(false);
   const [acceptsFinancing, setAcceptsFinancing] = useState(false);
-  const [finRate, setFinRate] = useState("");
-  const [finMonths, setFinMonths] = useState("");
-  const [finInitialPercent, setFinInitialPercent] = useState("");
   
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -185,15 +417,6 @@ export default function AddCarScreen() {
       case "km":
         if (value && (isNaN(Number(value)) || Number(value) < 0)) error = "Kilometraje inválido.";
         break;
-      case "finRate":
-         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Tasa inválida.";
-         break;
-      case "finMonths":
-         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Plazo inválido.";
-         break;
-      case "finInitialPercent":
-         if (acceptsFinancing && (!value || isNaN(Number(value)))) error = "Porcentaje inválido.";
-         break;
     }
     
     setErrors(prev => {
@@ -248,7 +471,7 @@ export default function AddCarScreen() {
                         confirmText: "Continuar",
                         cancelText: "Descartar",
                         onConfirm: () => {
-                            console.log("Restoring draft for user:", user?.uid);
+                            logger.log("Restoring draft for user:", user?.uid);
                             isRestoring.current = true;
                             
                             // Restore all fields
@@ -267,9 +490,6 @@ export default function AddCarScreen() {
                             setFuelType(draft.fuelType || "");
                             setGearbox(draft.gearbox || "");
                             setAcceptsFinancing(draft.acceptsFinancing || false);
-                            setFinRate(draft.finRate || "");
-                            setFinMonths(draft.finMonths || "");
-                            setFinInitialPercent(draft.finInitialPercent || "");
                             setSingleOwner(draft.singleOwner || false);
                             setServiceRecords(draft.serviceRecords || false);
                             setVtvValid(draft.vtvValid || false);
@@ -291,7 +511,7 @@ export default function AddCarScreen() {
                             }, 2000);
                         },
                         onCancel: async () => {
-                            console.log("Discarding draft...");
+                            logger.log("Discarding draft...");
                             try {
                                 await AsyncStorage.removeItem(DRAFT_KEY);
                                 // Force UI update/reset if needed, though state is already empty
@@ -308,6 +528,7 @@ export default function AddCarScreen() {
         }
     };
     checkDraft();
+    Analytics.logStartPublication();
   }, [user?.uid]);
 
   // Auto-save draft
@@ -321,7 +542,7 @@ export default function AddCarScreen() {
         const draftData = {
             brand, model, version, year, price, currency, km, province, city,
             coverImage, coverLocalUri, gallery, fuelType, gearbox,
-            acceptsFinancing, finRate, finMonths, finInitialPercent,
+            acceptsFinancing,
             singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
             details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
             videoUri
@@ -332,13 +553,13 @@ export default function AddCarScreen() {
             console.error("Error saving draft", e);
         }
     };
-    
+
     const timeout = setTimeout(saveDraft, 1000); // Debounce 1s
     return () => clearTimeout(timeout);
   }, [
     brand, model, version, year, price, currency, km, province, city,
     coverImage, coverLocalUri, gallery, fuelType, gearbox,
-    acceptsFinancing, finRate, finMonths, finInitialPercent,
+    acceptsFinancing,
     singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
     details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
     videoUri
@@ -533,7 +754,7 @@ export default function AddCarScreen() {
           if (snap.exists()) {
             const item = snap.data() as any;
             if (item?.versions && Array.isArray(item.versions) && item.versions.length > 0) {
-              console.log("Remote item found:", item);
+              logger.log("Remote item found:", item);
               setVersionsRemote(item.versions);
               return;
             }
@@ -577,7 +798,7 @@ export default function AddCarScreen() {
           setCitiesList(defaults.sort());
         }
       } catch (e) {
-        console.log("Error fetching cities for province:", province, e);
+        logger.log("Error fetching cities for province:", province, e);
         setCitiesList(defaults.sort());
       }
     };
@@ -620,45 +841,6 @@ export default function AddCarScreen() {
   }, [brand, modelsByMake, modelsRemote]);
   const CURRENT_YEAR = new Date().getFullYear();
   const yearOptions = Array.from({ length: 40 }, (_, i) => String(CURRENT_YEAR - i));
-  const PROVINCES: string[] = [
-    "Buenos Aires",
-    "CABA",
-    "Catamarca",
-    "Chaco",
-    "Chubut",
-    "Córdoba",
-    "Corrientes",
-    "Entre Ríos",
-    "Formosa",
-    "Jujuy",
-    "La Pampa",
-    "La Rioja",
-    "Mendoza",
-    "Misiones",
-    "Neuquén",
-    "Río Negro",
-    "Salta",
-    "San Juan",
-    "San Luis",
-    "Santa Cruz",
-    "Santa Fe",
-    "Santiago del Estero",
-    "Tierra del Fuego",
-    "Tucumán",
-  ];
-
-  const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
-    "Buenos Aires": ["La Plata", "Mar del Plata", "Bahía Blanca", "Quilmes", "Morón", "Tandil", "San Isidro", "Pilar", "Tigre", "Vicente López"],
-    "CABA": ["Palermo", "Recoleta", "Belgrano", "Caballito", "Flores", "Mataderos", "Villa Urquiza", "Devoto"],
-    "Córdoba": ["Córdoba", "Villa Carlos Paz", "Río Cuarto", "Alta Gracia", "Villa María"],
-    "Santa Fe": ["Rosario", "Santa Fe", "Rafaela", "Venado Tuerto"],
-    "Mendoza": ["Mendoza", "Godoy Cruz", "Guaymallén", "San Rafael"],
-    "Tucumán": ["San Miguel de Tucumán", "Yerba Buena", "Tafí Viejo"],
-    "Salta": ["Salta", "San Lorenzo", "Tartagal"],
-    "Neuquén": ["Neuquén", "Plottier", "Centenario"],
-    "Río Negro": ["Bariloche", "General Roca", "Cipolletti"],
-    "Chubut": ["Comodoro Rivadavia", "Trelew", "Puerto Madryn"],
-  };
 
   
 
@@ -738,7 +920,7 @@ export default function AddCarScreen() {
   ) => {
     if (blob) {
       try {
-        console.log("Starting uploadBytesResumable to:", storageRef.fullPath);
+        logger.log("Starting uploadBytesResumable to:", storageRef.fullPath);
         // Forzamos un objeto Blob nuevo para evitar problemas de tipos
         const cleanBlob = blob; // En Expo el blob ya viene bien del XHR
         const task = uploadBytesResumable(storageRef, cleanBlob, { contentType });
@@ -757,7 +939,7 @@ export default function AddCarScreen() {
         console.error("uploadBytesResumable failed:", e);
         // fallback sin progreso
         try {
-            console.log("Falling back to uploadBytes");
+            logger.log("Falling back to uploadBytes");
             await uploadBytes(storageRef, blob, { contentType });
             const url = await getDownloadURL(storageRef);
             if (onProgress) onProgress(100);
@@ -812,6 +994,76 @@ export default function AddCarScreen() {
 
 
 
+  async function ensureMaxSize(uri: string, maxBytes = 200_000): Promise<string> {
+    let size = 0;
+    if (Platform.OS !== 'web') {
+      try {
+        const info = await FileSystem.getInfoAsync(uri, { size: true } as any);
+        size = (info as any).size ?? 0;
+      } catch {}
+    } else if (uri.startsWith('data:')) {
+      const b64 = uri.split(',')[1] ?? '';
+      size = Math.ceil(b64.length * 0.75);
+    }
+    if (!size || size <= maxBytes) return uri;
+    const ratio = maxBytes / size;
+    const compress = Math.max(0.3, Math.min(0.75, ratio * 0.82));
+    const newWidth = size > maxBytes * 3 ? 800 : 1000;
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: newWidth } }],
+      { compress, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  }
+
+  async function standardizeImage(uri: string): Promise<string> {
+    const { width, height } = await getImageSize(uri);
+    // Target 4:3 aspect ratio
+    const targetRatio = 4 / 3;
+    const currentRatio = width / height;
+    
+    let cropAction = null;
+    
+    if (Math.abs(currentRatio - targetRatio) > 0.05) {
+        // Need to crop
+        let originX = 0;
+        let originY = 0;
+        let cropW = width;
+        let cropH = height;
+        
+        if (currentRatio > targetRatio) {
+            // Image is wider than 4:3, crop width
+            cropW = height * targetRatio;
+            originX = (width - cropW) / 2;
+        } else {
+            // Image is taller than 4:3, crop height
+            cropH = width / targetRatio;
+            originY = (height - cropH) / 2;
+        }
+        
+        cropAction = {
+            originX,
+            originY,
+            width: cropW,
+            height: cropH,
+        };
+    }
+    
+    const actions: any[] = [];
+    if (cropAction) {
+        actions.push({ crop: cropAction });
+    }
+    // Resize to 1280x960 (standard high quality)
+    actions.push({ resize: { width: 1200 } });
+
+    const result = await ImageManipulator.manipulateAsync(uri, actions, {
+        compress: 0.82,
+        format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return ensureMaxSize(result.uri);
+  }
+
   async function pickImageAndUpload(type: "cover" | "gallery") {
     if (!user) {
       showAlert("Sesión requerida", "Iniciá sesión para subir fotos.", "info");
@@ -835,12 +1087,16 @@ export default function AddCarScreen() {
 
     for (const asset of assets) {
       if (!asset?.uri) continue;
-      // Optimization: Resize to max 1024px and compress to 0.7
-      const manipulated = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1024 } }], {
-        compress: 0.7,
-        format: ImageManipulator.SaveFormat.JPEG,
-      });
-      let uri = manipulated.uri;
+      
+      let uri = asset.uri;
+      try {
+          // Standardize to 4:3 and 1280x960
+          uri = await standardizeImage(uri);
+      } catch (e) {
+          console.error("Error standardizing image:", e);
+          // Fallback to original if fails
+      }
+
       let blob: Blob | undefined;
       try {
         blob = await new Promise((resolve, reject) => {
@@ -849,11 +1105,11 @@ export default function AddCarScreen() {
             resolve(xhr.response);
           };
           xhr.onerror = function (e) {
-            console.log(e);
+            logger.log(e);
             reject(new TypeError("Network request failed"));
           };
           xhr.responseType = "blob";
-          xhr.open("GET", manipulated.uri, true);
+          xhr.open("GET", uri, true);
           xhr.send(null);
         });
         // Explicit cast for TS
@@ -866,17 +1122,13 @@ export default function AddCarScreen() {
       const path = `uploads/${userId}/${filename}`;
       const storageRef = ref(storage, path);
 
-            if (type === "cover") {
+      if (type === "cover") {
+        setCoverOriginalUri(uri);
         setCoverLocalUri(uri);
         setCoverUploading(true);
         setCoverProgress(0);
         try {
-          console.log("user in upload", user?.uid);
-          console.log("storage debug bucket:", (storage as any)?._bucket?.bucket || (storage as any)?.app?.options?.storageBucket);
-          
-          // Test direct upload string to verify permissions/connectivity
-          // const testRef = ref(storage, `test/${Date.now()}.txt`);
-          // await uploadString(testRef, "test", "raw");
+          // console.log("user in upload", user?.uid);
           
           const url = await uploadImage(
             storageRef,
@@ -906,29 +1158,14 @@ export default function AddCarScreen() {
         } finally {
           setCoverUploading(false);
         }
-      }
- else {
+      } else {
         if (gallery.length >= 8) {
           showAlert("Límite de galería", "Podés agregar hasta 8 fotos.", "info");
           break;
         }
         const idx = baseIndex + localIdx;
-        setGallery((prev) => [...prev, { localUri: uri, uploading: true, progress: 0 }]);
+        setGallery((prev) => [...prev, { localUri: uri, originalUri: uri, uploading: true, progress: 0 }]);
         try {
-          blob = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.onload = function () {
-              resolve(xhr.response);
-            };
-            xhr.onerror = function (e) {
-              console.log(e);
-              reject(new TypeError("Network request failed"));
-            };
-            xhr.responseType = "blob";
-            xhr.open("GET", uri, true);
-            xhr.send(null);
-          });
-          blob = blob as Blob;
           const url = await uploadImage(storageRef, blob!, undefined, (p) => {
             setGallery((prev) => prev.map((g, i) => (i === idx ? { ...g, progress: p } : g)));
           }, path);
@@ -979,6 +1216,7 @@ export default function AddCarScreen() {
   const removeCoverImage = () => {
     setCoverImage("");
     setCoverLocalUri("");
+    setCoverOriginalUri("");
     setCoverProgress(0);
   };
 
@@ -986,14 +1224,719 @@ export default function AddCarScreen() {
     setGallery((prev) => prev.filter((_, i) => i !== index));
   };
 
+  async function getImageSize(uri: string): Promise<{ width: number; height: number }> {
+    return await new Promise((resolve, reject) => {
+      Image.getSize(
+        uri,
+        (w, h) => resolve({ width: w, height: h }),
+        () => reject(new Error("size"))
+      );
+    });
+  }
+
+  async function cropBottomStrip(uri: string, ratio = 0.82) {
+    const { width, height } = await getImageSize(uri);
+    const cropH = Math.round(height * ratio);
+    const actions: any[] = [{ crop: { originX: 0, originY: 0, width, height: cropH } }];
+    const result = await ImageManipulator.manipulateAsync(uri, actions, {
+      compress: 0.9,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return result.uri;
+  }
+
+  async function rotateImage(uri: string, deg: number) {
+    const result = await ImageManipulator.manipulateAsync(uri, [{ rotate: deg }, { resize: { width: 1200 } }], { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG });
+    return ensureMaxSize(result.uri);
+  }
+
+  function scheduleCoverUpload(uri: string) {
+    if (!user) return;
+    const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}.jpg`;
+    const path = `uploads/${userId}/${filename}`;
+    const storageRef = ref(storage, path);
+    setCoverUploading(true);
+    setCoverProgress(0);
+    (async () => {
+      try {
+        const blob = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function () {
+            resolve(xhr.response);
+          };
+          xhr.onerror = function () {
+            reject(new TypeError("Network request failed"));
+          };
+          xhr.responseType = "blob";
+          xhr.open("GET", uri, true);
+          xhr.send(null);
+        }) as Blob;
+        const url = await uploadImage(storageRef, blob, undefined, (p) => setCoverProgress(p), path);
+        setCoverImage(url);
+      } catch {
+        showAlert("Error", "No se pudo subir la portada editada.", "error");
+      } finally {
+        setCoverUploading(false);
+      }
+    })();
+  }
+
+  function scheduleGalleryUpload(index: number, uri: string) {
+    if (!user) return;
+    const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}.jpg`;
+    const path = `uploads/${userId}/${filename}`;
+    const storageRef = ref(storage, path);
+    setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, uploading: true, progress: 0 } : g)));
+    (async () => {
+      try {
+        const blob = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function () {
+            resolve(xhr.response);
+          };
+          xhr.onerror = function () {
+            reject(new TypeError("Network request failed"));
+          };
+          xhr.responseType = "blob";
+          xhr.open("GET", uri, true);
+          xhr.send(null);
+        }) as Blob;
+        const url = await uploadImage(
+          storageRef,
+          blob,
+          undefined,
+          (p) => {
+            setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, progress: p } : g)));
+          },
+          path
+        );
+        setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, url, uploading: false, progress: 100 } : g)));
+      } catch {
+        setGallery((prev) => prev.map((g, i) => (i === index ? { ...g, uploading: false, progress: 0 } : g)));
+        showAlert("Error", "No se pudo subir la imagen editada.", "error");
+      }
+    })();
+  }
+
+  async function openPhotoEditor(type: "cover" | "gallery", index?: number) {
+    // Reset editor states for a clean start
+    setEditorBusy(false);
+    setEditorAutoMasks([]);
+    setEditorPaths([]);
+    setCurrentPath(null);
+    setEditorMode("standard");
+    
+    if (type === "cover") {
+      const base = coverOriginalUri || coverLocalUri || coverImage;
+      if (!base) {
+        showAlert("Sin portada", "Primero subí una foto de portada.", "info");
+        return;
+      }
+      setEditorTarget({ type: "cover", index: null });
+      setEditorOriginalUri(base);
+      setEditorWorkingUri(base);
+      const { width, height } = await getImageSize(base);
+      setImageRatio(width / height);
+      setEditorTab("basic");
+      setEditorVisible(true);
+      return;
+    }
+    const item = typeof index === "number" ? gallery[index] : undefined;
+    if (!item) return;
+    const base = item.originalUri || item.localUri || item.url;
+    if (!base) return;
+    setEditorTarget({ type: "gallery", index: index ?? 0 });
+    setEditorOriginalUri(base);
+    setEditorWorkingUri(base);
+    const { width, height } = await getImageSize(base);
+    setImageRatio(width / height);
+    setEditorTab("basic");
+    setEditorVisible(true);
+  }
+
+  function closePhotoEditor() {
+    setEditorVisible(false);
+    setEditorTarget(null);
+    setEditorOriginalUri(null);
+    setEditorWorkingUri(null);
+    setEditorBusy(false);
+  }
+
+  async function applyEditorAction(
+    action: "rotateLeft" | "rotateRight" | "crop1x1" | "crop4x3" | "crop16x9" | "hidePlate" | "reset" | "cropFree"
+  ) {
+    if (!editorOriginalUri && !editorWorkingUri) return;
+    if (action === "reset") {
+      if (editorOriginalUri) {
+        setEditorWorkingUri(editorOriginalUri);
+        const { width, height } = await getImageSize(editorOriginalUri);
+        setImageRatio(width / height);
+        setEditorAutoMasks([]);
+        setEditorPaths([]);
+        setCurrentPath(null);
+        setEditorMode("standard");
+      }
+      return;
+    }
+
+    setEditorBusy(true);
+    try {
+      if (action === "rotateLeft" || action === "rotateRight") {
+        const base = editorOriginalUri || editorWorkingUri;
+        if (!base) return;
+        const deg = action === "rotateLeft" ? -90 : 90;
+        const rotated = await rotateImage(base, deg);
+        setEditorOriginalUri(rotated);
+        setEditorWorkingUri(rotated);
+        const { width, height } = await getImageSize(rotated);
+        setImageRatio(width / height);
+        return;
+      }
+
+      const baseForCrop = editorWorkingUri || editorOriginalUri;
+      if (!baseForCrop) return;
+
+      const enterCropMode = async (ratio: number, uri: string) => {
+        const { width, height } = await getImageSize(uri);
+        setTargetRatio(ratio);
+        setImageRatio(width / height);
+        resetCropValues();
+        setEditorMode("crop");
+      };
+
+      if (action === "crop1x1") {
+        await enterCropMode(1, baseForCrop);
+        return;
+      } else if (action === "crop4x3") {
+        await enterCropMode(4 / 3, baseForCrop);
+        return;
+      } else if (action === "crop16x9") {
+        await enterCropMode(16 / 9, baseForCrop);
+        return;
+      } else if (action === "cropFree") {
+        const { width, height } = await getImageSize(baseForCrop);
+        await enterCropMode(width / height, baseForCrop);
+        return;
+      } else if (action === "hidePlate") {
+        // Switch to paint mode for manual finger drawing
+        const base = editorWorkingUri || editorOriginalUri;
+        if (base) {
+            const { width, height } = await getImageSize(base);
+            setImageRatio(width / height);
+        }
+        
+        setEditorMode("paint");
+        setEditorBusy(false);
+        return;
+      }
+      
+      if (action === "reset") {
+        if (editorOriginalUri) {
+          // Reset to the absolute original image before any edits
+          setEditorWorkingUri(editorOriginalUri);
+          const { width, height } = await getImageSize(editorOriginalUri);
+          setImageRatio(width / height);
+          setEditorAutoMasks([]);
+          setEditorPaths([]);
+          setCurrentPath(null);
+          setEditorMode("standard");
+        }
+        return;
+      }
+    } finally {
+      setEditorBusy(false);
+    }
+  }
+
+  async function performCrop() {
+    const uri = editorWorkingUri || editorOriginalUri;
+    if (!uri) return;
+    setEditorBusy(true);
+    
+    try {
+      const { width: origW, height: origH } = await getImageSize(uri);
+      
+      // Calculate crop rectangle based on scale and translation
+      // The viewport size depends on the container and targetRatio.
+      // We assume container matches editorLayoutRef.current
+      const containerW = editorLayoutRef.current.width;
+      const containerH = editorLayoutRef.current.height;
+      if (!containerW || !containerH) throw new Error("No layout");
+
+      // Calculate Viewport Size (fitting targetRatio in container)
+      let vw, vh;
+      if (containerW / containerH > targetRatio) {
+        // Container is wider than target -> Height is constraint
+        vh = containerH;
+        vw = vh * targetRatio;
+      } else {
+        // Container is taller than target -> Width is constraint
+        vw = containerW;
+        vh = vw / targetRatio;
+      }
+      
+      // Calculate Rendered Image Size (Cover logic inside Viewport)
+      // Since we changed resizeMode to "cover", the image fills the viewport.
+      
+      const imgRatio = origW / origH;
+      let iw, ih;
+      
+      if (imgRatio > targetRatio) {
+        // Wider image in narrower box. Cover -> Fit Height.
+        ih = vh;
+        iw = ih * imgRatio;
+      } else {
+        // Taller image in wider box. Cover -> Fit Width.
+        iw = vw;
+        ih = iw / imgRatio;
+      }
+
+      // Center the image in the viewport (it's "contain", so there might be empty space)
+      // BUT if user zooms in, we crop what's visible in the viewport.
+      // The image is centered in the viewport by default flex layout? 
+      // Yes, "justifyContent: center, alignItems: center" on parent view.
+      // So image center aligns with viewport center.
+
+      // Get transforms from shared values
+      const s = cropScale.value;
+      const tx = cropTranslateX.value;
+      const ty = cropTranslateY.value;
+      
+      // Calculate Rendered Image Rect in Viewport Coords
+      // Center of image is at Viewport Center + Translation
+      const cx = vw / 2 + tx;
+      const cy = vh / 2 + ty;
+      
+      // Top-Left of Rendered Image
+      const renderedX = cx - (iw * s) / 2;
+      const renderedY = cy - (ih * s) / 2;
+      
+      // Crop Rect is the Viewport (0,0 to vw,vh) relative to the Rendered Image
+      // We want to know which part of the IMAGE is under the Viewport.
+      
+      // Image space coord = (Viewport coord - Rendered Image Origin) / Scale
+      let cropX_rel = (0 - renderedX) / s;
+      let cropY_rel = (0 - renderedY) / s;
+      let cropW_rel = vw / s;
+      let cropH_rel = vh / s;
+      
+      // Map to Original Image Pixels
+      // scaleFactor = origW / iw (how many original pixels per rendered pixel at scale 1)
+      const scaleFactor = origW / iw;
+      
+      let finalX = cropX_rel * scaleFactor;
+      let finalY = cropY_rel * scaleFactor;
+      let finalW = cropW_rel * scaleFactor;
+      let finalH = cropH_rel * scaleFactor;
+      
+      // Handle "contain" empty space (black bars)
+      // If the image is smaller than viewport in some dimension (due to "contain"), 
+      // cropX_rel might be negative (viewport starts before image).
+      // We should clamp to 0.
+      // But if we clamp to 0, we lose the aspect ratio of the crop?
+      // No, ImageManipulator crops the IMAGE. It doesn't add black bars.
+      // If we ask for crop outside image, it might fail or clamp.
+      // If user wants 16:9 but image is 4:3 and fits inside, 
+      // the result will be the 4:3 image? 
+      // NO. The user sees black bars. They expect the result to be 16:9 (with black bars?).
+      // ImageManipulator crop doesn't add padding.
+      // If we want to support adding black bars, we need more complex logic (resize canvas).
+      // BUT, usually "Crop" means "Cut".
+      // If user selects 16:9 and zooms out so image is small, 
+      // we probably just want to cut what is visible of the image?
+      // OR does the user expect the black bars to be part of the saved image?
+      // Given "FotoLab" context, usually we want the result to match the target ratio.
+      // BUT ImageManipulator can't add background easily without base64 or complex actions.
+      // Let's assume we just crop the INTERSECTION of the image and the viewport.
+      // So if the viewport goes outside, we clamp.
+      // The resulting image might NOT be 16:9 if we clamp.
+      // This is a trade-off. 
+      // To strictly enforce 16:9, we'd need to resize/pad.
+      // Let's stick to Clamping for now, but ensure the calculation is correct for "contain".
+      
+      finalX = Math.max(0, finalX);
+      finalY = Math.max(0, finalY);
+      
+      // If finalX was negative, it means we cut off the left empty space.
+      // We must also adjust the width.
+      // original calculation: finalW = vw / s * scaleFactor
+      // If we clamped X, effectively we reduced the width from the left.
+      // But let's just use the clamp logic at the end.
+      
+      if (finalX + finalW > origW) finalW = origW - finalX;
+      if (finalY + finalH > origH) finalH = origH - finalY;
+      
+      // Safety check
+      if (finalW <= 0 || finalH <= 0) {
+          // Fallback to center crop if something went wrong
+          // or just return original
+           logger.warn("Invalid crop dimensions", finalX, finalY, finalW, finalH);
+           finalX = 0; finalY = 0; finalW = origW; finalH = origH;
+      }
+      
+      const actions: any[] = [{ crop: { originX: finalX, originY: finalY, width: finalW, height: finalH } }];
+      const result = await ImageManipulator.manipulateAsync(uri, actions, {
+        compress: 0.9,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+      
+      setEditorWorkingUri(result.uri);
+      setImageRatio(result.width / result.height);
+      setEditorMode("standard");
+      
+    } catch (e) {
+      console.error(e);
+      showAlert("Error", "No se pudo recortar la imagen.", "error");
+    } finally {
+      setEditorBusy(false);
+    }
+  }
+
+
+
+  async function persistEditorImage() {
+    if (!editorTarget || !editorWorkingUri) return;
+
+    let finalUri = editorWorkingUri;
+
+    // If we have stickers or paths active, we must "bake" them into a new image file
+    // before persisting to the gallery/cover state.
+    if (((editorMode === "draw" && editorAutoMasks.length > 0) || (editorMode === "paint" && editorPaths.length > 0)) && editorViewRef.current) {
+        try {
+            setEditorBusy(true);
+            // Give a tiny bit of time for the UI to settle if needed
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            const captured = await captureRef(editorViewRef, {
+                format: "jpg",
+                quality: 0.9,
+                result: "tmpfile",
+            });
+            finalUri = captured;
+            setEditorWorkingUri(captured);
+            // Once baked, we can clear masks and paths so they don't double up if edited again
+            setEditorAutoMasks([]); 
+            setEditorPaths([]);
+            setCurrentPath(null);
+            setEditorMode("standard");
+        } catch (e) {
+            console.error("Error capturing stickers:", e);
+            showAlert("Error", "No se pudo procesar la imagen con las marcas.", "error");
+            return;
+        } finally {
+            setEditorBusy(false);
+        }
+    }
+
+    if (editorTarget.type === "cover") {
+      setCoverOriginalUri(finalUri);
+      setCoverLocalUri(finalUri);
+      setEditorPaths([]);
+      setCurrentPath(null);
+      scheduleCoverUpload(finalUri);
+    } else {
+      const idx = editorTarget.index;
+      if (idx == null) return;
+      
+      setGallery((prev) =>
+        prev.map((g, i) =>
+          i === idx ? { ...g, originalUri: finalUri, localUri: finalUri } : g
+        )
+      );
+      setEditorPaths([]);
+      setCurrentPath(null);
+      scheduleGalleryUpload(idx, finalUri);
+    }
+  }
+
+  async function savePhotoEditor() {
+    if (editorTarget && editorWorkingUri) {
+       await persistEditorImage();
+    }
+    closePhotoEditor();
+  }
+
+  const handleNextImage = async () => {
+    if (!editorTarget || editorTarget.type !== "gallery" || editorTarget.index === null) return;
+    
+    // Save current progress if edited or has stickers
+    if (editorOriginalUri !== editorWorkingUri || editorAutoMasks.length > 0) {
+       await persistEditorImage();
+    }
+    
+    const nextIdx = editorTarget.index + 1;
+    if (nextIdx < gallery.length) {
+        // Reset editor state
+        setEditorMode("standard");
+        setEditorAutoMasks([]);
+        setEditorPaths([]);
+        setCurrentPath(null);
+        setEditorTab("basic");
+        setEditorBusy(false);
+        
+        // Open next
+        const nextItem = gallery[nextIdx];
+        const base = nextItem.originalUri || nextItem.localUri || nextItem.url;
+        if (base) {
+            setEditorTarget({ type: "gallery", index: nextIdx });
+            setEditorOriginalUri(base);
+            setEditorWorkingUri(base);
+        }
+    }
+  };
+
+  const handlePrevImage = async () => {
+    if (!editorTarget || editorTarget.type !== "gallery" || editorTarget.index === null) return;
+    
+    // Save current progress if edited or has stickers
+    if (editorOriginalUri !== editorWorkingUri || editorAutoMasks.length > 0) {
+       await persistEditorImage();
+    }
+    
+    const prevIdx = editorTarget.index - 1;
+    if (prevIdx >= 0) {
+        // Reset editor state
+        setEditorMode("standard");
+        setEditorAutoMasks([]);
+        setEditorPaths([]);
+        setCurrentPath(null);
+        setEditorTab("basic");
+        setEditorBusy(false);
+        
+        // Open prev
+        const prevItem = gallery[prevIdx];
+        const base = prevItem.originalUri || prevItem.localUri || prevItem.url;
+        if (base) {
+            setEditorTarget({ type: "gallery", index: prevIdx });
+            setEditorOriginalUri(base);
+            setEditorWorkingUri(base);
+        }
+    }
+  };
+
+  const swipeGesture = Gesture.Race(
+    Gesture.Fling()
+      .direction(Directions.LEFT)
+      .onEnd(() => {
+        runOnJS(handleNextImage)();
+      }),
+    Gesture.Fling()
+      .direction(Directions.RIGHT)
+      .onEnd(() => {
+        runOnJS(handlePrevImage)();
+      })
+  );
+
+  const finishPaint = (path: string) => {
+    setEditorPaths((prev) => [...prev, { path, color: "#000000", width: 20 }]);
+    setCurrentPath(null);
+  };
+
+  const paintGesture = Gesture.Pan()
+    .onStart((e) => {
+      if (editorMode !== "paint") return;
+      activePath.value = `M${e.x},${e.y}`;
+      runOnJS(setCurrentPath)(activePath.value);
+    })
+    .onUpdate((e) => {
+      if (editorMode !== "paint") return;
+      activePath.value = `${activePath.value} L${e.x},${e.y}`;
+      runOnJS(setCurrentPath)(activePath.value);
+    })
+    .onEnd(() => {
+      if (editorMode !== "paint" || !activePath.value) return;
+      runOnJS(finishPaint)(activePath.value);
+      activePath.value = "";
+    });
+
+  async function handleProEditorAction(action: "blurPlate" | "enhance") {
+    const plan = profile?.plan || "free";
+    
+    if (!canUseAITools(plan)) {
+      showAlert(
+        "Función Premium",
+        "Las herramientas de IA son exclusivas para usuarios PRO Plus o superiores.",
+        "info",
+        () => router.push("/(screens)/subscribe")
+      );
+      return;
+    }
+
+    setEditorBusy(true);
+    try {
+      const uri = editorWorkingUri || editorOriginalUri;
+      if (!uri) return;
+
+      // Normalize image orientation and size for AI
+      // This ensures AI sees the image exactly as displayed (rotated correctly)
+      const normalized = await ImageManipulator.manipulateAsync(
+        uri, 
+        [{ resize: { width: 2048 } }], // Resize to reasonable max width to speed up and fix orientation
+        { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
+      );
+      
+      // Update working URI to the normalized one so the user sees the correct orientation
+      // This is crucial for the mask coordinates to match the display
+      setEditorWorkingUri(normalized.uri);
+      setImageRatio(normalized.width / normalized.height);
+      const workingUri = normalized.uri;
+      const width = normalized.width;
+      const height = normalized.height;
+
+      const base64 = await FileSystem.readAsStringAsync(workingUri, { encoding: "base64" });
+
+      if (action === "blurPlate") {
+        // Step 1: Detect the car first to narrow down the search area for the plate
+        // This significantly improves accuracy by removing background noise
+        const carResult = await detectCar(base64);
+        let aiResult;
+        
+        if (carResult.success && carResult.box) {
+            // Step 2: Crop to the car area and detect plate within it
+            const carBox = carResult.box;
+             const carCrop = await ImageManipulator.manipulateAsync(
+                 workingUri,
+                 [{ crop: { 
+                     originX: Math.max(0, Math.floor(carBox.xmin * width)), 
+                     originY: Math.max(0, Math.floor(carBox.ymin * height)), 
+                     width: Math.max(1, Math.floor((carBox.xmax - carBox.xmin) * width)), 
+                     height: Math.max(1, Math.floor((carBox.ymax - carBox.ymin) * height)) 
+                 }}],
+                 { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
+             );
+            
+            const carBase64 = await FileSystem.readAsStringAsync(carCrop.uri, { encoding: "base64" });
+            const plateInCarResult = await detectLicensePlate(carBase64);
+            
+            if (plateInCarResult.success && plateInCarResult.box) {
+                // Map coordinates back to the full image
+                const pBox = plateInCarResult.box;
+                aiResult = {
+                    success: true,
+                    box: {
+                        xmin: carBox.xmin + pBox.xmin * (carBox.xmax - carBox.xmin),
+                        xmax: carBox.xmin + pBox.xmax * (carBox.xmax - carBox.xmin),
+                        ymin: carBox.ymin + pBox.ymin * (carBox.ymax - carBox.ymin),
+                        ymax: carBox.ymin + pBox.ymax * (carBox.ymax - carBox.ymin),
+                    }
+                };
+            } else {
+                aiResult = await detectLicensePlate(base64); // Fallback to full image
+            }
+        } else {
+            aiResult = await detectLicensePlate(base64);
+        }
+
+        if (aiResult.success && aiResult.box) {
+          const box = aiResult.box;
+          const w = box.xmax - box.xmin;
+          const h = box.ymax - box.ymin;
+          
+          // Expand horizontally and vertically to cover edges comfortably
+          // Reduced padding to be tighter as per user feedback and improved accuracy
+          const paddingX = w * 0.1; 
+          const paddingY = h * 0.1;
+
+          const safeBox = {
+            xmin: Math.max(0, box.xmin - paddingX),
+            xmax: Math.min(1, box.xmax + paddingX),
+            ymin: Math.max(0, box.ymin - paddingY),
+            ymax: Math.min(1, box.ymax + paddingY),
+            type: 'image' as const
+          };
+
+          setEditorAutoMasks([safeBox]);
+          setEditorMode("draw"); // We reuse "draw" mode flag to show masks, but integrated
+          // showAlert("Patente detectada", "Podés mover y redimensionar la máscara si es necesario.", "success");
+        } else {
+          console.error("AI Error (Plate):", aiResult.error);
+          
+          // Manual Fallback: Add a default mask in the center
+          const defaultBox = {
+              xmin: 0.3,
+              ymin: 0.45,
+              xmax: 0.7,
+              ymax: 0.55,
+              type: 'image' as const
+          };
+          setEditorAutoMasks([defaultBox]);
+          setEditorMode("draw");
+          
+          showAlert(
+              "No detectada automáticamente", 
+              "No pudimos encontrar la patente, pero agregamos una máscara para que la ubiques manualmente.", 
+              "info"
+          );
+        }
+      } else {
+        const aiResult = await detectCar(base64);
+        if (aiResult.success && aiResult.box) {
+             const box = aiResult.box;
+             
+             // Smart Crop Logic
+             // Calculate car dimensions in pixels
+             const carW = (box.xmax - box.xmin) * width;
+             const carH = (box.ymax - box.ymin) * height;
+             
+             // Expand car box by 30% to give more context
+             const padding = 0.30;
+             let w = carW * (1 + padding);
+             let h = carH * (1 + padding);
+             
+             // Ensure we don't exceed image bounds initially (with 2px safety margin)
+             w = Math.min(w, width - 2);
+             h = Math.min(h, height - 2);
+
+             // Try to Enforce 4:3 aspect ratio
+             const targetRatio = 4 / 3;
+             const currentRatio = w / h;
+
+             if (currentRatio > targetRatio) {
+               h = Math.min(w / targetRatio, height - 2);
+             } else {
+               w = Math.min(h * targetRatio, width - 2);
+             }
+
+             // Center and Clamp
+             const centerX = (box.xmin + box.xmax) / 2;
+             const centerY = (box.ymin + box.ymax) / 2;
+             
+             let x = (centerX * width) - (w / 2);
+             let y = (centerY * height) - (h / 2);
+             
+             // Final Clamping and Floor
+             const finalW = Math.max(1, Math.floor(w));
+             const finalH = Math.max(1, Math.floor(h));
+             const finalX = Math.max(0, Math.min(Math.floor(x), width - finalW));
+             const finalY = Math.max(0, Math.min(Math.floor(y), height - finalH));
+
+             const actions = [{ crop: { originX: finalX, originY: finalY, width: finalW, height: finalH } }];
+             const result = await ImageManipulator.manipulateAsync(workingUri, actions, {
+                compress: 0.9,
+                format: ImageManipulator.SaveFormat.JPEG,
+             });
+             
+             setEditorWorkingUri(result.uri);
+             setImageRatio(result.width / result.height);
+             showAlert("Foto mejorada", "Se ha re-encuadrado el vehículo (4:3) automáticamente.", "success");
+        } else {
+             console.error("AI Error (Car):", aiResult.error);
+             showAlert("No detectado", `No se encontró el vehículo.\n${aiResult.error || 'Intenta con otra foto.'}`, "info");
+        }
+      }
+    } catch (e: any) {
+      console.error("ProEditor Error:", e);
+      showAlert("Error", `Ocurrió un error al procesar la imagen con IA.\n${e?.message || ''}`, "error");
+    } finally {
+      setEditorBusy(false);
+    }
+  }
   async function pickVideoAndUpload() {
     if (!user) return;
     
-    // Check Plan for Video
     const plan = profile?.plan || 'free';
-    const hasVideoAccess = ['pro', 'pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => plan.startsWith(p));
     
-    if (!hasVideoAccess) {
+    if (!canUploadVideo(plan)) {
         showAlert("Función Premium", "El video walkaround es exclusivo para usuarios PRO. Suscribite para desbloquearlo.", "info", () => router.push("/(screens)/subscribe"));
         return;
     }
@@ -1030,16 +1973,16 @@ export default function AddCarScreen() {
         // Handle iOS ph:// assets (ensure we have a file:// URI)
         if (Platform.OS === 'ios' && (finalUri.startsWith('ph://') || finalUri.startsWith('assets-library://'))) {
              try {
-                 const cacheDir = FileSystemLegacy.cacheDirectory + 'video_temp/';
-                 const dirInfo = await FileSystemLegacy.getInfoAsync(cacheDir);
+                 const cacheDir = FileSystem.cacheDirectory + 'video_temp/';
+                 const dirInfo = await FileSystem.getInfoAsync(cacheDir);
                  if (!dirInfo.exists) {
-                     await FileSystemLegacy.makeDirectoryAsync(cacheDir, { intermediates: true });
+                     await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
                  }
                  const tempUri = cacheDir + `${Date.now()}.mp4`;
-                 await FileSystemLegacy.copyAsync({ from: finalUri, to: tempUri });
+                 await FileSystem.copyAsync({ from: finalUri, to: tempUri });
                  finalUri = tempUri;
              } catch (err) {
-                 console.log("Error handling iOS video asset:", err);
+                 logger.log("Error handling iOS video asset:", err);
              }
         }
 
@@ -1082,6 +2025,92 @@ export default function AddCarScreen() {
       setVideoProgress(0);
   };
 
+  async function evaluateVehicleRisk(options: {
+    brand: string;
+    model: string;
+    year: number;
+    price: number;
+    currency: "ARS" | "USD";
+    description: string;
+    userId: string;
+    trustLevel: string;
+    coverImage: string;
+  }) {
+    const flags: string[] = [];
+    let score = 0;
+
+    try {
+      const analysis = await analyzeMarketPrice(
+        options.brand,
+        options.model,
+        options.year,
+        options.currency
+      );
+      if (analysis.avg > 0) {
+        if (options.price < analysis.avg * 0.6) {
+          flags.push("price_outlier");
+          score += 4;
+        } else if (options.price > analysis.avg * 1.5) {
+          flags.push("price_high_outlier");
+          score += 3;
+        }
+        const currentYear = new Date().getFullYear();
+        if (options.year >= currentYear && options.price < analysis.avg * 0.8) {
+          flags.push("year_price_mismatch");
+          score += 2;
+        }
+      }
+    } catch {
+    }
+
+    try {
+      const now = new Date();
+      const from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const qRecent = query(
+        collection(db, "vehicles"),
+        where("userId", "==", options.userId),
+        where("createdAt", ">=", Timestamp.fromDate(from))
+      );
+      const snapRecent = await getDocs(qRecent);
+      if (snapRecent.docs.length >= 3 && options.trustLevel !== "verified") {
+        flags.push("new_user_mass");
+        score += 3;
+      }
+    } catch {
+    }
+
+    if (options.description) {
+      const text = options.description.toLowerCase();
+      const hasPhone = /\d{8,}/.test(text);
+      const hasLink = text.includes("http://") || text.includes("https://") || text.includes("www.") || text.includes(".com");
+      if (hasPhone || hasLink) {
+        flags.push("external_contact");
+        score += 2;
+      }
+    }
+
+    try {
+      if (options.coverImage) {
+        const qDup = query(
+          collection(db, "vehicles"),
+          where("userId", "==", options.userId),
+          where("images.cover", "==", options.coverImage)
+        );
+        const snapDup = await getDocs(qDup);
+        if (!snapDup.empty) {
+          flags.push("duplicate_image");
+          score += 2;
+        }
+      }
+    } catch {
+    }
+
+    return {
+      flags: Array.from(new Set(flags)),
+      score,
+    };
+  }
+
   async function handleSubmit() {
     if (!user) {
       showAlert("Sesión requerida", "Iniciá sesión para publicar.", "info");
@@ -1090,44 +2119,22 @@ export default function AddCarScreen() {
 
     // Verificar límites de publicación según plan
     const plan = profile?.plan || 'free';
-    let limit = 1; // Default Free
-    
-    if (plan.includes('dealer_pro_plus')) limit = Infinity;
-    else if (plan.includes('pro_dealer')) limit = 30;
-    else if (plan.includes('pro_plus')) limit = 7;
-    else if (plan.includes('pro')) limit = 3;
+    const limit = getMaxCars(plan);
 
     if (limit !== Infinity) {
       try {
-        // Count ACTIVE vehicles (not rejected/deleted)
-        // We filter by status != 'deleted' to be safe, though usually we might just count all non-deleted
-        const q = query(
-            collection(db, "vehicles"), 
-            where("userId", "==", userId),
-            where("status", "!=", "deleted") 
-        );
-        // Note: Firestore requires an index for != queries sometimes, or we can just count all and filter client side if small number, 
-        // but getCountFromServer is efficient. 
-        // Safer approach for now: Count all documents for user that are NOT deleted. 
-        // However, 'status' field might be 'published', 'paused', 'sold', 'pending'. 
-        // Let's assume we count all except 'deleted' or 'rejected'? 
-        // User said "Autos activos". Usually means 'published' + 'pending' + 'paused' (occupying a slot). 
-        // Let's count everything that is not 'deleted' and not 'rejected'.
-        // Simplified: Count all docs where userId == uid. Then subtract deleted? 
-        // Actually, let's just use the existing logic but with correct limits.
-        
-        // Use a simpler query to avoid complex index requirements if possible
         const qAll = query(collection(db, "vehicles"), where("userId", "==", userId));
         const snapshot = await getDocs(qAll);
+        const EXCLUDED_STATUSES = ["deleted", "rejected", "blocked", "sold"];
         const activeCount = snapshot.docs.filter(d => {
-            const data = d.data();
-            return data.status !== 'deleted' && data.status !== 'rejected';
+            const status = (d.data().status as string) || "available";
+            return !EXCLUDED_STATUSES.includes(status);
         }).length;
 
         if (activeCount >= limit) {
           showAlert(
-            "Límite alcanzado", 
-            `Tu plan actual permite hasta ${limit} autos activos. Tenés ${activeCount}. Actualizá tu plan para publicar más.`, 
+            "Límite alcanzado",
+            `Tu plan actual permite hasta ${limit} autos activos. Tenés ${activeCount} (incluyendo los pendientes de aprobación). Actualizá tu plan para publicar más.`,
             "info",
             () => router.push("/(screens)/subscribe")
           );
@@ -1135,7 +2142,8 @@ export default function AddCarScreen() {
         }
       } catch (e) {
         console.error("Error checking limit", e);
-        // Fail open or closed? Let's log and maybe allow if it's a transient error, but better to be safe.
+        showAlert("Error", "No se pudo verificar el límite de publicaciones. Intentá de nuevo.", "info");
+        return;
       }
     }
 
@@ -1147,15 +2155,7 @@ export default function AddCarScreen() {
     // Validar campos con errores
     const pValid = validateField('price', price);
     const kValid = validateField('km', km);
-    let fValid = true;
-    if (acceptsFinancing) {
-        const f1 = validateField('finRate', finRate);
-        const f2 = validateField('finMonths', finMonths);
-        const f3 = validateField('finInitialPercent', finInitialPercent);
-        fValid = f1 && f2 && f3;
-    }
-
-    if (!pValid || !kValid || !fValid) {
+    if (!pValid || !kValid) {
         showAlert("Datos inválidos", "Por favor, revisá los campos en rojo.", "error");
         return;
     }
@@ -1172,11 +2172,47 @@ export default function AddCarScreen() {
     try {
       setLoading(true);
 
-      await addDoc(collection(db, "vehicles"), {
+      try {
+        const market = await analyzeMarketPrice(
+          brand,
+          model,
+          yearNum,
+          currency
+        );
+        if (market.avg > 0 && priceNum > market.avg * 1.5) {
+          showAlert(
+            "Precio muy alto",
+            "El precio que cargaste está más de 50% por encima del valor de mercado estimado. Revisá el precio sugerido y ajustalo para publicar.",
+            "info"
+          );
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      let risk = { flags: [] as string[], score: 0 };
+      try {
+        risk = await evaluateVehicleRisk({
+          brand,
+          model,
+          year: yearNum,
+          price: priceNum,
+          currency,
+          description: details || "",
+          userId,
+          trustLevel: profile?.trustLevel || "new",
+          coverImage: coverImage,
+        });
+      } catch (e) {
+        // El scoring de riesgo es un análisis adicional: si falla, publicamos igual sin bloquear al usuario.
+        console.error("Error evaluando riesgo (no bloqueante):", e);
+      }
+
+      const vehicleData = {
         userId,
         userName,
         userPlan: profile?.plan || 'free',
-        sellerTrustLevel: profile?.trustLevel || "new", // Added Trust Level Denormalization
+        sellerTrustLevel: profile?.trustLevel || "new",
         brand,
         model,
         version: version || null,
@@ -1209,32 +2245,41 @@ export default function AddCarScreen() {
         negotiablePrice,
         immediateDelivery,
         sellingReason: sellingReason || null,
-        originalPrice: priceNum, // Inicialmente igual al precio actual
+        originalPrice: priceNum,
+        priceHistory: priceNum ? [{ price: priceNum, currency: currency || "ARS", changedAt: Timestamp.now() }] : [],
         updatedAt: serverTimestamp(),
-        financing: acceptsFinancing
-          ? {
-              rate: finRate ? Number(finRate) : 25,
-              months: finMonths ? Number(finMonths) : 24,
-              initialPercent: finInitialPercent ? Number(finInitialPercent) : 0,
-            }
-          : null,
+        financing: null,
         published: false,
-        status: "pending", // Moderation queue
+        status: "pending_review",
         likedBy: [],
-        isFeatured: profile?.plan?.includes('pro_dealer') || false,
-        featuredAt: profile?.plan?.includes('pro_dealer') ? serverTimestamp() : null,
+        isFeatured: profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus') || false,
+        featuredAt: (profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus')) ? serverTimestamp() : null,
         views: 0,
         likesCount: 0,
         flags: {
           forSale: true,
           tradeIn: acceptsTradeIn,
         },
+        riskFlags: risk.flags,
+        riskScore: risk.score,
         createdAt: serverTimestamp(),
-      });
+      };
+
+      const docRef = await addDoc(collection(db, "vehicles"), vehicleData);
+
+      // Track car publication in Meta Analytics
+      Analytics.logCarPublished(brand, model, priceNum, currency);
+
+      // Notificar a administración vía WhatsApp/Email
+      try {
+        await notifyAdminNewVehicle(docRef.id, vehicleData);
+      } catch (e) {
+        console.error("Error notifying admin:", e);
+      }
 
       // Update catalog with new values if they don't exist
       try {
-        console.log("Updating catalog with:", { brand, model, version });
+        logger.log("Updating catalog with:", { brand, model, version });
         
         // 1. Ensure Make exists
         const brandRef = doc(db, "catalog", "default", "makes", brand);
@@ -1263,7 +2308,7 @@ export default function AddCarScreen() {
              }
           }
         }
-        console.log("Catalog updated successfully");
+        logger.log("Catalog updated successfully");
       } catch (e) {
         console.error("Error updating catalog:", e);
       }
@@ -1322,31 +2367,102 @@ export default function AddCarScreen() {
         5. Máximo 2 párrafos cortos.
       `;
 
-      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-2.0-flash" });
+      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-2.5-flash" });
       const result = await modelAI.generateContent(prompt);
       const response = result.response;
       const text = response.text();
       
       setDetails(text.trim());
     } catch (error: any) {
+      // La IA es una ayuda opcional: si falla, el usuario siempre puede escribir la descripción a mano.
       console.error("Error generando descripción con IA:", error);
-      const msg = error.message || (typeof error === 'string' ? error : "Intenta nuevamente.");
-      
-      if (msg.includes("AI/api-not-enabled") || msg.includes("Firebase AI API")) {
-        showAlert(
-          "API No Habilitada", 
-          "La API de Inteligencia Artificial no está habilitada en Firebase. Por favor, contactá al administrador para habilitar 'Vertex AI in Firebase'.", 
-          "error"
-        );
-      } else {
-        showAlert("Error", `No se pudo generar la descripción. ${msg}`, "error");
-      }
+      showAlert(
+        "IA no disponible",
+        "La generación automática no está disponible por el momento. Podés reintentar o escribir la descripción manualmente.",
+        "info",
+        { showCancel: true, confirmText: "Reintentar", cancelText: "Escribir manualmente", onConfirm: () => generateDescription() }
+      );
     } finally {
       setLoadingAI(false);
     }
   };
 
   const canSubmit = !loading && !coverUploading && gallery.every((g) => !g.uploading) && !!brand && !!model && !!year && !!price;
+
+  const coverCount = coverLocalUri || coverImage ? 1 : 0;
+
+  const publicationQuality = useMemo(() => {
+    let score = 0;
+    const suggestions: string[] = [];
+
+    const hasBasicData = !!brand && !!model && !!year && !!km;
+    if (hasBasicData) score += 25;
+    else suggestions.push("Completá marca, modelo, año y kilómetros.");
+
+    const hasLocation = !!province && !!city;
+    if (hasLocation) score += 15;
+    else suggestions.push("Indicá provincia y ciudad para aparecer mejor en las búsquedas.");
+
+    const totalPhotos = coverCount + gallery.length;
+    if (coverCount > 0) score += 15;
+    else suggestions.push("Subí una foto de portada clara del auto.");
+
+    if (totalPhotos >= 6) score += 15;
+    else if (totalPhotos >= 3) score += 10;
+    else if (totalPhotos >= 1) score += 5;
+    else suggestions.push("Agregá varias fotos del interior y exterior.");
+
+    const detailsLength = details.trim().length;
+    if (detailsLength >= 400) score += 15;
+    else if (detailsLength >= 200) score += 10;
+    else if (detailsLength >= 80) score += 5;
+    else suggestions.push("Escribí una descripción contando estado, servicios y extras.");
+
+    if (price && priceSuggestion && priceSuggestion.avg > 0 && !priceSuggestion.loading) {
+      const numericPrice = Number(price);
+      if (!isNaN(numericPrice) && numericPrice > 0) {
+        const diffPercent = Math.abs(numericPrice - priceSuggestion.avg) / priceSuggestion.avg * 100;
+        if (diffPercent <= 5) {
+          score += 20;
+        } else if (diffPercent <= 15) {
+          score += 10;
+        } else {
+          suggestions.push("Revisá el precio para alinearlo al mercado sugerido.");
+        }
+      }
+    }
+
+    if (score > 100) score = 100;
+
+    let level = "Básica";
+    let levelColor = (theme as any).error || "#EF4444";
+
+    if (score >= 80) {
+      level = "Excelente";
+      levelColor = theme.accent;
+    } else if (score >= 50) {
+      level = "Buena";
+      levelColor = "#F59E0B";
+    }
+
+    const uniqueSuggestions = Array.from(new Set(suggestions)).slice(0, 3);
+
+    return { score, level, levelColor, suggestions: uniqueSuggestions };
+  }, [
+    brand,
+    model,
+    year,
+    km,
+    province,
+    city,
+    coverCount,
+    gallery.length,
+    details,
+    price,
+    priceSuggestion.avg,
+    priceSuggestion.loading,
+    theme,
+  ]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
@@ -1526,12 +2642,16 @@ export default function AddCarScreen() {
 
             <Input
               label="Kilómetros"
-              value={km}
-              onChangeText={(t) => { setKm(t); if(errors.km) validateField("km", t); }}
+              value={km ? Number(km).toLocaleString("es-AR") : ""}
+              onChangeText={(t) => { 
+                const raw = t.replace(/\D/g, "");
+                setKm(raw); 
+                if(errors.km) validateField("km", raw); 
+              }}
               onBlur={() => validateField("km", km)}
               error={errors.km}
               keyboardType="number-pad"
-              placeholder="35000"
+              placeholder="35.000"
             />
 
             <View style={{ marginBottom: 12 }}>
@@ -1660,23 +2780,32 @@ export default function AddCarScreen() {
                 </View>
               </View>
               {priceSuggestion.loading && brand && model && year && (
-                 <Text style={{ marginTop: 4, color: theme.textMuted, fontSize: 12, fontStyle: 'italic' }}>Calculando precio sugerido...</Text>
+                <Text style={{ marginTop: 4, color: theme.textMuted, fontSize: 12, fontStyle: "italic" }}>Calculando precio de mercado...</Text>
               )}
-              {priceSuggestion.count > 0 && !priceSuggestion.loading && (
-                <TouchableOpacity 
-                    onPress={() => setPrice(Math.round(priceSuggestion.avg).toString())}
-                    style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: theme.card, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.accent }}
+              {priceSuggestion.count > 0 && !priceSuggestion.loading && !valuationResult && (
+                <TouchableOpacity
+                  onPress={() => setPrice(Math.round(priceSuggestion.avg).toString())}
+                  style={{ marginTop: 8, flexDirection: "row", alignItems: "center", backgroundColor: theme.card, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
                 >
-                    <Ionicons name="bulb-outline" size={16} color={theme.accent} style={{ marginRight: 6 }} />
-                    <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.text, fontSize: 12, fontWeight: '700' }}>
-                            Precio sugerido: {currency} {Math.round(priceSuggestion.avg).toLocaleString("es-AR")}
-                        </Text>
-                        <Text style={{ color: theme.textMuted, fontSize: 10 }}>
-                            Basado en {priceSuggestion.count} publicaciones similares (Min: {priceSuggestion.min.toLocaleString()} - Max: {priceSuggestion.max.toLocaleString()})
-                        </Text>
-                    </View>
+                  <Ionicons name="bar-chart-outline" size={15} color={theme.textMuted} style={{ marginRight: 6 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>
+                      Promedio de mercado: {currency} {Math.round(priceSuggestion.avg).toLocaleString("es-AR")}
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                      {priceSuggestion.count} publicaciones similares · Min {priceSuggestion.min.toLocaleString("es-AR")} – Max {priceSuggestion.max.toLocaleString("es-AR")}
+                    </Text>
+                  </View>
+                  <Text style={{ color: theme.textMuted, fontSize: 10 }}>Tocar para aplicar</Text>
                 </TouchableOpacity>
+              )}
+              {priceSuggestion.count > 0 && !priceSuggestion.loading && valuationResult && (
+                <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Ionicons name="bar-chart-outline" size={12} color={theme.textMuted} />
+                  <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                    Mercado: {currency} {Math.round(priceSuggestion.avg).toLocaleString("es-AR")} prom. ({priceSuggestion.count} similares) · La tasación IA ya lo considera
+                  </Text>
+                </View>
               )}
             </View>
 
@@ -1722,45 +2851,14 @@ export default function AddCarScreen() {
                 </View>
             </View>
 
-            <View style={{ marginBottom: 12 }}>
-              {acceptsFinancing && (
-                <View style={{ marginTop: 8, flexDirection: "row", gap: 8 }}>
-                   <View style={{ flex: 1 }}>
-                    <Input
-                      label="Anticipo (%)"
-                      value={finInitialPercent}
-                      onChangeText={(t) => { setFinInitialPercent(t); if(errors.finInitialPercent) validateField("finInitialPercent", t); }}
-                      onBlur={() => validateField("finInitialPercent", finInitialPercent)}
-                      error={errors.finInitialPercent}
-                      keyboardType="number-pad"
-                      placeholder="30"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Input
-                      label="Tasa anual (%)"
-                      value={finRate}
-                      onChangeText={(t) => { setFinRate(t); if(errors.finRate) validateField("finRate", t); }}
-                      onBlur={() => validateField("finRate", finRate)}
-                      error={errors.finRate}
-                      keyboardType="number-pad"
-                      placeholder="25"
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Input
-                      label="Plazo (meses)"
-                      value={finMonths}
-                      onChangeText={(t) => { setFinMonths(t); if(errors.finMonths) validateField("finMonths", t); }}
-                      onBlur={() => validateField("finMonths", finMonths)}
-                      error={errors.finMonths}
-                      keyboardType="number-pad"
-                      placeholder="24"
-                    />
-                  </View>
-                </View>
-              )}
-            </View>
+            {acceptsFinancing && (
+              <View style={{ marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: theme.accent + "15", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: theme.accent + "40" }}>
+                <Ionicons name="information-circle-outline" size={16} color={theme.accent} />
+                <Text style={{ color: theme.accent, fontSize: 12, flex: 1 }}>
+                  Configurá el anticipo y las cuotas desde <Text style={{ fontWeight: "700" }}>Mis Autos → Financiación</Text> una vez publicado el auto.
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Sección: Ubicación y Fotos */}
@@ -1853,28 +2951,169 @@ export default function AddCarScreen() {
               <View style={{ marginTop: 8 }}>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>Galería: {gallery.length} / 8</Text>
               </View>
+
+              {/* Tasación IA — aparece cuando hay al menos una foto */}
+              {(coverImage || gallery.some((g) => g.url)) && (
+                <View style={{ marginTop: 14 }}>
+                  {!valuationResult && (
+                    <TouchableOpacity
+                      onPress={async () => {
+                        const imageUrls = [
+                          coverImage,
+                          ...gallery.map((g) => g.url ?? "").filter(Boolean),
+                        ].filter(Boolean) as string[];
+                        if (imageUrls.length === 0) return;
+                        setValuationLoading(true);
+                        try {
+                          const fns = getFunctions(app);
+                          const analyze = httpsCallable<object, typeof valuationResult>(fns, "analyzeCarPhotos");
+                          const res = await analyze({
+                            imageUrls,
+                            brand: brand || "Desconocido",
+                            model: model || "",
+                            year: Number(year) || new Date().getFullYear(),
+                            km: Number(km) || 0,
+                            currency,
+                            marketAvgPrice: priceSuggestion.avg > 0 ? Math.round(priceSuggestion.avg) : undefined,
+                          });
+                          setValuationResult(res.data);
+                        } catch {
+                          // Silent — valuation is optional
+                        } finally {
+                          setValuationLoading(false);
+                        }
+                      }}
+                      disabled={valuationLoading}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        backgroundColor: "#1e3a5f",
+                        borderRadius: 10,
+                        padding: 12,
+                        borderWidth: 1,
+                        borderColor: "#2563eb44",
+                      }}
+                    >
+                      <Ionicons name="sparkles" size={16} color={theme.accent} />
+                      <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 14, flex: 1 }}>
+                        {valuationLoading ? "Analizando fotos..." : "Tasación con IA"}
+                      </Text>
+                      {valuationLoading
+                        ? <ActivityIndicator size="small" color={theme.accent} />
+                        : <Text style={{ color: "#94A3B8", fontSize: 12 }}>Gratis</Text>
+                      }
+                    </TouchableOpacity>
+                  )}
+                  {valuationResult && (
+                    <View style={{ backgroundColor: theme.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: `${theme.accent}33` }}>
+                      {/* Header */}
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Ionicons name="sparkles" size={15} color={theme.accent} />
+                          <Text style={{ color: theme.title, fontWeight: "700", fontSize: 14 }}>Tasación IA</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setValuationResult(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                          <Ionicons name="refresh-outline" size={16} color={theme.textMuted} />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Condition badge */}
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <View style={{
+                          paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
+                          backgroundColor: valuationResult.conditionScore >= 8 ? "#10B98122" : valuationResult.conditionScore >= 6 ? "#3B82F622" : "#EF444422",
+                        }}>
+                          <Text style={{ fontWeight: "700", fontSize: 12, color: valuationResult.conditionScore >= 8 ? "#10B981" : valuationResult.conditionScore >= 6 ? "#3B82F6" : "#EF4444" }}>
+                            {valuationResult.conditionLabel} · {valuationResult.conditionScore}/10
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Price range */}
+                      <Text style={{ color: theme.price, fontWeight: "800", fontSize: 16, marginBottom: 3 }}>
+                        {currency} {Number(valuationResult.priceMin).toLocaleString("es-AR")} – {Number(valuationResult.priceMax).toLocaleString("es-AR")}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 10, lineHeight: 17 }}>
+                        {valuationResult.priceRationale}
+                      </Text>
+
+                      {/* Issues */}
+                      {valuationResult.issues.length > 0 && (
+                        <View style={{ gap: 4, marginBottom: 12 }}>
+                          {valuationResult.issues.map((issue, i) => (
+                            <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+                              <Ionicons name="alert-circle-outline" size={13} color="#F59E0B" style={{ marginTop: 1 }} />
+                              <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>{issue}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Apply price button */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          const mid = Math.round((valuationResult.priceMin + valuationResult.priceMax) / 2);
+                          setPrice(mid.toString());
+                        }}
+                        style={{ backgroundColor: theme.accent, borderRadius: 8, paddingVertical: 9, alignItems: "center", marginTop: valuationResult.issues.length === 0 ? 0 : 0 }}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>
+                          Aplicar precio sugerido ({currency} {Math.round((valuationResult.priceMin + valuationResult.priceMax) / 2).toLocaleString("es-AR")})
+                        </Text>
+                      </TouchableOpacity>
+
+                      {/* Market context note */}
+                      {priceSuggestion.count > 0 && (
+                        <Text style={{ color: theme.textMuted, fontSize: 10, marginTop: 8, textAlign: "center" }}>
+                          Considera el promedio de mercado ({currency} {Math.round(priceSuggestion.avg).toLocaleString("es-AR")}) y la condición del vehículo
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              )}
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                 {coverLocalUri ? (
-                  <View style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground }}>
-                    <View style={{ flex: 1, backgroundColor: theme.background }}>
+                  <TouchableOpacity
+                    onPress={() => openPhotoEditor("cover")}
+                    style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                  >
+                    <View style={{ flex: 1, backgroundColor: theme.background, opacity: coverUploading ? 0.6 : 1 }}>
                       {/* @ts-ignore */}
                       <Image
                         source={{ uri: coverLocalUri }}
                         style={{ width: "100%", height: "100%" }}
                         resizeMode="cover"
                       />
+                      {coverUploading && (
+                        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center" }}>
+                          <ActivityIndicator size="small" color={theme.accent} />
+                        </View>
+                      )}
                     </View>
                     {!coverUploading && (
-                    <TouchableOpacity 
-                        onPress={removeCoverImage}
-                        style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
-                    >
+                      <TouchableOpacity
+                        onPress={() => removeCoverImage()}
+                        style={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          backgroundColor: "rgba(0,0,0,0.5)",
+                          borderRadius: 12,
+                          padding: 2,
+                          zIndex: 10,
+                        }}
+                      >
                         <Ionicons name="close-circle" size={18} color="#FFF" />
-                    </TouchableOpacity>
+                      </TouchableOpacity>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 ) : coverImage ? (
-                  <View style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                  <TouchableOpacity
+                    onPress={() => openPhotoEditor("cover")}
+                    style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                  >
                     <View style={{ flex: 1, backgroundColor: theme.background }}>
                       {/* @ts-ignore */}
                       <Image
@@ -1883,28 +3122,70 @@ export default function AddCarScreen() {
                         resizeMode="cover"
                       />
                     </View>
-                    <TouchableOpacity 
-                        onPress={removeCoverImage}
-                        style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
+                    <TouchableOpacity
+                      onPress={() => removeCoverImage()}
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        right: 2,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        borderRadius: 12,
+                        padding: 2,
+                        zIndex: 10,
+                      }}
                     >
-                        <Ionicons name="close-circle" size={18} color="#FFF" />
+                      <Ionicons name="close-circle" size={18} color="#FFF" />
                     </TouchableOpacity>
-                  </View>
+                  </TouchableOpacity>
                 ) : null}
                 {gallery.map((g, idx) => (
-                  <View key={`${g.localUri}-${idx}`} style={{ width: 100, height: 70, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: g.uploading ? theme.textMuted : theme.likeBoxBackground }}>
-                    <View style={{ flex: 1, backgroundColor: theme.background, opacity: g.uploading ? 0.6 : 1 }}>
+                  <TouchableOpacity
+                    key={`${g.localUri}-${idx}`}
+                    onPress={() => openPhotoEditor("gallery", idx)}
+                    style={{
+                      width: 100,
+                      height: 70,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                      borderWidth: 1,
+                      borderColor: g.uploading ? theme.textMuted : theme.likeBoxBackground,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flex: 1,
+                        backgroundColor: theme.background,
+                        opacity: g.uploading ? 0.6 : 1,
+                      }}
+                    >
                       {/* @ts-ignore */}
-                      <Image source={{ uri: g.localUri }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                      <Image
+                        source={{ uri: g.localUri }}
+                        style={{ width: "100%", height: "100%" }}
+                        resizeMode="cover"
+                      />
+                      {g.uploading && (
+                        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: "center", alignItems: "center" }}>
+                          <ActivityIndicator size="small" color={theme.accent} />
+                        </View>
+                      )}
                     </View>
-                    
+
                     {!g.uploading && (
-                        <TouchableOpacity 
-                            onPress={() => removeGalleryImage(idx)}
-                            style={{ position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 12, padding: 2, zIndex: 10 }}
-                        >
-                            <Ionicons name="close-circle" size={18} color="#FFF" />
-                        </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => removeGalleryImage(idx)}
+                        style={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          backgroundColor: "rgba(0,0,0,0.5)",
+                          borderRadius: 12,
+                          padding: 2,
+                          zIndex: 10,
+                        }}
+                      >
+                        <Ionicons name="close-circle" size={18} color="#FFF" />
+                      </TouchableOpacity>
                     )}
 
                     {g.uploading && (
@@ -1914,14 +3195,30 @@ export default function AddCarScreen() {
                     )}
                     {!g.uploading && !g.url && (
                       <View style={{ position: "absolute", bottom: 2, right: 4 }}>
-                        <TouchableOpacity onPress={() => retryGalleryUpload(idx)} style={{ backgroundColor: theme.accent, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999 }}>
+                        <TouchableOpacity
+                          onPress={() => retryGalleryUpload(idx)}
+                          style={{
+                            backgroundColor: theme.accent,
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 999,
+                          }}
+                        >
                           <Text style={{ color: theme.buttonText, fontSize: 10 }}>Reintentar</Text>
                         </TouchableOpacity>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </View>
+              {(coverLocalUri || coverImage || gallery.length > 0) && (
+                <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="information-circle-outline" size={16} color={theme.textMuted} style={{ marginRight: 4 }} />
+                  <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: "center" }}>
+                    Toca una foto para editarla
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Video Walkaround Section */}
@@ -1981,7 +3278,33 @@ export default function AddCarScreen() {
             </View>
           </View>
 
-
+          <View style={{ marginBottom: 20 }}>
+            <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "700", marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>Calidad de publicación</Text>
+            <View style={{ borderRadius: 12, backgroundColor: theme.card, padding: 12, flexDirection: "row", alignItems: "center" }}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 4, borderColor: publicationQuality.levelColor, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                <Text style={{ color: publicationQuality.levelColor, fontSize: 20, fontWeight: "800" }}>{publicationQuality.score}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontSize: 14, fontWeight: "700", marginBottom: 4 }}>
+                  {publicationQuality.level === "Excelente"
+                    ? "Tu publicación está lista para destacar."
+                    : publicationQuality.level === "Buena"
+                    ? "Tu publicación está bien, pero podés mejorarla."
+                    : "Completá algunos datos más para atraer más interesados."}
+                </Text>
+                {publicationQuality.suggestions.length > 0 && (
+                  <View style={{ marginTop: 4 }}>
+                    {publicationQuality.suggestions.map((tip, idx) => (
+                      <View key={idx} style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 2 }}>
+                        <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.textMuted, marginTop: 7, marginRight: 6 }} />
+                        <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>{tip}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
 
         <TouchableOpacity
           onPress={handleSubmit}
@@ -2011,28 +3334,7 @@ export default function AddCarScreen() {
             </TouchableOpacity>
           </View>
         )}
-        {!coverUploading && !coverImage && coverLocalUri ? (
-          <View style={{ marginTop: 8, alignItems: "flex-end" }}>
-            <TouchableOpacity
-              onPress={async () => {
-                try {
-                  setCoverUploading(true);
-                  setCoverProgress(0);
-                  const base64 = await FileSystemLegacy.readAsStringAsync(coverLocalUri, { encoding: "base64" });
-                  const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}.jpg`;
-                  const path = `uploads/${userId}/${filename}`;
-                  const storageRef = ref(storage, path);
-                  const url = await uploadWithRetry(storageRef, base64, (p) => setCoverProgress(p));
-                  setCoverImage(url);
-                } catch {}
-                setCoverUploading(false);
-              }}
-              style={{ backgroundColor: theme.accent, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
-            >
-              <Text style={{ color: theme.buttonText, fontWeight: "600" }}>Reintentar portada</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
+        {/* Reintentar portada legacy eliminado: la portada se vuelve a subir automáticamente al editar */}
         </KeyboardAwareScrollView>
       </WebContainer>
       <CustomAlert
@@ -2046,6 +3348,672 @@ export default function AddCarScreen() {
         cancelText={alertConfig.cancelText}
         onClose={handleConfirm}
       />
+      {editorVisible && (
+        <GestureHandlerRootView
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 100,
+          }}
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.8)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            {/* Navigation Arrows for Gallery */}
+            {editorTarget?.type === "gallery" && editorTarget.index !== null && gallery.length > 1 && editorMode !== "draw" && (
+                <>
+                    {editorTarget.index > 0 && (
+                        <TouchableOpacity 
+                            onPress={handlePrevImage}
+                            style={{ 
+                                position: 'absolute', 
+                                left: 10, 
+                                top: '50%', 
+                                transform: [{translateY: -20}],
+                                zIndex: 10,
+                                backgroundColor: 'rgba(0,0,0,0.5)',
+                                padding: 8,
+                                borderRadius: 20
+                            }}
+                        >
+                            <Ionicons name="chevron-back" size={24} color="white" />
+                        </TouchableOpacity>
+                    )}
+                    {editorTarget.index < gallery.length - 1 && (
+                        <TouchableOpacity 
+                            onPress={handleNextImage}
+                            style={{ 
+                                position: 'absolute', 
+                                right: 10, 
+                                top: '50%', 
+                                transform: [{translateY: -20}],
+                                zIndex: 10,
+                                backgroundColor: 'rgba(0,0,0,0.5)',
+                                padding: 8,
+                                borderRadius: 20
+                            }}
+                        >
+                            <Ionicons name="chevron-forward" size={24} color="white" />
+                        </TouchableOpacity>
+                    )}
+                </>
+            )}
+
+             {editorMode === "crop" ? (
+              <View
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  padding: 20,
+                }}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontSize: 18,
+                    fontWeight: "bold",
+                    marginBottom: 20,
+                  }}
+                >
+                  Ajustar Recorte
+                </Text>
+                <View
+                  style={{
+                    width: "100%",
+                    flex: 1,
+                    justifyContent: "center",
+                    alignItems: "center",
+                    marginBottom: 20,
+                  }}
+                >
+                  <GestureDetector gesture={cropGesture}>
+                    <View
+                      style={{
+                        width: "100%",
+                        aspectRatio: targetRatio,
+                        maxWidth: "100%",
+                        maxHeight: "80%",
+                        backgroundColor: "#000",
+                        overflow: "hidden",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.3)",
+                      }}
+                      onLayout={(e) => {
+                        editorLayoutRef.current = e.nativeEvent.layout;
+                      }}
+                    >
+                      <Animated.Image
+                      source={{ uri: editorWorkingUri || editorOriginalUri || "" }}
+                      style={[
+                        {
+                          width: "100%",
+                          height: "100%",
+                        },
+                        cropAnimatedStyle,
+                      ]}
+                      resizeMode="cover"
+                    />
+                    </View>
+                  </GestureDetector>
+                  <Text style={{ color: "rgba(255,255,255,0.7)", marginTop: 10, fontSize: 12 }}>
+                    Pellizca para zoom y arrastra para ajustar
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
+                  {[
+                    { label: "1:1", ratio: 1 },
+                    { label: "4:3", ratio: 4/3 },
+                    { label: "16:9", ratio: 16/9 },
+                    { label: "Original", ratio: imageRatio || 4/3 },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.label}
+                      onPress={() => {
+                        setTargetRatio(opt.ratio);
+                        resetCropValues();
+                      }}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 20,
+                        backgroundColor: Math.abs(targetRatio - opt.ratio) < 0.01 ? "white" : "#333",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.2)"
+                      }}
+                    >
+                      <Text style={{ color: Math.abs(targetRatio - opt.ratio) < 0.01 ? "black" : "white", fontWeight: "600", fontSize: 12 }}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setEditorMode("standard");
+                    }}
+                    style={{
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      backgroundColor: theme.card,
+                    }}
+                  >
+                    <Text style={{ color: theme.text }}>Cancelar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={performCrop}
+                    style={{
+                      paddingHorizontal: 20,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      backgroundColor: theme.accent,
+                    }}
+                  >
+                    <Text style={{ color: "white", fontWeight: "bold" }}>Aplicar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View
+                style={{
+                  width: "100%",
+                  maxWidth: 420,
+                  backgroundColor: theme.card,
+                  borderRadius: 16,
+                  padding: 12,
+                }}
+              >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <TouchableOpacity onPress={closePhotoEditor} style={{ padding: 4 }}>
+                <Ionicons name="close" size={22} color={theme.text} />
+              </TouchableOpacity>
+              <Text
+                style={{
+                  color: theme.text,
+                  fontSize: 16,
+                  fontWeight: "700",
+                  flex: 1,
+                  textAlign: "center",
+                }}
+                numberOfLines={1}
+              >
+                Editar foto
+              </Text>
+              <TouchableOpacity
+                onPress={savePhotoEditor}
+                disabled={!editorWorkingUri || editorBusy}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: !editorWorkingUri || editorBusy ? theme.textMuted : theme.accent,
+                }}
+              >
+                <Text
+                  style={{
+                    color: theme.buttonText,
+                    fontWeight: "600",
+                    fontSize: 12,
+                  }}
+                >
+                  Guardar
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <GestureDetector gesture={Gesture.Race(swipeGesture, paintGesture)}>
+            <View style={{ width: "100%", aspectRatio: imageRatio || 4 / 3, marginBottom: 12 }}>
+              <View
+                ref={editorViewRef}
+                collapsable={false}
+                onLayout={(e) => setEditorLayout(e.nativeEvent.layout)}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  backgroundColor: "#000",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {editorWorkingUri ? (
+                  <Image
+                    source={{ uri: editorWorkingUri }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                ) : editorOriginalUri ? (
+                  <Image
+                    source={{ uri: editorOriginalUri }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <ActivityIndicator size="large" color={theme.accent} />
+                )}
+                {/* Painting Layer - Render whenever there are paths or we are painting */}
+                {(editorPaths.length > 0 || currentPath) && (
+                  <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                    <Svg width="100%" height="100%">
+                      <G>
+                        {Array.isArray(editorPaths) && editorPaths.map((p, i) => (
+                          <Path
+                            key={i}
+                            d={p.path}
+                            stroke={p.color}
+                            strokeWidth={p.width}
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        ))}
+                        {currentPath && (
+                          <Path
+                            d={currentPath}
+                            stroke="#000000"
+                            strokeWidth={20}
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        )}
+                      </G>
+                    </Svg>
+                  </View>
+                )}
+
+                {/* Integrated Masks (Stickers) */}
+                {editorMode === "draw" && editorAutoMasks.map((mask, i) => (
+                    <StickerMask
+                      key={i}
+                      box={mask}
+                      type={mask.type}
+                      containerWidth={editorLayout.width}
+                      containerHeight={editorLayout.height}
+                      onUpdate={(newBox) => {
+                          setEditorAutoMasks(prev => {
+                              const next = [...prev];
+                              next[i] = { ...next[i], ...newBox };
+                              return next;
+                          });
+                      }}
+                    />
+                ))}
+              </View>
+
+              {/* Loading Overlay - OUTSIDE of editorViewRef to avoid baking it into the image */}
+              {editorBusy && (
+                <View
+                  style={{
+                    ...StyleSheet.absoluteFillObject,
+                    backgroundColor: "rgba(0,0,0,0.6)",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    borderRadius: 12,
+                    zIndex: 200,
+                  }}
+                >
+                  <ActivityIndicator size="large" color={theme.accent} />
+                  <Text
+                    style={{
+                      color: "#FFF",
+                      marginTop: 12,
+                      fontSize: 14,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Procesando con IA...
+                  </Text>
+                </View>
+              )}
+            </View>
+            </GestureDetector>
+
+            <View
+              style={{
+                flexDirection: "row",
+                borderRadius: 999,
+                backgroundColor: themeName === "dark" ? "#1F2937" : "#E5E7EB",
+                padding: 4,
+                marginBottom: 16,
+                borderWidth: 1,
+                borderColor: themeName === "dark" ? "#374151" : "#D1D5DB",
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => setEditorTab("basic")}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  alignItems: "center",
+                  backgroundColor: editorTab === "basic" ? theme.accent : "transparent",
+                  elevation: editorTab === "basic" ? 2 : 0,
+                  shadowColor: "#000",
+                  shadowOpacity: editorTab === "basic" ? 0.2 : 0,
+                  shadowRadius: 4,
+                  shadowOffset: { width: 0, height: 2 },
+                }}
+              >
+                <Text
+                  style={{
+                    color: editorTab === "basic" ? "#FFFFFF" : (themeName === "dark" ? "#9CA3AF" : "#6B7280"),
+                    fontWeight: "800",
+                    fontSize: 13,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Básico
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setEditorTab("pro")}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  alignItems: "center",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  gap: 6,
+                  backgroundColor: editorTab === "pro" ? theme.accent : "transparent",
+                  elevation: editorTab === "pro" ? 2 : 0,
+                  shadowColor: "#000",
+                  shadowOpacity: editorTab === "pro" ? 0.2 : 0,
+                  shadowRadius: 4,
+                  shadowOffset: { width: 0, height: 2 },
+                }}
+              >
+                <Text
+                  style={{
+                    color: editorTab === "pro" ? "#FFFFFF" : (themeName === "dark" ? "#9CA3AF" : "#6B7280"),
+                    fontWeight: "800",
+                    fontSize: 13,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Pro
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: editorTab === "pro" ? "#FFFFFF" : theme.accent,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: editorTab === "pro" ? theme.accent : "#FFFFFF",
+                      fontSize: 10,
+                      fontWeight: "900",
+                    }}
+                  >
+                    IA
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {editorTab === "basic" ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("rotateLeft")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Rotar -90°
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("rotateRight")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Rotar +90°
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("crop1x1")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: Math.abs(targetRatio - 1) < 0.01 ? theme.accent : theme.likeBoxBackground,
+                    backgroundColor: Math.abs(targetRatio - 1) < 0.01 ? theme.accent : theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: Math.abs(targetRatio - 1) < 0.01 ? "#FFF" : theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    1:1
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("crop4x3")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: Math.abs(targetRatio - 4/3) < 0.01 ? theme.accent : theme.likeBoxBackground,
+                    backgroundColor: Math.abs(targetRatio - 4/3) < 0.01 ? theme.accent : theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: Math.abs(targetRatio - 4/3) < 0.01 ? "#FFF" : theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    4:3
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("crop16x9")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: Math.abs(targetRatio - 16/9) < 0.01 ? theme.accent : theme.likeBoxBackground,
+                    backgroundColor: Math.abs(targetRatio - 16/9) < 0.01 ? theme.accent : theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: Math.abs(targetRatio - 16/9) < 0.01 ? "#FFF" : theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    16:9
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("cropFree")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Original
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("hidePlate")}
+                  disabled={editorBusy}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Tapar patente
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => applyEditorAction("reset")}
+                  disabled={editorBusy || !editorOriginalUri}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Restablecer
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => handleProEditorAction("blurPlate")}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Ionicons name="sparkles" size={14} color={theme.accent} />
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Tapar patente
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleProEditorAction("enhance")}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: theme.likeBoxBackground,
+                    backgroundColor: theme.card,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Ionicons name="sparkles-outline" size={14} color={theme.accent} />
+                  <Text
+                    style={{
+                      color: theme.text,
+                      fontSize: 12,
+                      fontWeight: "600",
+                    }}
+                  >
+                    Mejorar foto
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+          )}
+        </View>
+      </GestureHandlerRootView>
+      )}
     </SafeAreaView>
   );
 }

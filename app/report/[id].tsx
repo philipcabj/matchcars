@@ -2,6 +2,8 @@ import { CustomAlert } from "@/components/CustomAlert";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
+import { notifyAdminNewReport } from "@/lib/admin-notifications";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { addDoc, collection, doc, increment, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
@@ -59,7 +61,7 @@ export default function ReportScreen() {
 
     setLoading(true);
     try {
-      await addDoc(collection(db, "reports"), {
+      const reportRef = await addDoc(collection(db, "reports"), {
         targetId: id,
         targetType: type || "vehicle",
         reason,
@@ -68,6 +70,14 @@ export default function ReportScreen() {
         createdAt: serverTimestamp(),
         status: "pending"
       });
+
+      notifyAdminNewReport(reportRef.id, {
+        targetId: id,
+        targetType: type || "vehicle",
+        reason,
+        details,
+        reportedBy: user.uid,
+      }).catch(() => {});
 
       if (type === "user") {
         // Bloquear al usuario automáticamente
@@ -82,7 +92,7 @@ export default function ReportScreen() {
             const reportedUserRef = doc(db, "users", id as string);
             await updateDoc(reportedUserRef, { flags: increment(1) });
         } catch (e) {
-            console.log("Error incrementing flags:", e);
+            logger.log("Error incrementing flags:", e);
         }
       }
       

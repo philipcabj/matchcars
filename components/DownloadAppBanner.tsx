@@ -2,6 +2,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Linking, Platform, Text, TouchableOpacity, View } from 'react-native';
+import { trackEvent } from '@/lib/analytics';
 
 export const DownloadAppBanner = ({ compact = false, message = "Para contactar al vendedor", floating = false, deepLink }: { compact?: boolean, message?: string, floating?: boolean, deepLink?: string }) => {
   const { theme } = useTheme();
@@ -19,13 +20,14 @@ export const DownloadAppBanner = ({ compact = false, message = "Para contactar a
   };
 
   const openStore = () => {
-    // Replace with your actual store links
     const androidUrl = 'https://play.google.com/store/apps/details?id=com.matchcars.app';
     const iosUrl = 'https://apps.apple.com/ar/app/matchcars/id6757968664'; // Replace if you have the ID
     
     if (Platform.OS === 'ios') {
+      trackEvent('app_download_click', { platform: 'ios', location: 'download_banner' });
       Linking.openURL(iosUrl); 
     } else {
+      trackEvent('app_download_click', { platform: 'android', location: 'download_banner' });
       Linking.openURL(androidUrl);
     }
   };

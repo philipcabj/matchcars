@@ -1,7 +1,9 @@
 import { CustomAlert } from "@/components/CustomAlert";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db, storage } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
@@ -33,7 +35,7 @@ if (Platform.OS !== 'web') {
         MapView = Maps.default;
         Marker = Maps.Marker;
     } catch (e) {
-        console.log("Maps module not found", e);
+        logger.log("Maps module not found", e);
     }
 }
 
@@ -50,12 +52,13 @@ export default function EditProfileScreen() {
   const { user, profile } = useAuth();
   const router = useRouter();
 
-  const isDealer = profile?.plan && profile.plan.includes("pro_dealer");
+  const isDealer = profile?.plan && (profile.plan.includes("pro_dealer") || profile.plan.includes("dealer_pro_plus"));
 
   const [firstName, setFirstName] = useState(profile?.firstName || "");
   const [lastName, setLastName] = useState(profile?.lastName || "");
   
   // Dealer Fields
+  const [description, setDescription] = useState((profile as any)?.description || "");
   const [agencyName, setAgencyName] = useState(profile?.agencyName || "");
   const [businessAddress, setBusinessAddress] = useState(profile?.businessAddress || "");
   const [businessCoordinates, setBusinessCoordinates] = useState<{latitude: number, longitude: number} | null>(profile?.businessCoordinates || null);
@@ -67,6 +70,19 @@ export default function EditProfileScreen() {
   const [bannerUrl, setBannerUrl] = useState(profile?.bannerUrl || "");
   const [bannerUploading, setBannerUploading] = useState(false);
   const [locating, setLocating] = useState(false);
+
+  // Extended dealer fields
+  const [phone, setPhone] = useState(profile?.phone || "");
+  const [foundedYear, setFoundedYear] = useState(
+    profile?.foundedYear ? String(profile.foundedYear) : ""
+  );
+  const [brandSpecialties, setBrandSpecialties] = useState<string[]>(
+    profile?.brandSpecialties || []
+  );
+  const [showroomGallery, setShowroomGallery] = useState<string[]>(
+    profile?.showroomGallery || []
+  );
+  const [galleryUploading, setGalleryUploading] = useState(false);
 
   // Address Autocomplete
   const [suggestions, setSuggestions] = useState<Location.LocationGeocodedAddress[]>([]);
@@ -149,7 +165,7 @@ export default function EditProfileScreen() {
                 setSuggestions(detailedSuggestions);
                 setShowSuggestions(true);
             } catch (e) {
-                console.log("Geocode error", e);
+                logger.log("Geocode error", e);
                 setSuggestions([]);
             } finally {
                 setIsSearching(false);
@@ -187,6 +203,7 @@ export default function EditProfileScreen() {
       const updateData: any = {
         firstName,
         lastName,
+        description,
       };
 
       if (isDealer) {
@@ -198,6 +215,10 @@ export default function EditProfileScreen() {
         updateData.instagram = instagram;
         updateData.whatsapp = whatsapp;
         updateData.bannerUrl = bannerUrl;
+        updateData.phone = phone;
+        updateData.foundedYear = foundedYear ? Number(foundedYear) : null;
+        updateData.brandSpecialties = brandSpecialties;
+        updateData.showroomGallery = showroomGallery;
       }
 
       await updateDoc(doc(db, "users", user.uid), updateData);
@@ -302,7 +323,7 @@ export default function EditProfileScreen() {
                   longitudeDelta: 0.005,
               });
           } catch (e) {
-              console.log("Could not get current location for map", e);
+              logger.log("Could not get current location for map", e);
           }
       }
       setMapVisible(true);
@@ -384,8 +405,66 @@ export default function EditProfileScreen() {
     }
   };
 
+  const addGalleryImage = async () => {
+    if (showroomGallery.length >= 6) {
+      showAlert("Límite alcanzado", "Podés subir hasta 6 fotos del local.", "info");
+      return;
+    }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.7,
+      });
+      if (!result.canceled && result.assets[0].uri) {
+        setGalleryUploading(true);
+        const uri = result.assets[0].uri;
+        const manipulated = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 900 } }],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        const blob: Blob = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => resolve(xhr.response);
+          xhr.onerror = () => reject(new TypeError("Network request failed"));
+          xhr.responseType = "blob";
+          xhr.open("GET", manipulated.uri, true);
+          xhr.send(null);
+        });
+        const storageRef = ref(storage, `showroom_gallery/${user?.uid}_${Date.now()}.jpg`);
+        await uploadBytes(storageRef, blob);
+        const url = await getDownloadURL(storageRef);
+        setShowroomGallery((prev) => [...prev, url]);
+      }
+    } catch (e) {
+      showAlert("Error", "No se pudo subir la foto.", "error");
+    } finally {
+      setGalleryUploading(false);
+    }
+  };
+
+  const removeGalleryImage = (index: number) => {
+    setShowroomGallery((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const BRANDS = [
+    "Toyota", "Volkswagen", "Chevrolet", "Ford", "Renault", "Fiat", "Peugeot",
+    "Citroën", "Honda", "Nissan", "Hyundai", "Kia", "Suzuki", "Jeep", "RAM",
+    "BMW", "Mercedes-Benz", "Audi", "Volvo", "Land Rover", "Lexus", "Mazda",
+    "Mitsubishi", "Subaru", "Chery", "BYD", "MG", "Dodge",
+  ];
+
+  const toggleBrand = (brand: string) => {
+    setBrandSpecialties((prev) =>
+      prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand]
+    );
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <WebContainer>
       <View style={{ flexDirection: "row", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: theme.inputBackground }}>
         <TouchableOpacity onPress={() => router.back()} style={{ padding: 8 }}>
             <Ionicons name="arrow-back" size={24} color={theme.text} />
@@ -395,8 +474,8 @@ export default function EditProfileScreen() {
         </Text>
       </View>
 
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === "ios" ? "padding" : "height"} 
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
       <ScrollView contentContainerStyle={{ padding: 20 }}>
@@ -453,6 +532,22 @@ export default function EditProfileScreen() {
                     onChangeText={setLastName}
                     style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
                 />
+            </View>
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Descripción / Bio</Text>
+                <TextInput
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder="Contá algo sobre vos o tu experiencia vendiendo autos..."
+                    placeholderTextColor={theme.textMuted}
+                    multiline
+                    numberOfLines={4}
+                    maxLength={300}
+                    style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground, minHeight: 90, textAlignVertical: 'top' }}
+                />
+                <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4 }}>
+                    {description.length}/300
+                </Text>
             </View>
         </View>
 
@@ -646,6 +741,121 @@ export default function EditProfileScreen() {
                         style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
                     />
                 </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Teléfono directo</Text>
+                    <TextInput
+                        value={phone}
+                        onChangeText={setPhone}
+                        placeholder="+54911..."
+                        placeholderTextColor={theme.textMuted}
+                        keyboardType="phone-pad"
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Año de fundación</Text>
+                    <TextInput
+                        value={foundedYear}
+                        onChangeText={(v) => setFoundedYear(v.replace(/\D/g, "").slice(0, 4))}
+                        placeholder="2005"
+                        placeholderTextColor={theme.textMuted}
+                        keyboardType="numeric"
+                        maxLength={4}
+                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                    />
+                </View>
+
+                {/* Brand specialties */}
+                <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 8 }}>
+                        Marcas en las que se especializan ({brandSpecialties.length} seleccionadas)
+                    </Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {BRANDS.map((brand) => {
+                            const selected = brandSpecialties.includes(brand);
+                            return (
+                                <TouchableOpacity
+                                    key={brand}
+                                    onPress={() => toggleBrand(brand)}
+                                    style={{
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 6,
+                                        borderRadius: 999,
+                                        backgroundColor: selected ? theme.accent : theme.inputBackground,
+                                        borderWidth: 1,
+                                        borderColor: selected ? theme.accent : theme.likeBoxBackground,
+                                    }}
+                                >
+                                    <Text style={{ color: selected ? "#fff" : theme.inputText, fontSize: 13, fontWeight: "600" }}>
+                                        {brand}
+                                    </Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </View>
+                </View>
+
+                {/* Showroom gallery */}
+                <View style={{ marginBottom: 16 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 8 }}>
+                        Galería del local ({showroomGallery.length}/6 fotos)
+                    </Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                        {showroomGallery.map((uri, i) => (
+                            <View key={i} style={{ position: "relative" }}>
+                                <Image
+                                    source={{ uri }}
+                                    style={{ width: 110, height: 80, borderRadius: 10 }}
+                                    resizeMode="cover"
+                                />
+                                <TouchableOpacity
+                                    onPress={() => removeGalleryImage(i)}
+                                    style={{
+                                        position: "absolute",
+                                        top: 4,
+                                        right: 4,
+                                        backgroundColor: "rgba(0,0,0,0.6)",
+                                        borderRadius: 999,
+                                        padding: 3,
+                                    }}
+                                >
+                                    <Ionicons name="close" size={14} color="#fff" />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                        {showroomGallery.length < 6 && (
+                            <TouchableOpacity
+                                onPress={addGalleryImage}
+                                disabled={galleryUploading}
+                                style={{
+                                    width: 110,
+                                    height: 80,
+                                    borderRadius: 10,
+                                    borderWidth: 1.5,
+                                    borderColor: theme.accent,
+                                    borderStyle: "dashed",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 4,
+                                    backgroundColor: theme.inputBackground,
+                                }}
+                            >
+                                {galleryUploading ? (
+                                    <ActivityIndicator color={theme.accent} size="small" />
+                                ) : (
+                                    <>
+                                        <Ionicons name="add-circle-outline" size={24} color={theme.accent} />
+                                        <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "600" }}>
+                                            Agregar
+                                        </Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        )}
+                    </ScrollView>
+                </View>
             </View>
         )}
 
@@ -679,6 +889,7 @@ export default function EditProfileScreen() {
         onClose={alertConfig.onClose}
         options={alertConfig.options}
       />
+      </WebContainer>
 
       <Modal visible={mapVisible} animationType="slide" onRequestClose={() => setMapVisible(false)}>
         <View style={{ flex: 1 }}>

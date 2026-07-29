@@ -1,22 +1,33 @@
+import { BuyerPreferencesModal } from "@/components/BuyerPreferencesModal";
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
 import { Onboarding } from "@/components/Onboarding";
+import { SkeletonList } from "@/components/SkeletonLoader";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
+import { useHistory } from "@/contexts/HistoryContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useDebounce } from "@/hooks/useDebounce";
 import { db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
+import { calcMatchScore } from "@/lib/matchScore";
 import { sendNotificationEmail } from "@/lib/mail";
+import { getBoostScoreMultiplier, hasUnlimitedFeatured, hasWeekendBoost, isDealerPlan } from "@/lib/planChecks";
+import type { BuyerPreferences } from "@/types/user";
 import type { Vehicle } from "@/types/vehicle";
 import { safeDate } from "@/utils/dateUtils";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { loadVehiclesCache, saveVehiclesCache } from "@/lib/offlineCache";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { DocumentSnapshot, arrayRemove, arrayUnion, collection, deleteDoc, doc, documentId, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, setDoc, startAfter, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Platform, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as CarModelsAr from "../../config/carModelsAr";
+import { PROVINCES } from "@/config/locations";
 
 export default function AutosPublicTab() {
   const { theme } = useTheme();
@@ -25,8 +36,15 @@ export default function AutosPublicTab() {
   const owner = (params?.owner as string) || undefined;
   const favOf = (params?.favOf as string) || undefined;
   const { user, profile } = useAuth();
+  const { viewedIds } = useHistory();
+  const [buyerPrefs, setBuyerPrefs] = useState<BuyerPreferences | undefined>(undefined);
+  const [showPrefsModal, setShowPrefsModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [lastDoc, setLastDoc] = useState<DocumentSnapshot | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [userNamesCache, setUserNamesCache] = useState<Record<string, string>>({}); // New Cache State
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [likesRemaining, setLikesRemaining] = useState<number>(10);
@@ -46,6 +64,11 @@ export default function AutosPublicTab() {
   const [modelOpen, setModelOpen] = useState(false);
   const [brandQuery, setBrandQuery] = useState("");
   const [modelQuery, setModelQuery] = useState("");
+  
+  // Debounced search queries for better performance
+  const debouncedBrandQuery = useDebounce(brandQuery, 300);
+  const debouncedModelQuery = useDebounce(modelQuery, 300);
+  
   const [makesRemote, setMakesRemote] = useState<string[]>([]);
   const [modelsRemote, setModelsRemote] = useState<string[]>([]);
   const [provinceOpen, setProvinceOpen] = useState(false);
@@ -58,26 +81,259 @@ export default function AutosPublicTab() {
   const [kmMaxOpen, setKmMaxOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
   const [filterCurrency, setFilterCurrency] = useState<"ARS" | "USD" | undefined>(undefined);
-  // Reset onboarding when user logs in if needed? No, user requested "every login"
-  // so we can force a key reset if user is present. But Onboarding component handles it by key.
   
+  // Persistence for Filters
+  const STORAGE_KEY_FILTERS = `matchcars_filters_${user?.uid || 'guest'}`;
+
+  const saveFilters = async (filters: any) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(filters));
+    } catch (e) {
+      console.error("Error saving filters:", e);
+    }
+  };
+
+  const loadSavedFilters = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(STORAGE_KEY_FILTERS);
+      if (saved) {
+        const f = JSON.parse(saved);
+        if (f.province) setProvinceFilter(f.province);
+        if (f.brand) {
+            setBrandFilter(f.brand);
+            loadModels(f.brand);
+        }
+        if (f.model) setModelFilter(f.model);
+        if (f.yearMin) setYearMin(f.yearMin);
+        if (f.yearMax) setYearMax(f.yearMax);
+        if (f.priceMin) setPriceMin(f.priceMin);
+        if (f.priceMax) setPriceMax(f.priceMax);
+        if (f.kmMin) setKmMin(f.kmMin);
+        if (f.kmMax) setKmMax(f.kmMax);
+        if (f.financing) setFinancingFilter(f.financing);
+        if (f.fuel) setFuelFilter(f.fuel);
+        if (f.currency) setFilterCurrency(f.currency);
+        
+        // If any filter is active, expand the filter section
+        const hasFilters = Object.values(f).some(v => v !== "" && v !== "all" && v !== undefined);
+        if (hasFilters) setFiltersCollapsed(false);
+      }
+    } catch (e) {
+      console.error("Error loading filters:", e);
+    }
+  };
+
+  const clearFilters = async () => {
+    setProvinceFilter("");
+    setBrandFilter("");
+    setModelFilter("");
+    setYearMin("");
+    setYearMax("");
+    setPriceMin("");
+    setPriceMax("");
+    setKmMin("");
+    setKmMax("");
+    setFinancingFilter("all");
+    setFuelFilter("");
+    setFilterCurrency(undefined);
+    setModelsRemote([]);
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY_FILTERS);
+    } catch (e) {
+      console.error("Error clearing filters:", e);
+    }
+  };
+
+  // Effect to load filters on mount
+  useEffect(() => {
+    loadSavedFilters();
+  }, [user?.uid]);
+
+  // Seed UI from cache while Firestore loads (stale-while-revalidate)
+  useEffect(() => {
+    loadVehiclesCache().then((cached) => {
+      if (cached && cached.length > 0) {
+        setVehicles(cached);
+        setLoading(false);
+      }
+    });
+  }, []);
+
+  const activeFilterCount = [
+    provinceFilter !== "",
+    brandFilter !== "",
+    modelFilter !== "",
+    yearMin !== "" || yearMax !== "",
+    priceMin !== "" || priceMax !== "",
+    kmMin !== "" || kmMax !== "",
+    fuelFilter !== "",
+    filterCurrency !== undefined,
+    financingFilter !== "all",
+  ].filter(Boolean).length;
+  const hasActiveFilters = activeFilterCount > 0;
+
+  // Effect to save filters whenever they change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const currentFilters = {
+        province: provinceFilter,
+        brand: brandFilter,
+        model: modelFilter,
+        yearMin,
+        yearMax,
+        priceMin,
+        priceMax,
+        kmMin,
+        kmMax,
+        financing: financingFilter,
+        fuel: fuelFilter,
+        currency: filterCurrency,
+      };
+      saveFilters(currentFilters);
+    }, 1000); // Debounce save
+    return () => clearTimeout(timer);
+  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, filterCurrency]);
+
+  // Reset onboarding cuando el usuario inicia sesión si es necesario.
+
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const [recentVehicles, setRecentVehicles] = useState<Vehicle[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [hideHomeRecently, setHideHomeRecently] = useState<boolean>(!!profile?.hideHomeRecentlyViewed);
+
+  // Sync buyer preferences from profile
+  useEffect(() => {
+    if (profile?.buyerPreferences) {
+      setBuyerPrefs(profile.buyerPreferences);
+    }
+  }, [profile?.buyerPreferences]);
+
+  // Auto-show preferences modal once for logged-in users without preferences
+  useEffect(() => {
+    if (!user || profile?.buyerPreferences) return;
+    const key = `matchcars_prefs_seen_${user.uid}`;
+    AsyncStorage.getItem(key).then((val) => {
+      if (!val) {
+        setShowPrefsModal(true);
+        AsyncStorage.setItem(key, "1").catch(() => {});
+      }
+    }).catch(() => {});
+  }, [user, profile?.buyerPreferences]);
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
         await loadMakes();
-        if (brandFilter) {
-            await loadModels(brandFilter);
-        }
-        // Simulate a delay to show the spinner, as onSnapshot is real-time
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (brandFilter) await loadModels(brandFilter);
+        setRefreshTrigger(t => t + 1);
     } catch (e) {
         console.error(e);
     } finally {
         setRefreshing(false);
     }
   }, [brandFilter]);
+
+  const loadMore = React.useCallback(async () => {
+    if (loadingMore || !hasMore || !lastDoc) return;
+    setLoadingMore(true);
+    try {
+      const PAGE_SIZE = 20;
+      const q = query(
+        collection(db, "vehicles"),
+        where("published", "==", true),
+        startAfter(lastDoc),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const blockedUsers = profile?.blockedUsers || [];
+      const now = new Date();
+      const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+      const newItems: Vehicle[] = [];
+
+      snap.forEach((docSnap) => {
+        const data: any = docSnap.data();
+        if (data.userId && blockedUsers.includes(data.userId)) return;
+        const mapped: Vehicle = {
+          id: docSnap.id,
+          brand: data.brand, model: data.model, version: data.version ?? undefined,
+          year: data.year, price: data.price, currency: data.currency, km: data.km,
+          coverImage: data.coverImage ?? data.images?.cover ?? undefined,
+          additionalImages: data.additionalImages ?? data.images?.gallery ?? undefined,
+          city: data.location?.city ?? data.city,
+          province: data.location?.province ?? data.province,
+          location: data.location ? { latitude: data.location.latitude, longitude: data.location.longitude, address: data.location.address, city: data.location.city, province: data.location.province } : undefined,
+          userId: data.userId, userName: data.userName, createdAt: data.createdAt,
+          published: data.published, fuelType: data.fuelType ?? data.fuel,
+          acceptsFinancing: data.acceptsFinancing, financing: data.financing ?? undefined,
+          gearbox: data.gearbox, isFeatured: data.isFeatured, userPlan: data.userPlan,
+          status: data.status, sellerRating: data.sellerRating,
+          sellerReviewCount: data.sellerReviewCount, sellerTrustLevel: data.sellerTrustLevel,
+        };
+        newItems.push(mapped);
+      });
+
+      setVehicles(prev => {
+        const existingIds = new Set(prev.map(v => v.id));
+        const merged = [...prev, ...newItems.filter(v => !existingIds.has(v.id))];
+        // Re-sort entire list by boost score
+        return merged.sort((a, b) => {
+          const score = (v: Vehicle) => {
+            let s = getBoostScoreMultiplier(v.userPlan ?? "");
+            if (v.isFeatured && !hasUnlimitedFeatured(v.userPlan ?? "")) s += 500;
+            if (isWeekend && hasWeekendBoost(v.userPlan ?? "")) s += 300;
+            return s;
+          };
+          const diff = score(b) - score(a);
+          if (diff !== 0) return diff;
+          const tA = (a.createdAt as any)?.toMillis?.() ?? 0;
+          const tB = (b.createdAt as any)?.toMillis?.() ?? 0;
+          return tB - tA;
+        });
+      });
+      setLastDoc(snap.docs[snap.docs.length - 1] ?? null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
+    } catch (e) {
+      console.error("Error loading more vehicles:", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, lastDoc, profile?.blockedUsers]);
+
+  useEffect(() => {
+    const fetchRecentVehicles = async () => {
+      if (!viewedIds || viewedIds.length === 0) {
+        setRecentVehicles([]);
+        return;
+      }
+      try {
+        setRecentLoading(true);
+        const ids = viewedIds.slice(0, 3);
+        const q = query(
+          collection(db, "vehicles"),
+          where(documentId(), "in", ids)
+        );
+        const snap = await getDocs(q);
+        const allDocs: any[] = [];
+        snap.forEach((d) => allDocs.push({ id: d.id, ...d.data() }));
+        const sorted = ids
+          .map((id) => allDocs.find((v) => v.id === id))
+          .filter((v) => v !== undefined) as Vehicle[];
+        setRecentVehicles(sorted);
+      } catch (e) {
+        console.error(e);
+        setRecentVehicles([]);
+      } finally {
+        setRecentLoading(false);
+      }
+    };
+    fetchRecentVehicles();
+  }, [viewedIds]);
+  
+  useEffect(() => {
+    setHideHomeRecently(!!profile?.hideHomeRecentlyViewed);
+  }, [profile?.hideHomeRecentlyViewed]);
 
   const [alertConfig, setAlertConfig] = useState({ 
     visible: false, 
@@ -94,6 +350,28 @@ export default function AutosPublicTab() {
   const closeAlert = () => {
     setAlertConfig(prev => ({ ...prev, visible: false }));
     if (alertConfig.onClose) alertConfig.onClose();
+  };
+
+  const handleHideHomeRecently = async () => {
+    if (!user) return;
+    setHideHomeRecently(true);
+    try {
+      await updateDoc(doc(db, "users", user.uid), { hideHomeRecentlyViewed: true });
+    } catch (e) {
+      console.error(e);
+      setHideHomeRecently(false);
+    }
+  };
+
+  const handleShowHomeRecently = async () => {
+    if (!user) return;
+    setHideHomeRecently(false);
+    try {
+      await updateDoc(doc(db, "users", user.uid), { hideHomeRecentlyViewed: false });
+    } catch (e) {
+      console.error(e);
+      setHideHomeRecently(true);
+    }
   };
 
   type CarArItem = { make: string; model: string };
@@ -113,32 +391,6 @@ export default function AutosPublicTab() {
     acc[item.make] = list;
     return acc;
   }, {} as Record<string, string[]>) : {};
-  const PROVINCES: string[] = [
-    "Buenos Aires",
-    "CABA",
-    "Catamarca",
-    "Chaco",
-    "Chubut",
-    "Córdoba",
-    "Corrientes",
-    "Entre Ríos",
-    "Formosa",
-    "Jujuy",
-    "La Pampa",
-    "La Rioja",
-    "Mendoza",
-    "Misiones",
-    "Neuquén",
-    "Río Negro",
-    "Salta",
-    "San Juan",
-    "San Luis",
-    "Santa Cruz",
-    "Santa Fe",
-    "Santiago del Estero",
-    "Tierra del Fuego",
-    "Tucumán",
-  ];
   const CURRENT_YEAR = new Date().getFullYear();
   const YEAR_OPTIONS: number[] = Array.from({ length: 40 }, (_, i) => CURRENT_YEAR - i);
   const PRICE_STEPS_ARS: number[] = [4000000, 6000000, 8000000, 10000000, 15000000, 20000000, 30000000, 50000000, 80000000, 120000000];
@@ -181,15 +433,25 @@ export default function AutosPublicTab() {
     return favMatch && ownerMatch && notMineMatch && brandMatch && modelMatch && provinceMatch && yearMatch && currencyListMatch && priceMatch && kmMatch && finMatch && fuelMatch && statusMatch;
   });
 
+  // Auto-load more pages when active filters produce fewer than PAGE_SIZE results
+  const PAGE_SIZE_CONST = 20;
+  React.useEffect(() => {
+    if (!loading && !loadingMore && hasMore && filteredVehicles.length < PAGE_SIZE_CONST) {
+      loadMore();
+    }
+  }, [filteredVehicles.length, hasMore, loading, loadingMore]);
+
   async function loadMakes() {
     try {
       const snap = await getDocs(collection(db, "catalog", "default", "makes"));
       const arr: string[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const name = data?.name || d.id;
-        if (name) arr.push(name);
-      });
+      if (snap && (snap as any).forEach) {
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          const name = data?.name || d.id;
+          if (name) arr.push(name);
+        });
+      }
       setMakesRemote(arr);
     } catch {
       setMakesRemote([]);
@@ -200,11 +462,13 @@ export default function AutosPublicTab() {
     try {
       const snap = await getDocs(collection(db, "catalog", "default", "makes", make, "models"));
       const arr: string[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const name = data?.name || d.id;
-        if (name) arr.push(name);
-      });
+      if (snap && (snap as any).forEach) {
+        snap.forEach((d) => {
+          const data = d.data() as any;
+          const name = data?.name || d.id;
+          if (name) arr.push(name);
+        });
+      }
       const local = DEFAULT_MODELS_BY_MAKE[make] || [];
       const combined = Array.from(new Set([...local, ...arr])).sort();
       setModelsRemote(combined);
@@ -214,8 +478,16 @@ export default function AutosPublicTab() {
   }
 
   useEffect(() => {
-    // Solo mostrar vehículos publicados
-    const ref = query(collection(db, "vehicles"), where("published", "==", true));
+    const PAGE_SIZE = 20;
+    setVehicles([]);
+    setLastDoc(null);
+    setHasMore(true);
+
+    const ref = query(
+      collection(db, "vehicles"),
+      where("published", "==", true),
+      limit(PAGE_SIZE)
+    );
     const unsub = onSnapshot(ref, (snap) => {
       const items: Vehicle[] = [];
       const blockedUsers = profile?.blockedUsers || [];
@@ -254,6 +526,7 @@ export default function AutosPublicTab() {
           published: data.published,
           fuelType: data.fuelType ?? data.fuel,
           acceptsFinancing: data.acceptsFinancing,
+          financing: data.financing ?? undefined,
           gearbox: data.gearbox,
           isFeatured: data.isFeatured,
           userPlan: data.userPlan,
@@ -264,7 +537,7 @@ export default function AutosPublicTab() {
         };
 
         // Lazy expiration check (7 days) for non-dealers
-        if (mapped.isFeatured && data.featuredAt && (!mapped.userPlan || !mapped.userPlan.includes('pro_dealer'))) {
+        if (mapped.isFeatured && data.featuredAt && !hasUnlimitedFeatured(mapped.userPlan ?? "")) {
           try {
              const featDate = safeDate(data.featuredAt);
              if (featDate) {
@@ -275,11 +548,11 @@ export default function AutosPublicTab() {
                  if (diffDays > 7) {
                    mapped.isFeatured = false;
                    // Background update to cleanup DB
-                   updateDoc(doc.ref, { isFeatured: false }).catch(e => console.log("Auto-expire failed", e));
+                   updateDoc(doc.ref, { isFeatured: false }).catch(e => logger.log("Auto-expire failed", e));
                  }
              }
           } catch (e) {
-            console.log("Error checking expiration", e);
+            logger.log("Error checking expiration", e);
           }
         }
 
@@ -293,19 +566,16 @@ export default function AutosPublicTab() {
       const getBoostScore = (v: Vehicle) => {
         let score = 0;
         
-        // 1. Dealer siempre arriba (Destacado Ilimitado)
-        if (v.userPlan && v.userPlan.includes('pro_dealer')) score += 1000;
-        
-        // 2. Destacado normal (Pro Monthly / Plus con destacado activo)
-        if (v.isFeatured && (!v.userPlan || !v.userPlan.includes('pro_dealer'))) score += 500;
+        // Base boost from plan
+        score += getBoostScoreMultiplier(v.userPlan ?? "");
 
-        // 3. Weekend Boost (Pro Plus y Pro Dealer)
-        if (isWeekend && (v.userPlan?.includes('pro_plus') || v.userPlan?.includes('pro_dealer'))) score += 300;
+        if (v.isFeatured && !hasUnlimitedFeatured(v.userPlan ?? "")) {
+          score += 500;
+        }
 
-        // 4. Boost Posicionamiento (Pro Plus > Pro Monthly)
-        // Pro Plus debe tener mejor base que Monthly
-        if (v.userPlan?.includes('pro_plus')) score += 200;
-        else if (v.userPlan?.includes('pro_monthly') || v.userPlan?.includes('pro_annual')) score += 100;
+        if (isWeekend && hasWeekendBoost(v.userPlan ?? "")) {
+          score += 300;
+        }
 
         return score;
       };
@@ -325,14 +595,19 @@ export default function AutosPublicTab() {
       });
 
       setVehicles(items);
+      setLastDoc(snap.docs[snap.docs.length - 1] ?? null);
+      setHasMore(snap.docs.length === PAGE_SIZE);
       setLoading(false);
+      setIsOffline(false);
+      saveVehiclesCache(items);
     }, (error) => {
         console.error("Error fetching vehicles:", error);
+        setIsOffline(true);
         setLoading(false);
     });
 
     return () => unsub();
-  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, owner, favOf, filterCurrency, profile?.blockedUsers]);
+  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, owner, favOf, filterCurrency, profile?.blockedUsers, refreshTrigger]);
 
     // Effect to fetch missing user names (if they look like emails)
     useEffect(() => {
@@ -340,9 +615,14 @@ export default function AutosPublicTab() {
 
         const idsToFetch = new Set<string>();
         vehicles.forEach(v => {
-            // Fetch if userName is missing, contains '@', or is generic "Usuario"
-            // Check cache first to avoid re-fetching.
-            if ((!v.userName || v.userName.includes('@') || v.userName === 'Usuario') && v.userId && !userNamesCache[v.userId]) {
+            if (!v.userId || userNamesCache[v.userId]) return;
+            // Always fetch for dealer plans to resolve agencyName
+            if (isDealerPlan(v.userPlan ?? "")) {
+                idsToFetch.add(v.userId);
+                return;
+            }
+            // For regular users fetch only if userName is missing, looks like email, or is generic
+            if (!v.userName || v.userName.includes('@') || v.userName === 'Usuario') {
                 idsToFetch.add(v.userId);
             }
         });
@@ -357,18 +637,18 @@ export default function AutosPublicTab() {
                     const userDoc = await getDoc(doc(db, "users", uid));
                     if (userDoc.exists()) {
                         const u = userDoc.data();
-                        // Prioritize First+Last Name, then DisplayName. 
-                        // AVOID using email as fallback.
                         let fullName = "Usuario MatchCars";
-                        
-                        if (u.firstName && u.lastName) {
+                        // Agency name takes priority for dealer plans
+                        if (u.agencyName) {
+                            fullName = u.agencyName;
+                        } else if (u.firstName && u.lastName) {
                             fullName = `${u.firstName} ${u.lastName}`.trim();
                         } else if (u.displayName) {
                             fullName = u.displayName;
                         } else if (u.firstName) {
-                             fullName = u.firstName;
+                            fullName = u.firstName;
                         }
-                        
+
                         newNames[uid] = fullName;
                     } else {
                          // User not found
@@ -505,19 +785,143 @@ export default function AutosPublicTab() {
       <Header />
       {Platform.OS === 'web' && <DownloadAppBanner floating />}
 
+      {Platform.OS === 'web' && (
+        <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
+          <TouchableOpacity
+            onPress={() => router.push("/(screens)/agencias" as any)}
+            style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.border }}
+            activeOpacity={0.8}
+          >
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="business" size={18} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>Agencias</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11 }}>Concesionarias verificadas</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={theme.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push("/(screens)/compare" as any)}
+            style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.border }}
+            activeOpacity={0.8}
+          >
+            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="git-compare-outline" size={18} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>Comparador</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11 }}>Comparar modelos</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#8B5CF6" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={{ paddingHorizontal: 16, paddingTop: 4, flex: 1 }}>
+        {Platform.OS !== "web" && !hideHomeRecently && recentVehicles.length > 0 && (
+          <View style={{ marginBottom: 10, backgroundColor: "#1f2937", borderRadius: 12, paddingHorizontal: 8, paddingVertical: 6 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <Text style={{ color: "#F9FAFB", fontSize: 13, fontWeight: "700" }}>Seguí viendo</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <TouchableOpacity onPress={() => router.push("/(screens)/recently-viewed")}>
+                  <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "600" }}>Ver todos</Text>
+                </TouchableOpacity>
+                {user && (
+                  <TouchableOpacity onPress={handleHideHomeRecently}>
+                    <Text style={{ color: "#9CA3AF", fontSize: 10 }}>Ocultar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+            {recentLoading && recentVehicles.length === 0 ? (
+              <ActivityIndicator color={theme.accent} size="small" />
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {recentVehicles
+                  .filter((v) => {
+                    const s = (v as any).status;
+                    const p = (v as any).published;
+                    return !["sold","pending","pending_review","rejected","blocked","deleted"].includes(s) && p !== false;
+                  })
+                  .map((v) => (
+                    <TouchableOpacity
+                      key={v.id}
+                      style={{ width: 95, borderRadius: 8, borderWidth: 1, borderColor: theme.accent, backgroundColor: theme.card, overflow: "hidden" }}
+                      activeOpacity={0.9}
+                      onPress={() => router.push(`/car/${v.id}`)}
+                    >
+                      <View style={{ width: "100%", height: 52, backgroundColor: "#f0f0f0" }}>
+                        {(() => {
+                          const anyV: any = v as any;
+                          const rawImage = v.coverImage || anyV.images?.cover || anyV.images?.gallery?.[0] || (Array.isArray(anyV.images) ? anyV.images[0] : null);
+                          return rawImage
+                            ? <Image source={{ uri: rawImage }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                            : <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Ionicons name="car-sport-outline" size={20} color={theme.textMuted} /></View>;
+                        })()}
+                      </View>
+                      <View style={{ paddingHorizontal: 5, paddingVertical: 3 }}>
+                        <Text style={{ color: theme.text, fontSize: 9, fontWeight: "700" }} numberOfLines={1}>{(v.brand ?? "") + " " + (v.model ?? "")}</Text>
+                        <Text style={{ color: theme.price, fontSize: 9, fontWeight: "700", marginTop: 2 }} numberOfLines={1}>
+                          {v.price != null && v.currency ? `${v.currency} ${v.price.toLocaleString("es-AR")}` : "Consultar"}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
+        {Platform.OS !== "web" && hideHomeRecently && recentVehicles.length > 0 && user && (
+          <View style={{ marginBottom: 16 }}>
+            <TouchableOpacity
+              onPress={handleShowHomeRecently}
+              style={{
+                alignSelf: "flex-start",
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: "#1f2937",
+                backgroundColor: "#1f2937",
+              }}
+            >
+              <Text style={{ color: "#E5E7EB", fontSize: 11, fontWeight: "500" }}>
+                Volver a mostrar «Seguí viendo»
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <Text style={{ color: theme.text, fontSize: 16, fontWeight: "700" }}>Publicaciones</Text>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-            <TouchableOpacity onPress={() => setFiltersCollapsed((p) => !p)} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: theme.likeBoxBackground, backgroundColor: theme.inputBackground, flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Text style={{ color: theme.text, fontSize: 12 }}>{filtersCollapsed ? "Filtrar" : "Cerrar"}</Text>
-              <Ionicons name={filtersCollapsed ? "chevron-down" : "chevron-up"} size={12} color={theme.text} />
+            <TouchableOpacity onPress={() => setFiltersCollapsed((p) => !p)} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: hasActiveFilters ? theme.accent : theme.likeBoxBackground, backgroundColor: hasActiveFilters ? `${theme.accent}15` : theme.inputBackground, flexDirection: "row", alignItems: "center", gap: 4 }}>
+              {hasActiveFilters && (
+                <View style={{ minWidth: 16, height: 16, borderRadius: 8, backgroundColor: theme.accent, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, marginRight: 2 }}>
+                  <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>{activeFilterCount}</Text>
+                </View>
+              )}
+              <Text style={{ color: hasActiveFilters ? theme.accent : theme.text, fontSize: 12, fontWeight: hasActiveFilters ? "700" : "400" }}>{filtersCollapsed ? "Filtrar" : "Cerrar"}</Text>
+              <Ionicons name={filtersCollapsed ? "chevron-down" : "chevron-up"} size={12} color={hasActiveFilters ? theme.accent : theme.text} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => user && router.push("/(screens)/add-car")} disabled={!user} style={{ backgroundColor: !user ? theme.textMuted : theme.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, opacity: !user ? 0.7 : 1 }}>
               <Text style={{ color: theme.buttonText, fontWeight: "700", fontSize: 12 }}>Publicar</Text>
             </TouchableOpacity>
           </View>
         </View>
+        {hasActiveFilters && filtersCollapsed && (
+          <View style={{ marginBottom: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: `${theme.accent}10`, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: `${theme.accent}30` }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+              <Ionicons name="funnel" size={14} color={theme.accent} />
+              <Text style={{ color: theme.text, fontSize: 12, fontWeight: "500" }} numberOfLines={1}>
+                Filtros activos: {[brandFilter, modelFilter, provinceFilter, yearMin ? `>${yearMin}` : "", priceMax ? `<${priceMax}` : ""].filter(Boolean).join(", ") || "Personalizados"}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={clearFilters} style={{ marginLeft: 8 }}>
+              <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "700" }}>Limpiar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {!filtersCollapsed && (
         <View style={{ gap: 6, marginBottom: 6 }}>
           <View style={{ flexDirection: "row", gap: 6 }}>
@@ -541,7 +945,7 @@ export default function AutosPublicTab() {
               <TextInput value={brandQuery} onChangeText={setBrandQuery} placeholder="Buscar marca" placeholderTextColor={theme.textMuted} style={{ paddingHorizontal: 12, paddingVertical: 10, color: theme.text }} />
               <ScrollView keyboardShouldPersistTaps="handled" style={{ height: 220 }}>
                 {combinedMakes
-                  .filter((m) => m.toLowerCase().includes(brandQuery.toLowerCase()))
+                  .filter((m) => m.toLowerCase().includes(debouncedBrandQuery.toLowerCase()))
                   .map((m) => (
                     <TouchableOpacity key={m} onPress={async () => { setBrandFilter(m); setModelFilter(""); await loadModels(m); setBrandOpen(false); setBrandQuery(""); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: m === brandFilter ? `${theme.accent}22` : undefined }}>
                       <Text style={{ color: m === brandFilter ? theme.accent : theme.text }}>{m}</Text>
@@ -563,7 +967,7 @@ export default function AutosPublicTab() {
               <TextInput value={modelQuery} onChangeText={setModelQuery} placeholder="Buscar modelo" placeholderTextColor={theme.textMuted} style={{ paddingHorizontal: 12, paddingVertical: 10, color: theme.text }} />
               <ScrollView keyboardShouldPersistTaps="handled" style={{ height: 220 }}>
                 {(modelsRemote.length ? modelsRemote : (DEFAULT_MODELS_BY_MAKE[brandFilter] || []))
-                  .filter((mo) => mo.toLowerCase().includes(modelQuery.toLowerCase()))
+                  .filter((mo) => mo.toLowerCase().includes(debouncedModelQuery.toLowerCase()))
                   .map((mo) => (
                     <TouchableOpacity key={mo} onPress={() => { setModelFilter(mo); setModelOpen(false); setModelQuery(""); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: mo === modelFilter ? `${theme.accent}22` : undefined }}>
                       <Text style={{ color: mo === modelFilter ? theme.accent : theme.text }}>{mo}</Text>
@@ -794,35 +1198,7 @@ export default function AutosPublicTab() {
 
           <TouchableOpacity
               activeOpacity={0.7}
-              onPress={() => {
-                setBrandFilter("");
-                setModelFilter("");
-                setYearMin("");
-                setYearMax("");
-                setPriceMin("");
-                setPriceMax("");
-                setKmMin("");
-                setKmMax("");
-                setProvinceFilter("");
-                setFinancingFilter("all");
-                setFuelFilter("");
-                setBrandOpen(false);
-                setModelOpen(false);
-                setProvinceOpen(false);
-                setFuelOpen(false);
-                setBrandQuery("");
-                setModelQuery("");
-                setProvinceQuery("");
-                setMakesRemote([]);
-                setModelsRemote([]);
-                setFilterCurrency(undefined);
-                setPriceMinOpen(false);
-                setPriceMaxOpen(false);
-                setYearMinOpen(false);
-                setYearMaxOpen(false);
-                setKmMinOpen(false);
-                setKmMaxOpen(false);
-              }}
+              onPress={clearFilters}
               style={{
                 marginTop: 8,
                 paddingHorizontal: 12,
@@ -848,19 +1224,39 @@ export default function AutosPublicTab() {
           </View>
         )}
         {loading ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={theme.accent} />
-          </View>
+          <SkeletonList count={5} />
         ) : (
-          <FlatList 
+          <FlatList
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#2563eb" />
                     }
                     style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
-            data={filteredVehicles} 
-            keyExtractor={(item) => item.id} 
-            ListHeaderComponent={null}
+            data={filteredVehicles}
+            keyExtractor={(item) => item.id}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            onEndReachedThreshold={0.4}
+            onEndReached={loadMore}
+            ListHeaderComponent={isOffline ? (
+              <View style={{ backgroundColor: "#92400e", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 4 }}>
+                <Ionicons name="cloud-offline-outline" size={16} color="#fde68a" />
+                <Text style={{ color: "#fde68a", fontSize: 13, flex: 1 }}>Sin conexión — mostrando datos guardados</Text>
+              </View>
+            ) : null}
+
+            ListFooterComponent={
+              loadingMore ? (
+                <View style={{ paddingVertical: 16, alignItems: "center" }}>
+                  <ActivityIndicator color={theme.accent} size="small" />
+                </View>
+              ) : !hasMore && filteredVehicles.length > 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: "center", paddingVertical: 16 }}>
+                  — {filteredVehicles.length} vehículos —
+                </Text>
+              ) : null
+            }
             ListEmptyComponent={
               <View style={{ flex: 1, alignItems: "center", justifyContent: "center", marginTop: 40, padding: 20 }}>
                   <Ionicons name="car-sport-outline" size={48} color={theme.textMuted} />
@@ -880,6 +1276,7 @@ export default function AutosPublicTab() {
               liked={favoriteIds.has(item.id)}
               likeDisabled={!favoriteIds.has(item.id) && likesRemaining <= 0}
               onToggleLike={() => toggleFavorite(item.id, item.userId)}
+              matchScore={buyerPrefs && Object.keys(buyerPrefs).length > 0 ? calcMatchScore(item, buyerPrefs).score : undefined}
               onMessage={
                 user && item.userId && user.uid === item.userId
                   ? undefined
@@ -927,6 +1324,87 @@ export default function AutosPublicTab() {
       </View>
       </WebContainer>
       <Onboarding />
+
+      {/* FABs — fijos, no scrollean */}
+      {Platform.OS !== "web" && (
+        <>
+          {/* FAB Asesor IA */}
+          <TouchableOpacity
+            onPress={() => router.push("/(screens)/ai-advisor" as any)}
+            activeOpacity={0.88}
+            style={{
+              position: "absolute",
+              bottom: 86,
+              right: 16,
+              backgroundColor: theme.accent,
+              borderRadius: 28,
+              flexDirection: "row",
+              alignItems: "center",
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              gap: 7,
+              shadowColor: "#000",
+              shadowOpacity: 0.28,
+              shadowRadius: 10,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 8,
+            }}
+          >
+            <Ionicons name="sparkles" size={18} color="#fff" />
+            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>Buscá con IA</Text>
+          </TouchableOpacity>
+
+          {/* FAB Preferencias */}
+          {user && (
+            <TouchableOpacity
+              onPress={() => setShowPrefsModal(true)}
+              activeOpacity={0.88}
+              style={{
+                position: "absolute",
+                bottom: 148,
+                right: 16,
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: theme.card,
+                alignItems: "center",
+                justifyContent: "center",
+                borderWidth: 1.5,
+                borderColor: buyerPrefs && Object.keys(buyerPrefs).some(k => (buyerPrefs as any)[k]) ? theme.accent : theme.likeBoxBackground,
+                shadowColor: "#000",
+                shadowOpacity: 0.18,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 3 },
+                elevation: 6,
+              }}
+            >
+              <Ionicons
+                name="options-outline"
+                size={20}
+                color={buyerPrefs && Object.keys(buyerPrefs).some(k => (buyerPrefs as any)[k]) ? theme.accent : theme.textMuted}
+              />
+              {buyerPrefs && Object.keys(buyerPrefs).some(k => (buyerPrefs as any)[k]) && (
+                <View style={{
+                  position: "absolute", top: 6, right: 6,
+                  width: 8, height: 8, borderRadius: 4,
+                  backgroundColor: theme.accent,
+                  borderWidth: 1.5, borderColor: theme.card,
+                }} />
+              )}
+            </TouchableOpacity>
+          )}
+        </>
+      )}
+
+      {user && (
+        <BuyerPreferencesModal
+          visible={showPrefsModal}
+          userId={user.uid}
+          initial={buyerPrefs}
+          onSave={(prefs) => { setBuyerPrefs(prefs); setShowPrefsModal(false); }}
+          onDismiss={() => setShowPrefsModal(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }

@@ -9,6 +9,8 @@ export type SubscriptionPlan =
   | "pro_plus_annual" 
   | "pro_dealer_monthly" 
   | "pro_dealer_annual"
+  | "dealer_pro_plus_monthly"
+  | "dealer_pro_plus_annual"
   | "pro_dealer"; // Fallback/Legacy
 
 export interface UserProfile {
@@ -50,6 +52,9 @@ export interface UserProfile {
   agencyName?: string;
   bannerUrl?: string;
   businessAddress?: string;
+  address?: string; // Standard address field
+  city?: string;    // City for location filters
+  province?: string; // Province for location filters
   businessCoordinates?: { latitude: number; longitude: number };
   businessHours?: string;
   website?: string;
@@ -57,8 +62,40 @@ export interface UserProfile {
   whatsapp?: string;
   highlightedVehicleIds?: string[]; // IDs of vehicles to feature
 
+  // Bio / Description
+  description?: string;
+
   // Ratings
   sellerRating?: number;
   sellerReviewCount?: number;
   sellerTrustLevel?: TrustLevel;
+
+  // UI Preferences
+  hideHomeRecentlyViewed?: boolean;
+
+  // KYC / Identity Verification
+  kycStatus?: "verified" | "pending" | "failed";
+  kycVerifiedAt?: any;
+  kycIdentityId?: string;
+
+  // Extended dealer profile
+  phone?: string;
+  foundedYear?: number;
+  brandSpecialties?: string[];
+  showroomGallery?: string[];
+
+  // Buyer preferences (for Match Score)
+  buyerPreferences?: BuyerPreferences;
+}
+
+export interface BuyerPreferences {
+  budgetMin?: number;
+  budgetMax?: number;
+  province?: string;
+  fuelType?: string;
+  maxKm?: number;
+  minYear?: number;
+  wantsSwap?: boolean;
+  wantsFinancing?: boolean;
+  useType?: "familia" | "ciudad" | "trabajo" | "finde";
 }

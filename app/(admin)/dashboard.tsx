@@ -1,14 +1,47 @@
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
 import { Header } from "@/components/Header";
+import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { sendNotificationEmail } from "@/lib/mail";
+import { sendPushNotification } from "@/lib/notifications";
+import { SubscriptionPlan, UserRole } from "@/types/user";
 import { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Linking, Modal, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Linking, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const ROLE_LABELS: Record<UserRole, string> = { user: "Usuario", moderator: "Moderador", admin: "Admin" };
+const ROLE_COLORS: Record<UserRole, string> = { user: "#6B7280", moderator: "#F59E0B", admin: "#EF4444" };
+
+const PLAN_LABELS: Record<SubscriptionPlan, string> = {
+  free: "Gratis",
+  pro_monthly: "Pro Mensual",
+  pro_annual: "Pro Anual",
+  pro_plus_monthly: "Pro+ Mensual",
+  pro_plus_annual: "Pro+ Anual",
+  pro_dealer_monthly: "Dealer Mensual",
+  pro_dealer_annual: "Dealer Anual",
+  dealer_pro_plus_monthly: "Dealer Pro+ Mensual",
+  dealer_pro_plus_annual: "Dealer Pro+ Anual",
+  pro_dealer: "Pro Dealer",
+};
+
+const PLAN_COLORS: Record<SubscriptionPlan, string> = {
+  free: "#6B7280",
+  pro_monthly: "#3B82F6",
+  pro_annual: "#2563EB",
+  pro_plus_monthly: "#6366F1",
+  pro_plus_annual: "#4F46E5",
+  pro_dealer_monthly: "#10B981",
+  pro_dealer_annual: "#059669",
+  dealer_pro_plus_monthly: "#0D9488",
+  dealer_pro_plus_annual: "#0F766E",
+  pro_dealer: "#9CA3AF",
+};
 
 interface Report {
   id: string;
@@ -173,7 +206,9 @@ const ReportItem = ({ item, onDismiss, onBlock, onDeletePost, onShowAlert }: { i
 };
 
 export default function AdminDashboardScreen() {
-  const { theme } = useTheme();
+  const { theme, themeName } = useTheme();
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<"moderation" | "reports" | "users">("moderation");
   
@@ -188,9 +223,19 @@ export default function AdminDashboardScreen() {
   const [loadingGrouped, setLoadingGrouped] = useState(false);
   const [viewingUserId, setViewingUserId] = useState<string | null>(null);
 
-  // State for Blocked Users
-  const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
+  // State for Users tab
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editRole, setEditRole] = useState<UserRole>("user");
+  const [editPlan, setEditPlan] = useState<SubscriptionPlan>("free");
+  const [savingUserEdit, setSavingUserEdit] = useState(false);
+
+  // Pricing Config (USD → ARS)
+  const [usdToArs, setUsdToArs] = useState<string>("");
+  const [loadingFx, setLoadingFx] = useState(true);
+  const [savingFx, setSavingFx] = useState(false);
 
   // Rejection Modal State
   const [rejectionModalVisible, setRejectionModalVisible] = useState(false);
@@ -201,11 +246,18 @@ export default function AdminDashboardScreen() {
 
   // --- Effects ---
 
-  // Fetch Pending Vehicles
   useEffect(() => {
-    const q = query(collection(db, "vehicles"), where("status", "==", "pending"));
+    const q = query(collection(db, "vehicles"), where("status", "in", ["pending", "pending_review"]));
     const unsub = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Vehicle));
+      data.sort((a, b) => {
+        const scoreA = a.riskScore || 0;
+        const scoreB = b.riskScore || 0;
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        const tA = (a.createdAt as any)?.toMillis ? (a.createdAt as any).toMillis() : 0;
+        const tB = (b.createdAt as any)?.toMillis ? (b.createdAt as any).toMillis() : 0;
+        return tA - tB;
+      });
       setVehicles(data);
       setLoadingVehicles(false);
     }, (error) => {
@@ -213,6 +265,32 @@ export default function AdminDashboardScreen() {
       setLoadingVehicles(false);
     });
     return () => unsub();
+  }, []);
+
+  // Fetch pricing config (usdToArsRate)
+  useEffect(() => {
+    let mounted = true;
+    const loadConfig = async () => {
+      try {
+        const snap = await getDoc(doc(db, "config", "pricing"));
+        if (snap.exists()) {
+          const data: any = snap.data();
+          const raw = data.usdToArsRate;
+          const value = typeof raw === "number" ? raw : Number(raw);
+          if (!Number.isNaN(value) && value > 0 && mounted) {
+            setUsdToArs(String(value));
+          }
+        }
+      } catch (e) {
+        console.error("Error loading pricing config", e);
+      } finally {
+        if (mounted) setLoadingFx(false);
+      }
+    };
+    loadConfig();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Fetch Pending Reports
@@ -285,20 +363,24 @@ export default function AdminDashboardScreen() {
     group();
   }, [reports]);
 
-  // Fetch Blocked Users (Only when tab is active)
+  // Fetch All Users (when tab is active)
   useEffect(() => {
     if (activeTab === "users") {
       setLoadingUsers(true);
-      const q = query(collection(db, "users"), where("isBlocked", "==", true));
-      const unsub = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setBlockedUsers(data);
+      const q = query(collection(db, "users"), limit(300));
+      getDocs(q).then((snap) => {
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        data.sort((a: any, b: any) => {
+          const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return tB - tA;
+        });
+        setAllUsers(data);
         setLoadingUsers(false);
-      }, (error) => {
-        console.error("Error fetching blocked users:", error);
+      }).catch((error) => {
+        console.error("Error fetching users:", error);
         setLoadingUsers(false);
       });
-      return () => unsub();
     }
   }, [activeTab]);
 
@@ -347,15 +429,104 @@ export default function AdminDashboardScreen() {
 
   const handleApprove = async (vehicleId: string) => {
     try {
-      await updateDoc(doc(db, "vehicles", vehicleId), {
+      const vehicleRef = doc(db, "vehicles", vehicleId);
+      const vehicleSnap = await getDoc(vehicleRef);
+      const vehicleData = vehicleSnap.exists() ? vehicleSnap.data() as any : null;
+
+      await updateDoc(vehicleRef, {
         status: "available",
         published: true,
         approvedAt: serverTimestamp(),
       });
+
+      const ownerId = vehicleData?.userId;
+      if (ownerId) {
+        const carModel = [vehicleData?.brand, vehicleData?.model, vehicleData?.year].filter(Boolean).join(" ");
+
+        const notifRef = doc(collection(db, "users", ownerId, "system_notifications"));
+        setDoc(notifRef, {
+          type: "vehicle_approved",
+          vehicleId,
+          brand: vehicleData?.brand || null,
+          model: vehicleData?.model || null,
+          year: vehicleData?.year || null,
+          createdAt: serverTimestamp(),
+          read: false,
+        }).catch((e) => console.error("Error creating approval notification", e));
+
+        sendNotificationEmail("vehicle_approved", {
+          recipientUid: ownerId,
+          senderName: "MatchCars",
+          subject: "¡Tu publicación ya está activa!",
+          carModel,
+          ctaLink: `https://matchcars.app/car/${vehicleId}`,
+        }).catch((e) => console.error("Error sending approval email", e));
+
+        try {
+          const ownerSnap = await getDoc(doc(db, "users", ownerId));
+          const pushToken = ownerSnap.data()?.pushToken;
+          if (pushToken) {
+            sendPushNotification(
+              pushToken,
+              "¡Tu publicación ya está activa!",
+              `${carModel || "Tu auto"} ya está visible para todos los compradores.`,
+              { url: `matchcars://car/${vehicleId}` }
+            );
+          }
+        } catch (e) {
+          console.error("Error sending approval push", e);
+        }
+      }
+
       showAlert("Aprobado", "El vehículo ha sido publicado.", "success");
     } catch (e: any) {
       console.error(e);
       showAlert("Error", "No se pudo aprobar. Verificá tus permisos.", "error");
+    }
+  };
+
+  const handleSaveUsdToArs = async () => {
+    if (!usdToArs.trim()) {
+      showAlert(
+        "Valor inválido",
+        "Ingresá una cotización válida para el dólar.",
+        "error"
+      );
+      return;
+    }
+
+    const cleaned = usdToArs.replace(/\./g, "").replace(",", ".");
+    const parsed = Number(cleaned);
+    if (!parsed || Number.isNaN(parsed) || parsed <= 0) {
+      showAlert(
+        "Valor inválido",
+        "La cotización debe ser un número mayor a cero.",
+        "error"
+      );
+      return;
+    }
+
+    try {
+      setSavingFx(true);
+      await setDoc(
+        doc(db, "config", "pricing"),
+        { usdToArsRate: parsed, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      showAlert(
+        "Cotización actualizada",
+        "El valor del dólar se actualizó correctamente.",
+        "success"
+      );
+    } catch (e) {
+      console.error("Error updating usdToArsRate", e);
+      showAlert(
+        "Error al guardar",
+        "No se pudo actualizar la cotización. Intentá de nuevo.",
+        "error"
+      );
+    } finally {
+      setSavingFx(false);
     }
   };
 
@@ -377,18 +548,75 @@ export default function AdminDashboardScreen() {
 
     setProcessingRejection(true);
     try {
-      // User requested to DELETE the vehicle on rejection
-      await deleteDoc(doc(db, "vehicles", selectedVehicleId));
-      
+      const vehicleRef = doc(db, "vehicles", selectedVehicleId);
+      const vehicleSnap = await getDoc(vehicleRef);
+      const vehicleData = vehicleSnap.exists() ? vehicleSnap.data() as any : null;
+
+      await updateDoc(vehicleRef, {
+        status: "rejected",
+        published: false,
+        rejectedAt: serverTimestamp(),
+        rejectionReason: rejectionReason.trim(),
+      });
+
+      const ownerId = vehicleData?.userId;
+      if (ownerId) {
+        const notifRef = doc(collection(db, "users", ownerId, "system_notifications"));
+        await setDoc(notifRef, {
+          type: "vehicle_rejected",
+          vehicleId: selectedVehicleId,
+          brand: vehicleData?.brand || null,
+          model: vehicleData?.model || null,
+          year: vehicleData?.year || null,
+          rejectionReason: rejectionReason.trim() || null,
+          createdAt: serverTimestamp(),
+          read: false,
+        });
+
+        try {
+          const carModel =
+            [vehicleData?.brand, vehicleData?.model, vehicleData?.year]
+              .filter(Boolean)
+              .join(" ");
+          await sendNotificationEmail("moderation_rejected", {
+            recipientUid: ownerId,
+            senderName: "Matchcars",
+            subject: "Tu publicación fue rechazada para corrección",
+            carModel,
+            messagePreview: rejectionReason.trim() || undefined,
+          });
+        } catch (e) {
+          console.error("Error sending moderation rejection email", e);
+        }
+
+        try {
+          const ownerSnap = await getDoc(doc(db, "users", ownerId));
+          const pushToken = ownerSnap.data()?.pushToken;
+          if (pushToken) {
+            const carModel = [vehicleData?.brand, vehicleData?.model, vehicleData?.year].filter(Boolean).join(" ");
+            sendPushNotification(
+              pushToken,
+              "Tu publicación fue rechazada",
+              `${carModel || "Tu auto"} necesita algunos cambios antes de publicarse.`,
+              { url: `matchcars://car/${selectedVehicleId}` }
+            );
+          }
+        } catch (e) {
+          console.error("Error sending rejection push", e);
+        }
+      }
+
       setRejectionModalVisible(false);
-      // Wait a bit for modal to close before showing alert to avoid conflict
       setTimeout(() => {
-        showAlert("Eliminado", "La publicación ha sido eliminada permanentemente.", "success");
+        showAlert(
+          "Devuelto para edición",
+          "La publicación fue rechazada con comentarios para que el usuario la corrija.",
+          "info"
+        );
       }, 300);
     } catch (e: any) {
       console.error(e);
-      // Keep modal open, show error inline or via native Alert
-      setRejectionError("No se pudo eliminar. Verificá tus permisos o tu conexión.");
+      setRejectionError("No se pudo rechazar la publicación. Verificá tus permisos o tu conexión.");
     } finally {
       setProcessingRejection(false);
     }
@@ -471,17 +699,40 @@ export default function AdminDashboardScreen() {
   };
 
   // --- Handlers: Users ---
-  
+
   const handleUnblockUser = async (userId: string) => {
     try {
       await updateDoc(doc(db, "users", userId), {
         isBlocked: false,
         blockedAt: null
       });
+      setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, isBlocked: false, blockedAt: null } : u));
       showAlert("Desbloqueado", "El usuario ha sido desbloqueado. Podrá volver a operar.", "success");
     } catch (e) {
       console.error(e);
       showAlert("Error", "No se pudo desbloquear al usuario.", "error");
+    }
+  };
+
+  const openEditUser = (user: any) => {
+    setEditingUser(user);
+    setEditRole(user.role ?? "user");
+    setEditPlan(user.plan ?? "free");
+  };
+
+  const handleSaveUserEdit = async () => {
+    if (!editingUser || !isAdmin) return;
+    setSavingUserEdit(true);
+    try {
+      await updateDoc(doc(db, "users", editingUser.id), { role: editRole, plan: editPlan });
+      setAllUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role: editRole, plan: editPlan } : u));
+      showAlert("Guardado", "Rol y plan actualizados correctamente.", "success");
+      setEditingUser(null);
+    } catch (e) {
+      console.error(e);
+      showAlert("Error", "No se pudo actualizar el usuario.", "error");
+    } finally {
+      setSavingUserEdit(false);
     }
   };
 
@@ -493,8 +744,51 @@ export default function AdminDashboardScreen() {
         <Header title="Administración" showBack />
       </View>
 
+      {/* Pricing Config */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+        <View style={{ backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+          <Text style={{ color: theme.text, fontWeight: "700", marginBottom: 4 }}>Cotización USD → ARS</Text>
+          <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8 }}>
+            Este valor se usa para convertir los precios de referencia en dólares a pesos argentinos.
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={{ color: theme.textMuted }}>1 USD =</Text>
+            <View style={{ flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: theme.inputBackground, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+              <TextInput
+                value={usdToArs}
+                onChangeText={setUsdToArs}
+                placeholder={loadingFx ? "Cargando..." : "Ej: 1200"}
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                style={{ flex: 1, color: theme.text }}
+                editable={!loadingFx && !savingFx}
+              />
+              <Text style={{ color: theme.textMuted, marginLeft: 4 }}>ARS</Text>
+            </View>
+            <TouchableOpacity
+              onPress={handleSaveUsdToArs}
+              disabled={savingFx || loadingFx}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 8,
+                backgroundColor: savingFx || loadingFx ? theme.textMuted : theme.primary,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {savingFx ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 12 }}>Guardar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
       {/* Tabs */}
-      <View style={{ flexDirection: "row", padding: 16, gap: 8 }}>
+      <View style={{ flexDirection: "row", padding: 16, paddingTop: 8, gap: 8 }}>
         <TouchableOpacity
           onPress={() => setActiveTab("moderation")}
           style={{
@@ -547,31 +841,33 @@ export default function AdminDashboardScreen() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => setActiveTab("users")}
-          style={{
-            flex: 1,
-            paddingVertical: 10,
-            paddingHorizontal: 4,
-            borderRadius: 8,
-            backgroundColor: activeTab === "users" ? theme.primary : theme.card,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Text 
-            numberOfLines={1} 
-            adjustsFontSizeToFit
-            style={{ 
-              color: activeTab === "users" ? "#FFF" : theme.text,
-              fontWeight: "bold",
-              fontSize: 12,
-              textAlign: "center"
+        {isAdmin && (
+          <TouchableOpacity
+            onPress={() => setActiveTab("users")}
+            style={{
+              flex: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 4,
+              borderRadius: 8,
+              backgroundColor: activeTab === "users" ? theme.primary : theme.card,
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            Bloqueados
-          </Text>
-        </TouchableOpacity>
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              style={{
+                color: activeTab === "users" ? "#FFF" : theme.text,
+                fontWeight: "bold",
+                fontSize: 12,
+                textAlign: "center"
+              }}
+            >
+              Usuarios
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Content */}
@@ -579,10 +875,90 @@ export default function AdminDashboardScreen() {
         <FlatList
           data={vehicles}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <View style={{ marginBottom: 24 }}>
+          renderItem={({ item }) => {
+            const flags = item.riskFlags || [];
+            let score = item.riskScore || 0;
+            if (flags.includes("price_outlier") || flags.includes("price_high_outlier")) {
+              if (score < 3) score = 3;
+            }
+            let severityLabel = "";
+            let severityBg = "";
+            let severityColor = "";
+
+            const isDark = themeName === "dark";
+            if (score >= 5) {
+              severityLabel = "Riesgo alto";
+              severityBg = isDark ? "#4C0519" : "#FEE2E2";
+              severityColor = isDark ? "#FCA5A5" : "#B91C1C";
+            } else if (score >= 3) {
+              severityLabel = "Riesgo medio";
+              severityBg = isDark ? "#451A03" : "#FEF9C3";
+              severityColor = isDark ? "#FDE68A" : "#92400E";
+            } else if (score > 0) {
+              severityLabel = "Riesgo bajo";
+              severityBg = isDark ? "#052E16" : "#DCFCE7";
+              severityColor = isDark ? "#86EFAC" : "#166534";
+            } else {
+              severityLabel = "OK para publicar";
+              severityBg = isDark ? "#022C22" : "#ECFDF5";
+              severityColor = isDark ? "#6EE7B7" : "#047857";
+            }
+
+            return (
+            <View style={{ marginBottom: 32 }}>
+              {severityLabel !== "" && (
+                <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+                  <View style={{ 
+                    flexDirection: "row", 
+                    alignItems: "center", 
+                    alignSelf: "flex-start",
+                    paddingHorizontal: 10,
+                    paddingVertical: 4,
+                    borderRadius: 999,
+                    backgroundColor: severityBg
+                  }}>
+                    <Text style={{ color: severityColor, fontSize: 11, fontWeight: "700" }}>
+                      {severityLabel}
+                      {score > 0 ? ` • Score ${score}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              )}
               <CarCard vehicle={item} hideLike={true} hideCompare={true} />
-              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, marginTop: -8 }}>
+              {item.riskFlags && item.riskFlags.length > 0 && (
+                <View style={{ paddingHorizontal: 16, marginTop: 8, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {item.riskFlags.map((flag) => (
+                    <View
+                      key={flag}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 999,
+                        backgroundColor: theme.card,
+                        borderWidth: 1,
+                        borderColor: theme.likeBoxBackground,
+                      }}
+                    >
+                      <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {flag === "price_outlier"
+                          ? "Precio muy por debajo del mercado"
+                          : flag === "price_high_outlier"
+                          ? "Precio muy por encima del mercado"
+                          : flag === "new_user_mass"
+                          ? "Usuario nuevo con muchas publicaciones recientes"
+                          : flag === "external_contact"
+                          ? "Teléfono o link externo en la descripción"
+                          : flag === "duplicate_image"
+                          ? "Fotos repetidas en otras publicaciones"
+                          : flag === "year_price_mismatch"
+                          ? "Año y precio no parecen consistentes"
+                          : flag}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, marginTop: 12 }}>
                 <TouchableOpacity
                   onPress={() => openRejectionModal(item.id)}
                   style={{
@@ -620,7 +996,7 @@ export default function AdminDashboardScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-          )}
+          )}}
           ListEmptyComponent={
             <Text style={{ color: theme.textMuted, textAlign: "center", marginTop: 40 }}>
               No hay publicaciones pendientes.
@@ -672,42 +1048,190 @@ export default function AdminDashboardScreen() {
       ) : (
         // Users Tab
         <View style={{ flex: 1 }}>
+          <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.inputBackground, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+              <Ionicons name="search" size={18} color={theme.textMuted} style={{ marginRight: 8 }} />
+              <TextInput
+                value={usersSearch}
+                onChangeText={setUsersSearch}
+                placeholder="Buscar por nombre o email..."
+                placeholderTextColor={theme.textMuted}
+                style={{ flex: 1, color: theme.text, fontSize: 14 }}
+                autoCapitalize="none"
+              />
+              {usersSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setUsersSearch("")}>
+                  <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 6 }}>
+              {loadingUsers ? "Cargando..." : `${allUsers.filter(u => {
+                if (!usersSearch.trim()) return true;
+                const q = usersSearch.toLowerCase();
+                return (u.firstName?.toLowerCase() ?? "").includes(q) || (u.lastName?.toLowerCase() ?? "").includes(q) || (u.email?.toLowerCase() ?? "").includes(q);
+              }).length} usuario(s)`}
+            </Text>
+          </View>
           {loadingUsers ? (
             <ActivityIndicator color={theme.primary} style={{ marginTop: 40 }} />
           ) : (
             <FlatList
-              data={blockedUsers}
+              data={allUsers.filter(u => {
+                if (!usersSearch.trim()) return true;
+                const q = usersSearch.toLowerCase();
+                return (u.firstName?.toLowerCase() ?? "").includes(q) || (u.lastName?.toLowerCase() ?? "").includes(q) || (u.email?.toLowerCase() ?? "").includes(q);
+              })}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={{ padding: 16 }}
-              renderItem={({ item }) => (
-                <View style={{ backgroundColor: theme.card, padding: 16, borderRadius: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 16 }}>
-                      {item.firstName} {item.lastName}
-                    </Text>
-                    <Text style={{ color: theme.textMuted }}>{item.email}</Text>
-                    <Text style={{ color: "#EF4444", fontSize: 12, marginTop: 4 }}>
-                      Bloqueado: {item.blockedAt?.toDate ? item.blockedAt.toDate().toLocaleDateString() : "Fecha desconocida"}
-                    </Text>
-                  </View>
-                  
+              contentContainerStyle={{ padding: 16, paddingTop: 4 }}
+              renderItem={({ item }) => {
+                const role: UserRole = item.role ?? "user";
+                const plan: SubscriptionPlan = item.plan ?? "free";
+                const registeredAt = item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString("es-AR") : null;
+                const lastLogin = item.lastLoginAt?.toDate ? item.lastLoginAt.toDate().toLocaleDateString("es-AR") : null;
+                return (
                   <TouchableOpacity
-                    onPress={() => handleUnblockUser(item.id)}
-                    style={{ backgroundColor: theme.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 }}
+                    onPress={() => isAdmin && openEditUser(item)}
+                    style={{ backgroundColor: theme.card, padding: 14, borderRadius: 12, marginBottom: 10 }}
+                    activeOpacity={0.75}
                   >
-                    <Text style={{ color: "white", fontWeight: "bold" }}>Desbloquear</Text>
+                    <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 15 }}>
+                          {item.firstName ?? ""} {item.lastName ?? ""}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 1 }}>{item.email}</Text>
+                        <View style={{ flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                          <View style={{ backgroundColor: ROLE_COLORS[role] + "22", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                            <Text style={{ color: ROLE_COLORS[role], fontSize: 11, fontWeight: "700" }}>{ROLE_LABELS[role]}</Text>
+                          </View>
+                          <View style={{ backgroundColor: PLAN_COLORS[plan] + "22", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                            <Text style={{ color: PLAN_COLORS[plan], fontSize: 11, fontWeight: "700" }}>{PLAN_LABELS[plan]}</Text>
+                          </View>
+                          {item.isBlocked && (
+                            <View style={{ backgroundColor: "#EF444422", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                              <Text style={{ color: "#EF4444", fontSize: 11, fontWeight: "700" }}>Bloqueado</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 4 }}>
+                        {registeredAt && <Text style={{ color: theme.textMuted, fontSize: 11 }}>Reg: {registeredAt}</Text>}
+                        {lastLogin && <Text style={{ color: theme.textMuted, fontSize: 11 }}>Login: {lastLogin}</Text>}
+                        <Ionicons name="chevron-forward" size={16} color={theme.textMuted} style={{ marginTop: 4 }} />
+                      </View>
+                    </View>
                   </TouchableOpacity>
-                </View>
-              )}
+                );
+              }}
               ListEmptyComponent={
                 <Text style={{ color: theme.textMuted, textAlign: "center", marginTop: 40 }}>
-                  No hay usuarios bloqueados.
+                  {usersSearch.trim() ? "Sin resultados para esa búsqueda." : "No hay usuarios registrados."}
                 </Text>
               }
             />
           )}
         </View>
       )}
+
+      {/* User Edit Modal */}
+      <Modal
+        visible={!!editingUser}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditingUser(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: theme.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 32 }}>
+            {/* Header */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: theme.inputBackground }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontSize: 17, fontWeight: "bold" }}>
+                  {editingUser?.firstName ?? ""} {editingUser?.lastName ?? ""}
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{editingUser?.email}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setEditingUser(null)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={26} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
+              {/* Role */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginTop: 20, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>Rol</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {(["user", "moderator", "admin"] as UserRole[]).map(r => (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setEditRole(r)}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      backgroundColor: editRole === r ? ROLE_COLORS[r] : theme.inputBackground,
+                      borderWidth: 1.5,
+                      borderColor: editRole === r ? ROLE_COLORS[r] : theme.likeBoxBackground,
+                    }}
+                  >
+                    <Text style={{ color: editRole === r ? "#FFF" : theme.text, fontWeight: "700", fontSize: 13 }}>
+                      {ROLE_LABELS[r]}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Plan */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginTop: 20, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>Plan</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {(Object.keys(PLAN_LABELS) as SubscriptionPlan[]).map(p => (
+                  <TouchableOpacity
+                    key={p}
+                    onPress={() => setEditPlan(p)}
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 9,
+                      borderRadius: 10,
+                      backgroundColor: editPlan === p ? PLAN_COLORS[p] : theme.inputBackground,
+                      borderWidth: 1.5,
+                      borderColor: editPlan === p ? PLAN_COLORS[p] : theme.likeBoxBackground,
+                    }}
+                  >
+                    <Text style={{ color: editPlan === p ? "#FFF" : theme.text, fontWeight: "600", fontSize: 12 }}>
+                      {PLAN_LABELS[p]}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Unblock (if blocked) */}
+              {editingUser?.isBlocked && (
+                <TouchableOpacity
+                  onPress={() => {
+                    handleUnblockUser(editingUser.id);
+                    setEditingUser(null);
+                  }}
+                  style={{ marginTop: 20, backgroundColor: theme.inputBackground, borderRadius: 10, padding: 14, alignItems: "center", borderWidth: 1, borderColor: "#EF4444" }}
+                >
+                  <Text style={{ color: "#EF4444", fontWeight: "700" }}>Desbloquear usuario</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Save */}
+              <TouchableOpacity
+                onPress={handleSaveUserEdit}
+                disabled={savingUserEdit}
+                style={{ marginTop: 16, backgroundColor: theme.primary, borderRadius: 12, padding: 16, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, opacity: savingUserEdit ? 0.7 : 1 }}
+              >
+                {savingUserEdit && <ActivityIndicator size="small" color="#FFF" />}
+                <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 16 }}>
+                  {savingUserEdit ? "Guardando..." : "Guardar cambios"}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* User Reports Detail Modal */}
       <Modal

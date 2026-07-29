@@ -1,4 +1,5 @@
 // app/contexts/AuthContext.tsx
+import { logger } from "@/lib/logger";
 import React, {
     ReactNode,
     createContext,
@@ -26,6 +27,8 @@ import {
 } from "firebase/auth";
 
 import { auth, db } from "@/lib/firebase";
+import { getMaxCars, getMonthlyFeaturedAllowance, hasUnlimitedFeatured } from "@/lib/planChecks";
+import { getAvatarColorFromEmail } from "@/utils/avatarUtils";
 import { TrustLevel } from "@/types/commerce";
 import { SubscriptionPlan, UserProfile, UserRole } from "@/types/user";
 import { Timestamp, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
@@ -36,13 +39,24 @@ if (Platform.OS !== 'web') {
     try {
         AppleAuthentication = require("expo-apple-authentication");
     } catch (e) {
-        console.warn("AppleAuthentication module not found");
+        logger.warn("AppleAuthentication module not found");
     }
 }
 
 WebBrowser.maybeCompleteAuthSession(); // Cierra bien el flujo OAuth
 
 export { SubscriptionPlan, UserProfile, UserRole };
+
+// Shape of a user document as stored in Firestore
+interface FirestoreUserDoc extends Partial<UserProfile> {
+  isPro?: boolean;
+  displayName?: string;
+  notificationsLastSeenAt?: unknown;
+  notificationsClearedAt?: unknown;
+  seenLikesCount?: number;
+  seenMatchesCount?: number;
+  hideHomeRecentlyViewed?: boolean;
+}
 
 interface AuthContextValue {
   user: User | null;
@@ -72,25 +86,6 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const AVATAR_COLORS = [
-  "#FF6B6B",
-  "#FFB347",
-  "#F9D66B",
-  "#4ECDC4",
-  "#1B9CFC",
-  "#A66DD4",
-  "#FF7F50",
-];
-
-function getAvatarColorFromEmail(email: string): string {
-  if (!email) return AVATAR_COLORS[0];
-  let sum = 0;
-  for (let i = 0; i < email.length; i++) {
-    sum += email.charCodeAt(i);
-  }
-  const index = sum % AVATAR_COLORS.length;
-  return AVATAR_COLORS[index];
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -148,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Escuchar cambios en el perfil en tiempo real
         unsubProfile = onSnapshot(ref, (snap) => {
           if (snap.exists()) {
-            const data = snap.data() as any;
+            const data = snap.data() as FirestoreUserDoc;
             setProfile({ 
               ...data, 
               id: firebaseUser.uid,
@@ -194,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
       if (!initializing) return;
       const timer = setTimeout(() => {
-          console.warn("Auth initialization timed out. Forcing app load.");
+          logger.warn("Auth initialization timed out. Forcing app load.");
           setInitializing(false);
       }, 4000); // 4 seconds timeout
       return () => clearTimeout(timer);
@@ -209,7 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const nextBill = profile.nextBillingDate.toDate ? profile.nextBillingDate.toDate() : new Date(profile.nextBillingDate);
 
       if (now > nextBill) {
-        console.log("Subscription expired, downgrading to free...");
+        logger.log("Subscription expired, downgrading to free...");
         await updatePlan("free");
       }
     };
@@ -278,7 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, cleanEmail, password);
       // onAuthStateChanged actualiza profile
     } catch (error: any) {
-      console.log("🔥 ERROR LOGIN:", error.code, error.message);
+      logger.log("🔥 ERROR LOGIN:", error.code, error.message);
 
       if (
         error.code === "auth/invalid-credential" ||
@@ -330,7 +325,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (snap.exists()) {
         // Usuario ya registrado
-        const data = snap.data() as any;
+        const data = snap.data() as FirestoreUserDoc;
         setProfile({ 
           ...data, 
           id: fbUser.uid,
@@ -422,7 +417,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setProfile(userProfile);
       } else {
-        const data = snap.data() as any;
+        const data = snap.data() as FirestoreUserDoc;
         setProfile({ 
           ...data, 
           id: fbUser.uid,
@@ -486,7 +481,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setProfile(userProfile);
       } else {
-        const data = snap.data() as any;
+        const data = snap.data() as FirestoreUserDoc;
         setProfile({ 
           ...data, 
           id: aUser.uid,
@@ -588,10 +583,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // 1. Actualizar perfil de usuario
       const userRef = doc(db, "users", user.uid);
-      const updatePayload: any = { 
-        plan, 
+      const updatePayload: Partial<FirestoreUserDoc> & { isPro: boolean; cancelAtPeriodEnd: boolean } = {
+        plan,
         isPro: plan !== "free",
-        cancelAtPeriodEnd: false // Resetear cancelación al cambiar de plan
+        cancelAtPeriodEnd: false,
       };
       
       if (plan !== "free") {
@@ -605,25 +600,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       batch.set(userRef, updatePayload, { merge: true });
 
-      // 2. Actualizar vehículos
+      // 2. Actualizar vehículos según nuevo plan
       const q = query(collection(db, "vehicles"), where("userId", "==", user.uid));
       const querySnapshot = await getDocs(q);
-      
-      const shouldFeatureAll = plan.startsWith("pro_dealer");
-      const shouldUnfeatureAll = plan === "free";
-      
-      querySnapshot.forEach((doc) => {
-        const updateData: any = { userPlan: plan };
-        
-        if (shouldFeatureAll) {
+
+      const oldPlan = profile.plan || "free";
+      const newMaxCars = getMaxCars(plan);
+      const newFeaturedLimit = getMonthlyFeaturedAllowance(plan);
+      const EXCLUDED = ["deleted", "rejected", "rejected_limit", "blocked", "sold"];
+
+      // Clasificar vehículos por estado
+      const activeDocs = querySnapshot.docs.filter(d => !EXCLUDED.includes(d.data().status || "available"));
+      const rejectedLimitDocs = querySnapshot.docs.filter(d => d.data().status === "rejected_limit");
+      const featuredDocs = querySnapshot.docs
+        .filter(d => d.data().isFeatured === true)
+        .sort((a, b) => (a.data().featuredAt?.seconds || 0) - (b.data().featuredAt?.seconds || 0)); // más antiguos primero
+
+      // a) Actualizar userPlan en todos los vehículos
+      querySnapshot.forEach((docSnap) => {
+        const updateData: Record<string, unknown> = { userPlan: plan };
+
+        // b) Dealer: destacar todos automáticamente
+        if (hasUnlimitedFeatured(plan)) {
           updateData.isFeatured = true;
           updateData.featuredAt = serverTimestamp();
-        } else if (shouldUnfeatureAll) {
+        }
+
+        // c) Bajar a free o a un plan que no tenga featured ilimitado
+        // si venía de dealer (featured ilimitado) → quitar featured a todos
+        if (hasUnlimitedFeatured(oldPlan) && !hasUnlimitedFeatured(plan)) {
           updateData.isFeatured = false;
         }
-        
-        batch.update(doc.ref, updateData);
+
+        // d) Bajar a free → quitar featured a todos
+        if (plan === "free") {
+          updateData.isFeatured = false;
+        }
+
+        batch.update(docSnap.ref, updateData);
       });
+
+      // e) Downgrade de featured: si el nuevo plan tiene límite finito y hay más de los permitidos,
+      //    quitar featured a los más recientes (se conservan los que llevan más tiempo activos)
+      if (newFeaturedLimit !== Infinity && featuredDocs.length > newFeaturedLimit) {
+        for (let i = newFeaturedLimit; i < featuredDocs.length; i++) {
+          batch.update(featuredDocs[i].ref, { isFeatured: false });
+        }
+      }
+
+      // f) Upgrade: restaurar vehículos con rejected_limit hasta el nuevo cupo
+      if (newMaxCars > getMaxCars(oldPlan) || newMaxCars === Infinity) {
+        const slots = newMaxCars === Infinity ? Infinity : newMaxCars - activeDocs.length;
+        let restored = 0;
+        for (const rejDoc of rejectedLimitDocs) {
+          if (restored >= slots) break;
+          batch.update(rejDoc.ref, {
+            status: "pending_review",
+            published: false,
+            rejectedReason: null,
+          });
+          restored++;
+        }
+      }
 
       await batch.commit();
 
@@ -675,8 +713,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         // Logic: Verified
-        // PRO Plan OR Sales >= 3
-        if (profile.plan !== 'free') {
+        // PRO Plan (any non-free) OR Sales >= 3
+        const isPro = !!profile.plan && profile.plan !== 'free';
+        if (isPro) {
             newLevel = "verified";
         } else if ((profile.salesCount || 0) >= 3) {
             newLevel = "verified";

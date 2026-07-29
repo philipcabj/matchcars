@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
 import { db } from './firebase';
+import { logger } from './logger';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -35,21 +36,21 @@ export async function registerForPushNotificationsAsync(uid?: string) {
       finalStatus = status;
     }
     if (finalStatus !== 'granted') {
-      console.log('Failed to get push token for push notification!');
+      logger.log('Failed to get push token for push notification!');
       return;
     }
     
     try {
         const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
         if (!projectId) {
-            console.log("Project ID not found");
+            logger.log("Project ID not found");
         }
         
         token = (await Notifications.getExpoPushTokenAsync({
             projectId,
         })).data;
         
-        console.log("Push Token:", token);
+        logger.log("Push Token:", token);
 
         if (uid && token) {
             // Save to Firestore
@@ -63,7 +64,7 @@ export async function registerForPushNotificationsAsync(uid?: string) {
         console.error("Error getting push token:", e);
     }
   } else {
-    console.log('Must use physical device for Push Notifications');
+    logger.log('Must use physical device for Push Notifications');
   }
 
   return token;
@@ -90,7 +91,7 @@ export async function sendPushNotification(expoPushToken: string, title: string,
         body: JSON.stringify(message),
       });
       const result = await response.json();
-      console.log("Push Notification Response:", result);
+      logger.log("Push Notification Response:", result);
   } catch (e) {
       console.error("Error sending push:", e);
   }

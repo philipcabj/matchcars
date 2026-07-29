@@ -1,17 +1,28 @@
 // app/car/[id].tsx
 import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
+import { ShareSheet } from "@/components/ShareSheet";
+import { OfferCard } from "@/components/OfferCard";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { PriceRecommendation } from "@/components/PriceRecommendation";
 import { SelectionModal } from "@/components/SelectionModal";
 import { WebContainer } from "@/components/WebContainer";
 import type { Theme } from "@/config/theme";
+import type { Vehicle } from "@/types/vehicle";
+import { CITY_OPTIONS_BY_PROVINCE, PROVINCES } from "@/config/locations";
 import { useAuth } from "@/contexts/AuthContext";
 import { useHistory } from "@/contexts/HistoryContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { Offer } from "@/types/commerce";
+import { calcMatchScore } from "@/lib/matchScore";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
+import { trackEvent } from "@/lib/analytics";
 import { db, storage } from "@/lib/firebase";
-import { shareVehicle } from "@/lib/share";
+import { logger } from "@/lib/logger";
+import { sendNotificationEmail } from "@/lib/mail";
+import { sendPushNotification } from "@/lib/notifications";
+import { canExportPDF } from "@/lib/planChecks";
+import { analyzeMarketPrice } from "@/lib/pricing";
 import { playLikeSound } from "@/lib/sounds";
 import { formatNumber, parseNumber } from "@/utils/format";
 import { getOptimizedImageUrl } from "@/utils/imageUtils";
@@ -21,40 +32,27 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import * as Linking from 'expo-linking';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from "expo-router";
+import Head from "expo-router/head";
 import * as Sharing from 'expo-sharing';
-import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, arrayRemove, arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, getDocs, getDocFromServer, getDocsFromServer, increment, limit, onSnapshot, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Dimensions, Image, InputAccessoryView, Keyboard, Modal, Platform, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type CarDetailsTabs = "resumen" | "ficha" | "financiacion" | "fotos" | "video";
 
-// Por ahora usamos any para no pelearnos con el tipo Vehicle
-type VehicleDoc = any;
+type VehicleDoc = Vehicle & {
+  likedBy?: string[];
+  fuel?: string; // legacy field alias for fuelType
+  images?: { cover?: string; gallery?: string[] };
+};
 
 const fuelOptions = ["Nafta", "Diésel", "Híbrido", "Eléctrico", "GNC"];
 const gearboxOptions = ["Manual", "Automática"];
-const PROVINCES: string[] = [
-  "Buenos Aires","CABA","Catamarca","Chaco","Chubut","Córdoba","Corrientes","Entre Ríos","Formosa","Jujuy","La Pampa","La Rioja","Mendoza","Misiones","Neuquén","Río Negro","Salta","San Juan","San Luis","Santa Cruz","Santa Fe","Santiago del Estero","Tierra del Fuego","Tucumán"
-];
-
-const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
-  "Buenos Aires": ["La Plata", "Mar del Plata", "Bahía Blanca", "Quilmes", "Morón", "Tandil", "San Isidro"],
-  "CABA": ["Palermo", "Recoleta", "Belgrano", "Caballito", "Flores", "Mataderos"],
-  "Córdoba": ["Córdoba", "Villa Carlos Paz", "Río Cuarto", "Alta Gracia", "Villa María"],
-  "Santa Fe": ["Rosario", "Santa Fe", "Rafaela", "Venado Tuerto"],
-  "Mendoza": ["Mendoza", "Godoy Cruz", "Guaymallén", "San Rafael"],
-  "Tucumán": ["San Miguel de Tucumán", "Yerba Buena", "Tafí Viejo"],
-  "Salta": ["Salta", "San Lorenzo", "Tartagal"],
-  "Neuquén": ["Neuquén", "Plottier", "Centenario"],
-  "Río Negro": ["Bariloche", "General Roca", "Cipolletti"],
-  "Chubut": ["Comodoro Rivadavia", "Trelew", "Puerto Madryn"],
-};
 
 export default function CarDetailsScreen() {
   const { id, tab, edit } = useLocalSearchParams<{ id: string; tab?: string; edit?: string }>();
@@ -63,6 +61,9 @@ export default function CarDetailsScreen() {
   const { theme } = useTheme();
   const { addToHistory } = useHistory();
   const styles = createStyles(theme);
+  const windowWidth = Dimensions.get("window").width;
+  const heroWidth = (Platform.OS === "web" ? Math.min(windowWidth, 800) : windowWidth) - 24;
+  const heroHeight = heroWidth * (Platform.OS === "web" ? 0.5 : 0.65);
 
   const [vehicle, setVehicle] = useState<VehicleDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,9 +87,11 @@ export default function CarDetailsScreen() {
     province: "",
     currency: "",
     acceptsFinancing: false,
+    finDownPayment: "",
+    finType: "",
+    finEntity: "",
     finRate: "",
     finMonths: "",
-    finInitialPercent: "",
     description: "",
     featuresText: "",
     historyItems: [] as { year?: string; title?: string; note?: string }[],
@@ -115,6 +118,19 @@ export default function CarDetailsScreen() {
   const [citiesList, setCitiesList] = useState<string[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
+  // Offer state
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
+  const [offerModalVisible, setOfferModalVisible] = useState(false);
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerCurrency, setOfferCurrency] = useState<"ARS" | "USD">("ARS");
+  const [offerTradeIn, setOfferTradeIn] = useState(false);
+  const [offerTradeInDesc, setOfferTradeInDesc] = useState("");
+  const [offerFinancing, setOfferFinancing] = useState(false);
+  const [offerFinancingNote, setOfferFinancingNote] = useState("");
+  const [offerNote, setOfferNote] = useState("");
+  const [submittingOffer, setSubmittingOffer] = useState(false);
+  const [activeOffer, setActiveOffer] = useState<(Offer & { id: string }) | null>(null);
+
   // Alert State
   const [alertConfig, setAlertConfig] = useState({ 
     visible: false,
@@ -139,7 +155,7 @@ export default function CarDetailsScreen() {
   // Hero Items State (Images + Video)
    const [heroItems, setHeroItems] = useState<{ type: 'image' | 'video', uri: string }[]>([]);
    const [activeHeroIndex, setActiveHeroIndex] = useState(0);
-   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [, setKeyboardVisible] = useState(false);
 
    useEffect(() => {
     const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardVisible(true));
@@ -163,11 +179,11 @@ export default function CarDetailsScreen() {
     return () => unsub();
    }, [user, id]);
 
-   useEffect(() => {
+  useEffect(() => {
     if (id) {
-        addToHistory(Array.isArray(id) ? id[0] : id);
+      addToHistory(Array.isArray(id) ? id[0] : id);
     }
-  }, [id]);
+  }, [id, addToHistory]);
 
   useEffect(() => {
     if (!user) {
@@ -307,62 +323,44 @@ export default function CarDetailsScreen() {
   // Similar Vehicles State
   const [similarVehicles, setSimilarVehicles] = useState<any[]>([]);
 
-  // Calculator State
-  const [calcDownPayment, setCalcDownPayment] = useState<string>("");
-  const [calcMonths, setCalcMonths] = useState<number>(24);
-
-  useEffect(() => {
-    if (vehicle?.price && vehicle?.financing) {
-        // Default to saved initial percent or 30%
-        const initialPct = vehicle.financing.initialPercent || 30;
-        const initialAmount = Math.floor(vehicle.price * (initialPct / 100));
-        setCalcDownPayment(String(initialAmount).replace(/\B(?=(\d{3})+(?!\d))/g, "."));
-        setCalcMonths(vehicle.financing.months || 24);
-    }
-  }, [vehicle?.id]); // Reset when vehicle changes
-
-  const calculateQuota = () => {
-      if (!vehicle?.price || !vehicle?.financing) return 0;
-      const price = Number(vehicle.price);
-      const down = Number(calcDownPayment.replace(/\./g, '').replace(/,/g, '')) || 0;
-      const loan = price - down;
-      
-      if (loan <= 0) return 0;
-      
-      const rateAnnual = Number(vehicle.financing.rate) || 0;
-      const months = calcMonths || 1;
-      
-      // French Amortization System
-      const rateMonthly = (rateAnnual / 100) / 12;
-      if (rateMonthly === 0) return loan / months;
-      
-      const quota = (loan * rateMonthly) / (1 - Math.pow(1 + rateMonthly, -months));
-      return Math.round(quota);
+  const calcPMT = (price: number, downPayment: number, annualRate: number, months: number): number => {
+    const principal = price - downPayment;
+    if (principal <= 0 || months <= 0) return 0;
+    if (annualRate === 0) return Math.round(principal / months);
+    const r = annualRate / 100 / 12;
+    return Math.round((principal * r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1));
   };
 
   useEffect(() => {
     if (!vehicle || !vehicle.brand) return;
-    
+
     const fetchSimilar = async () => {
-        try {
-            const q = query(
-                collection(db, "vehicles"),
-                where("brand", "==", vehicle.brand),
-                where("published", "==", true),
-                limit(10)
-            );
-            const snap = await getDocs(q);
-            const list = snap.docs
-                .map(d => ({ id: d.id, ...d.data() }))
-                .filter((v: any) => v.id !== vehicle.id && v.status !== 'deleted' && v.status !== 'sold' && v.status !== 'blocked' && v.status !== 'rejected')
-                .slice(0, 5);
-            setSimilarVehicles(list);
-        } catch (e) {
-            console.log("Error fetching similar vehicles", e);
-        }
+      try {
+        const q = query(
+          collection(db, "vehicles"),
+          where("brand", "==", vehicle.brand),
+          where("published", "==", true),
+          limit(10)
+        );
+        const snap = await getDocs(q);
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter(
+            (v: any) =>
+              v.id !== vehicle.id &&
+              v.status !== "deleted" &&
+              v.status !== "sold" &&
+              v.status !== "blocked" &&
+              v.status !== "rejected"
+          )
+          .slice(0, 5);
+        setSimilarVehicles(list);
+      } catch (e) {
+        logger.log("Error fetching similar vehicles", e);
+      }
     };
     fetchSimilar();
-  }, [vehicle?.id, vehicle?.brand]);
+  }, [vehicle]);
 
   const showAlert = (
     title: string, 
@@ -405,8 +403,8 @@ export default function CarDetailsScreen() {
   const priceSuggestion = usePriceSuggestion(
     vehicle?.brand || "", 
     vehicle?.model || "", 
-    vehicle?.year || "", 
-    vehicle?.currency || "ARS",
+    String(vehicle?.year || ""),
+    (vehicle?.currency as "ARS" | "USD") || "ARS",
     vehicle?.id // Exclude current vehicle from average calculation
   );
 
@@ -435,7 +433,7 @@ export default function CarDetailsScreen() {
           setCitiesList(defaults.sort());
         }
       } catch (e) {
-        console.log("Error fetching cities for province:", prov, e);
+        logger.log("Error fetching cities for province:", prov, e);
         setCitiesList(defaults.sort());
       }
     };
@@ -455,7 +453,7 @@ export default function CarDetailsScreen() {
     if (tab && ["resumen", "ficha", "financiacion", "fotos", "video"].includes(String(tab))) {
       setActiveTab(tab as CarDetailsTabs);
     }
-    if (edit === "true") {
+    if (edit === "true" || edit === "1") {
       setEditing(true);
     }
   }, [tab, edit]);
@@ -465,22 +463,33 @@ export default function CarDetailsScreen() {
     const isWeb = Platform.OS === 'web';
     if (!id || initializing || (authChecking && !isWeb) || (!user && !isWeb)) return;
 
-    // Increment views
-    const incrementView = async () => {
-        try {
-            const ref = doc(db, "vehicles", id);
-            await updateDoc(ref, { views: increment(1) });
-        } catch {}
-    };
-    incrementView();
-
     const ref = doc(db, "vehicles", id);
     const unsub = onSnapshot(
       ref,
       (snap) => {
         if (snap.exists()) {
-          const data = { id: snap.id, ...snap.data() } as any;
+          const data = { id: snap.id, ...snap.data() } as VehicleDoc;
+          // Hide vehicles that are not publicly accessible to non-owners
+          const hiddenStatuses = ["deleted", "blocked", "rejected"];
+          if (hiddenStatuses.includes(data.status ?? "") && data.userId !== user?.uid) {
+            setVehicle(null);
+            setLoading(false);
+            return;
+          }
           setVehicle(data);
+          if (Platform.OS === "web") {
+            try {
+              trackEvent("car_view", {
+                vehicleId: data.id,
+                brand: data.brand ?? "",
+                model: data.model ?? "",
+                year: data.year ?? "",
+                price: data.price ?? 0,
+                currency: data.currency ?? "",
+                status: data.status ?? "",
+              });
+            } catch {}
+          }
           setEditState((prev: any) => ({
             ...prev,
             price: String(data.price ?? ""),
@@ -491,8 +500,11 @@ export default function CarDetailsScreen() {
             province: data.location?.province ?? data.province ?? "",
             currency: data.currency ?? "ARS",
             acceptsFinancing: !!data.acceptsFinancing,
-            finRate: String(data.financing?.rate ?? 25),
-            finMonths: String(data.financing?.months ?? 24),
+            finDownPayment: data.financing?.downPayment ? String(data.financing.downPayment) : "",
+            finType: data.financing?.type ?? "",
+            finEntity: data.financing?.entity ?? "",
+            finRate: data.financing?.rate ? String(data.financing.rate) : "",
+            finMonths: data.financing?.months ? String(data.financing.months) : "",
             description: data.description ?? "",
             featuresText: Array.isArray(data.features) ? data.features.join(", ") : "",
             historyItems: Array.isArray(data.history) ? data.history : [],
@@ -530,47 +542,49 @@ export default function CarDetailsScreen() {
   }, [id, initializing, authChecking, user]);
 
   useEffect(() => {
-    if (!vehicle?.userId) return;
+    const ownerUserId = vehicle?.userId;
+    if (!ownerUserId) return;
     const fetchOwner = async () => {
       try {
-        const docRef = doc(db, "users", vehicle.userId);
+        const docRef = doc(db, "users", ownerUserId);
         const snap = await getDoc(docRef);
         if (snap.exists()) {
           const data = snap.data();
           let initials = data.initials;
           if (!initials) {
-             const name = data.displayName || data.firstName || "Usuario";
-             initials = name.slice(0, 2).toUpperCase();
+            const name = data.displayName || data.firstName || "Usuario";
+            initials = name.slice(0, 2).toUpperCase();
           }
           const avatarColor = data.avatarColor || theme.accent;
           const photoURL = data.photoURL || data.avatar || null;
           const plan = data.plan;
           const trustLevel = data.trustLevel;
-          setOwnerProfile({ 
-            photoURL, 
-            initials, 
-            avatarColor, 
-            plan, 
-            trustLevel, 
-            sellerRating: data.sellerRating, 
-            sellerReviewCount: data.sellerReviewCount 
+          setOwnerProfile({
+            photoURL,
+            initials,
+            avatarColor,
+            plan,
+            trustLevel,
+            sellerRating: data.sellerRating,
+            sellerReviewCount: data.sellerReviewCount,
           });
 
-          // Sync denormalized data to vehicle if needed
-          if (vehicle && (
-              vehicle.sellerRating !== data.sellerRating ||
+          if (
+            vehicle &&
+            (vehicle.sellerRating !== data.sellerRating ||
               vehicle.sellerReviewCount !== data.sellerReviewCount ||
               vehicle.sellerTrustLevel !== trustLevel ||
-              vehicle.userPlan !== plan
-          )) {
-              console.log("Syncing vehicle owner data...");
-              const vRef = doc(db, "vehicles", id);
-              updateDoc(vRef, {
-                  sellerRating: data.sellerRating ?? null,
-                  sellerReviewCount: data.sellerReviewCount ?? 0,
-                  sellerTrustLevel: trustLevel ?? "new",
-                  userPlan: plan ?? "free"
-              }).catch(e => console.log("Error syncing vehicle owner data", e));
+              vehicle.userPlan !== plan)
+          ) {
+            const vRef = doc(db, "vehicles", id);
+            updateDoc(vRef, {
+              sellerRating: data.sellerRating ?? null,
+              sellerReviewCount: data.sellerReviewCount ?? 0,
+              sellerTrustLevel: trustLevel ?? "new",
+              userPlan: plan ?? "free",
+            }).catch((e) =>
+              logger.log("Error syncing vehicle owner data", e)
+            );
           }
         }
       } catch (e) {
@@ -578,7 +592,33 @@ export default function CarDetailsScreen() {
       }
     };
     fetchOwner();
-  }, [vehicle?.userId]);
+  }, [vehicle, id, theme.accent]);
+
+  // Track view once per mount (only for non-owners) — must be before early returns
+  const viewTrackedRef = useRef(false);
+  useEffect(() => {
+    if (viewTrackedRef.current || !vehicle?.id || !user || user.uid === vehicle.userId) return;
+    viewTrackedRef.current = true;
+    updateDoc(doc(db, "vehicles", vehicle.id), { views: increment(1) }).catch(() => {});
+  }, [vehicle?.id, user?.uid]);
+
+  // Load active offer for this vehicle+buyer pair
+  useEffect(() => {
+    if (!vehicle?.id || !user || user.uid === vehicle.userId) return;
+    const q = query(
+      collection(db, "offers"),
+      where("vehicleId", "==", vehicle.id),
+      where("buyerId", "==", user.uid),
+      where("status", "in", ["pending", "countered", "accepted", "rejected"])
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      if (snap.empty) { setActiveOffer(null); return; }
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Offer & { id: string }));
+      docs.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      setActiveOffer(docs[0]);
+    }, (err) => console.error("[car/[id] offers listener]", err.code, err.message));
+    return () => unsub();
+  }, [vehicle?.id, user?.uid]);
 
   if (initializing || authChecking) {
     return (
@@ -606,11 +646,95 @@ export default function CarDetailsScreen() {
   }
 
   const handleGoBack = () => {
+    if (editing) {
+      showAlert(
+        "Cambios sin guardar",
+        "Tenés cambios sin guardar. ¿Querés descartarlos y salir?",
+        "warning",
+        () => { setEditing(false); router.back(); },
+        true,
+        undefined,
+        "Descartar",
+        "Seguir editando"
+      );
+      return;
+    }
     router.back();
   };
 
   const handleGoHome = () => {
     router.push("/(tabs)");
+  };
+
+  const handleReactivate = async () => {
+    if (!vehicle) return;
+    try {
+      const vehicleRef = doc(db, "vehicles", vehicle.id);
+
+      // Force server reads — bypass local cache so we find ALL sale docs regardless of offline state
+      const [exactSnap, querySnap] = await Promise.all([
+        getDocFromServer(doc(db, "sales", vehicle.id)),
+        getDocsFromServer(query(collection(db, "sales"), where("vehicleId", "==", vehicle.id))),
+      ]);
+
+      const seenIds = new Set<string>();
+      const saleEntries: { ref: any; data: any }[] = [];
+
+      if (exactSnap.exists()) {
+        seenIds.add(exactSnap.id);
+        saleEntries.push({ ref: exactSnap.ref, data: exactSnap.data() });
+      }
+      querySnap.forEach((d) => {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          saleEntries.push({ ref: d.ref, data: d.data() });
+        }
+      });
+
+      // Delete each sale in its own transaction — runTransaction waits for server confirmation
+      for (const { ref: saleRef, data: sd } of saleEntries) {
+        const { sellerId, buyerId, ratingBySeller, ratingByBuyer } = sd;
+        const soldViaOfferId = (vehicle as any).soldViaOfferId ?? sd.soldViaOfferId;
+
+        await runTransaction(db, async (t) => {
+          const snap = await t.get(saleRef);
+          if (!snap.exists()) return;
+
+          if (ratingBySeller?.score && buyerId) {
+            t.update(doc(db, "users", buyerId), {
+              ratingSum: increment(-ratingBySeller.score),
+              ratingCount: increment(-1),
+            });
+          }
+          if (ratingByBuyer?.score && sellerId) {
+            t.update(doc(db, "users", sellerId), {
+              ratingSum: increment(-ratingByBuyer.score),
+              ratingCount: increment(-1),
+            });
+          }
+          if (soldViaOfferId) {
+            t.update(doc(db, "offers", soldViaOfferId), { vehicleSold: deleteField() });
+          }
+          t.delete(saleRef);
+        });
+      }
+
+      // Use transaction for vehicle update too — ensures server confirmation
+      await runTransaction(db, async (t) => {
+        const vSnap = await t.get(vehicleRef);
+        if (!vSnap.exists()) throw new Error("Vehículo no encontrado.");
+        t.update(vehicleRef, {
+          status: "available",
+          published: true,
+          soldAt: deleteField(),
+          soldViaOfferId: deleteField(),
+        });
+      });
+
+      showAlert("Publicación reactivada", "El vehículo volvió a estar disponible.", "success");
+    } catch (e: any) {
+      showAlert("Error", e?.message ?? "No se pudo reactivar el vehículo.", "error");
+    }
   };
 
   const handleContact = async () => {
@@ -643,6 +767,216 @@ export default function CarDetailsScreen() {
         showAlert("Error", "No se puede contactar a este usuario.", "error");
     }
   };
+
+  const handleSubmitOffer = async () => {
+    if (!user || !vehicle || !vehicle.userId) return;
+    const parsed = parseFloat(offerAmount.replace(/\./g, "").replace(",", "."));
+    if (!parsed || parsed <= 0) {
+      showAlert("Monto inválido", "Ingresá un monto válido para tu oferta.", "error");
+      return;
+    }
+    setSubmittingOffer(true);
+    try {
+      const [uid1, uid2] = [user.uid, vehicle.userId].sort();
+      const convId = `${uid1}_${uid2}`;
+      const leadId = `${vehicle.userId}_${user.uid}_${vehicle.id}`;
+
+      // Ensure conversation exists
+      const cRef = doc(db, "conversations", convId);
+      const cSnap = await getDoc(cRef);
+      if (!cSnap.exists()) {
+        await setDoc(cRef, { members: [user.uid, vehicle.userId], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      }
+
+      const now = serverTimestamp();
+      const expiresAt = Timestamp.fromMillis(Date.now() + 48 * 60 * 60 * 1000);
+
+      const offerData: Omit<Offer, "id"> = {
+        leadId,
+        conversationId: convId,
+        vehicleId: vehicle.id,
+        sellerId: vehicle.userId,
+        buyerId: user.uid,
+        amount: parsed,
+        currency: offerCurrency,
+        includesTradeIn: offerTradeIn,
+        ...(offerTradeIn && offerTradeInDesc.trim() ? { tradeInDescription: offerTradeInDesc.trim() } : {}),
+        includesFinancing: offerFinancing,
+        ...(offerFinancing && offerFinancingNote.trim() ? { financingNote: offerFinancingNote.trim() } : {}),
+        ...(offerNote.trim() ? { note: offerNote.trim() } : {}),
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+        expiresAt,
+        vehicleSnapshot: { brand: vehicle.brand ?? "", model: vehicle.model ?? "", year: Number(vehicle.year) || undefined, price: vehicle.price, currency: (vehicle.currency as "ARS" | "USD") || "ARS" },
+        buyerSnapshot: { firstName: profile?.firstName, lastName: profile?.lastName, initials: profile?.initials, avatarColor: profile?.avatarColor },
+      };
+
+      const offerRef = await addDoc(collection(db, "offers"), offerData);
+
+      // Notify seller
+      addDoc(collection(db, "users", vehicle.userId, "offer_notifications"), {
+        type: "offer_received",
+        offerId: offerRef.id,
+        conversationId: convId,
+        vehicleId: vehicle.id,
+        buyerId: user.uid,
+        sellerId: vehicle.userId,
+        amount: parsed,
+        currency: offerCurrency,
+        buyerSnapshot: offerData.buyerSnapshot ?? {},
+        vehicleSnapshot: offerData.vehicleSnapshot ?? {},
+        read: false,
+        createdAt: now,
+      }).catch(() => {});
+
+      const buyerName = (profile?.firstName && profile?.lastName)
+        ? `${profile.firstName} ${profile.lastName}`.trim()
+        : (profile?.firstName || user.displayName || (user.email?.split('@')[0] ?? "Un interesado"));
+      const carModel = `${vehicle.brand} ${vehicle.model}`.trim();
+      const amountText = `${offerCurrency} ${Number(parsed).toLocaleString("es-AR")}`;
+
+      sendNotificationEmail("offer_received", {
+        recipientUid: vehicle.userId,
+        senderName: buyerName,
+        subject: `${buyerName} ofertó por tu ${carModel}`,
+        carModel,
+        amount: amountText,
+      }).catch(() => {});
+
+      getDoc(doc(db, "users", vehicle.userId)).then((sellerSnap) => {
+        const pushToken = sellerSnap.data()?.pushToken;
+        if (pushToken) {
+          sendPushNotification(pushToken, "¡Recibiste una oferta!", `${buyerName} ofertó ${amountText} por tu ${carModel}`, { url: `matchcars://chat/${user.uid}` });
+        }
+      }).catch(() => {});
+
+      const offerSummary = {
+        id: offerRef.id, amount: parsed, currency: offerCurrency,
+        status: "pending", includesTradeIn: offerTradeIn, includesFinancing: offerFinancing,
+        ...(offerData.note ? { note: offerData.note } : {}),
+        ...(offerData.financingNote ? { financingNote: offerData.financingNote } : {}),
+        createdAt: now, expiresAt,
+      };
+
+      // Create/update lead
+      const leadRef = doc(db, "leads", leadId);
+      const leadSnap = await getDoc(leadRef);
+      if (!leadSnap.exists()) {
+        await setDoc(leadRef, {
+          sellerId: vehicle.userId, buyerId: user.uid, vehicleId: vehicle.id,
+          conversationId: convId, status: "negotiation", createdAt: now,
+          lastMessageAt: now, lastSenderId: user.uid, unreadCount: 1, messageCount: 0,
+          estimatedValue: vehicle.price, currency: (vehicle.currency as "ARS" | "USD") || "ARS",
+          offer: offerSummary,
+          vehicleSnapshot: offerData.vehicleSnapshot,
+          buyerSnapshot: offerData.buyerSnapshot,
+        });
+      } else {
+        await updateDoc(leadRef, { status: "negotiation", offer: offerSummary, unreadCount: increment(1), lastMessageAt: now });
+      }
+
+      // System message in conversation
+      const msgText = `Oferta: ${offerCurrency} ${Number(parsed).toLocaleString("es-AR")}`;
+      await addDoc(collection(db, "conversations", convId, "messages"), {
+        senderId: user.uid, text: msgText, type: "offer", offerId: offerRef.id, createdAt: now,
+      });
+      await updateDoc(cRef, { lastMessage: msgText, lastSenderId: user.uid, updatedAt: now, readBy: [user.uid], deletedBy: [] });
+
+      // Increment vehicle offerCount
+      await updateDoc(doc(db, "vehicles", vehicle.id), { offerCount: increment(1) }).catch(() => {});
+
+      setOfferAmount(""); setOfferNote(""); setOfferTradeIn(false); setOfferTradeInDesc(""); setOfferFinancing(false); setOfferFinancingNote("");
+      setOfferModalVisible(false);
+    } catch (e: any) {
+      console.error(e);
+      showAlert("Error", "No se pudo enviar la oferta. Intentá de nuevo.", "error");
+    } finally {
+      setSubmittingOffer(false);
+    }
+  };
+
+  const handleWithdrawOffer = async () => {
+    if (!activeOffer || !vehicle) return;
+    try {
+      const now = serverTimestamp();
+      await updateDoc(doc(db, "offers", activeOffer.id), { status: "withdrawn", updatedAt: now });
+      await updateDoc(doc(db, "leads", activeOffer.leadId), {
+        "offer.status": "withdrawn",
+        ...(activeOffer.status === "accepted" ? { status: "contacted" } : {}),
+      }).catch(() => {});
+      // Notificar al vendedor si se cancela un acuerdo aceptado
+      if (activeOffer.status === "accepted" && activeOffer.sellerId) {
+        addDoc(collection(db, "users", activeOffer.sellerId, "offer_notifications"), {
+          type: "deal_canceled",
+          offerId: activeOffer.id,
+          vehicleId: activeOffer.vehicleId ?? vehicle.id,
+          buyerId: activeOffer.buyerId ?? user!.uid,
+          sellerId: activeOffer.sellerId,
+          vehicleSnapshot: activeOffer.vehicleSnapshot ?? {},
+          read: false,
+          createdAt: now,
+        }).catch(() => {});
+
+        const carModel = `${activeOffer.vehicleSnapshot?.brand ?? vehicle.brand} ${activeOffer.vehicleSnapshot?.model ?? vehicle.model}`.trim();
+        sendNotificationEmail("deal_canceled", {
+          recipientUid: activeOffer.sellerId,
+          senderName: "MatchCars",
+          subject: `El acuerdo por ${carModel} fue cancelado`,
+          carModel,
+        }).catch(() => {});
+      }
+    } catch (e) {
+      showAlert("Error", "No se pudo cancelar.", "error");
+    }
+  };
+
+  const normalizedId = Array.isArray(id) ? id[0] : id;
+
+  const pageTitle = vehicle
+    ? `${vehicle.brand || ""} ${vehicle.model || ""} ${vehicle.year || ""} en venta | Matchcars`
+    : "Auto en venta | Matchcars";
+
+  const pageDescription = vehicle
+    ? `Encontrá este ${vehicle.brand || ""} ${vehicle.model || ""} ${vehicle.year || ""} usado en Matchcars${
+        vehicle.km ? ` con ${Number(vehicle.km).toLocaleString("es-AR")} km` : ""
+      }.`
+    : "Encontrá autos usados publicados por particulares y agencias en Matchcars.";
+
+  const vehicleStructuredData =
+    vehicle && normalizedId
+      ? {
+          "@context": "https://schema.org",
+          "@type": "Product",
+          name: [vehicle.brand, vehicle.model, vehicle.year].filter(Boolean).join(" "),
+          description: pageDescription,
+          image:
+            vehicle.images?.cover ??
+            vehicle.coverImage ??
+            vehicle.images?.gallery?.[0] ??
+            vehicle.additionalImages?.[0] ??
+            undefined,
+          url: `https://matchcars.app/car/${normalizedId}`,
+          brand: vehicle.brand
+            ? {
+                "@type": "Brand",
+                name: vehicle.brand,
+              }
+            : undefined,
+          offers:
+            typeof vehicle.price === "number"
+              ? {
+                  "@type": "Offer",
+                  priceCurrency: vehicle.currency || "ARS",
+                  price: vehicle.price,
+                  availability:
+                    vehicle.status === "sold"
+                      ? "https://schema.org/SoldOut"
+                      : "https://schema.org/InStock",
+                }
+              : undefined,
+        }
+      : null;
 
   if (loading) {
     return (
@@ -750,8 +1084,8 @@ export default function CarDetailsScreen() {
     try {
         for (const asset of assets) {
             // Manipulate/Compress
-            const manipulated = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1024 } }], {
-                compress: 0.7,
+            const manipulated = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1200 } }], {
+                compress: 0.82,
                 format: ImageManipulator.SaveFormat.JPEG,
             });
 
@@ -850,7 +1184,7 @@ export default function CarDetailsScreen() {
                  await FileSystem.copyAsync({ from: finalUri, to: tempUri });
                  finalUri = tempUri;
              } catch (err) {
-                 console.log("Error handling iOS video asset:", err);
+                 logger.log("Error handling iOS video asset:", err);
              }
         }
 
@@ -915,12 +1249,12 @@ export default function CarDetailsScreen() {
     if (!vehicle || !user) return;
     
     try {
-        console.log("Checking price drop for notifications: ", oldPrice, "->", newPrice);
+        logger.log("Checking price drop for notifications: ", oldPrice, "->", newPrice);
         
         const subscribersRef = collection(db, "vehicles", vehicle.id, "price_alerts");
         const snap = await getDocs(subscribersRef);
         
-        console.log("Found subscribers: ", snap.size);
+        logger.log("Found subscribers: ", snap.size);
         
         if (!snap.empty) {
             const notificationsBatch: Promise<void>[] = [];
@@ -951,20 +1285,28 @@ export default function CarDetailsScreen() {
                         read: false,
                         createdAt: now
                     }));
+
+                    sendNotificationEmail("price_drop", {
+                        recipientUid: subscriberId,
+                        senderName: "MatchCars",
+                        subject: `¡Bajó de precio! ${vehicle.brand} ${vehicle.model}`,
+                        carModel: `${vehicle.brand} ${vehicle.model}`.trim(),
+                        newPrice: `${currency} ${formatNumber(newPrice)}`,
+                    }).catch(() => {});
                 }
             });
             
             await Promise.all(notificationsBatch);
-            console.log("Notifications sent to", notificationsBatch.length, "users");
+            logger.log("Notifications sent to", notificationsBatch.length, "users");
             if (notificationsBatch.length > 0) {
                 // Notify the owner (current user) that alerts were sent, for feedback
                 showAlert("Notificaciones Enviadas", `Se avisó a ${notificationsBatch.length} interesados sobre la baja de precio.`, "success");
             } else {
                 // If there were subscribers but they were all the owner (shouldn't happen with correct logic but good for safety)
-                console.log("No valid subscribers found (filtered out owner)");
+                logger.log("No valid subscribers found (filtered out owner)");
             }
         } else {
-            console.log("No subscribers found for price alert");
+            logger.log("No subscribers found for price alert");
         }
     } catch (error: any) {
         console.error("Error sending price drop notifications", error);
@@ -986,9 +1328,115 @@ export default function CarDetailsScreen() {
         }
 
         const ref = doc(db, "vehicles", vehicle.id);
+
+        let riskUpdate: any = {};
+        try {
+          if (vehicle.brand && vehicle.model && vehicle.year) {
+            const yearNum = Number(vehicle.year);
+            if (!Number.isNaN(yearNum) && targetPrice > 0) {
+              const currency = (vehicle.currency as "ARS" | "USD") || "ARS";
+              const description = typeof vehicle.description === "string" ? vehicle.description : "";
+              const coverImage =
+                vehicle.images?.cover ||
+                vehicle.coverImage ||
+                "";
+              const trustLevel = (vehicle.sellerTrustLevel as string) || profile?.trustLevel || "new";
+              const userId = String(vehicle.userId || "");
+
+              if (userId) {
+                const now = new Date();
+                const from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+                const flags: string[] = [];
+                let score = 0;
+
+            try {
+              const analysis = await analyzeMarketPrice(
+                String(vehicle.brand),
+                String(vehicle.model),
+                yearNum,
+                currency,
+                vehicle.id
+              );
+              if (analysis.avg > 0) {
+                if (targetPrice > analysis.avg * 1.5) {
+                  showAlert(
+                    "Precio muy alto",
+                    "El precio que cargaste está más de 50% por encima del valor de mercado estimado. Revisá el precio sugerido y ajustalo antes de guardar.",
+                    "info"
+                  );
+                  return;
+                }
+                if (targetPrice < analysis.avg * 0.6) {
+                  flags.push("price_outlier");
+                  score += 4;
+                } else if (targetPrice > analysis.avg * 1.5) {
+                  flags.push("price_high_outlier");
+                  score += 3;
+                }
+                const currentYear = now.getFullYear();
+                if (yearNum >= currentYear && targetPrice < analysis.avg * 0.8) {
+                  flags.push("year_price_mismatch");
+                  score += 2;
+                }
+              }
+            } catch {}
+
+                try {
+                  const qRecent = query(
+                    collection(db, "vehicles"),
+                    where("userId", "==", userId),
+                    where("createdAt", ">=", Timestamp.fromDate(from))
+                  );
+                  const snapRecent = await getDocs(qRecent);
+                  if (snapRecent.docs.length >= 3 && trustLevel !== "verified") {
+                    flags.push("new_user_mass");
+                    score += 3;
+                  }
+                } catch {}
+
+                if (description) {
+                  const text = description.toLowerCase();
+                  const hasPhone = /\d{8,}/.test(text);
+                  const hasLink =
+                    text.includes("http://") ||
+                    text.includes("https://") ||
+                    text.includes("www.") ||
+                    text.includes(".com");
+                  if (hasPhone || hasLink) {
+                    flags.push("external_contact");
+                    score += 2;
+                  }
+                }
+
+                try {
+                  if (coverImage) {
+                    const qDup = query(
+                      collection(db, "vehicles"),
+                      where("userId", "==", userId),
+                      where("images.cover", "==", coverImage)
+                    );
+                    const snapDup = await getDocs(qDup);
+                    if (snapDup.docs.some((d) => d.id !== vehicle.id)) {
+                      flags.push("duplicate_image");
+                      score += 2;
+                    }
+                  }
+                } catch {}
+
+                riskUpdate = {
+                  riskFlags: Array.from(new Set(flags)),
+                  riskScore: score,
+                };
+              }
+            }
+          }
+        } catch {}
+
         await updateDoc(ref, {
             price: targetPrice,
-            updatedAt: serverTimestamp()
+            updatedAt: serverTimestamp(),
+            ...riskUpdate,
         });
         showAlert("Precio actualizado", "El precio se ha actualizado correctamente.", "success");
         setHideRecommendation(true); // Hide recommendation after applying
@@ -1013,7 +1461,7 @@ export default function CarDetailsScreen() {
         }, { merge: true });
       } catch (e: any) {
         if (e.code === 'permission-denied') {
-            console.warn("Advertencia: No tienes permiso para actualizar el catálogo global de ciudades. (Esto requiere actualizar las reglas de seguridad en Firebase). El auto se actualizará igual.");
+            logger.warn("Advertencia: No tienes permiso para actualizar el catálogo global de ciudades. (Esto requiere actualizar las reglas de seguridad en Firebase). El auto se actualizará igual.");
         } else {
             console.error("Error updating province cities:", e);
         }
@@ -1025,20 +1473,142 @@ export default function CarDetailsScreen() {
     
     // Check for price drop and notify subscribers
     const currentPrice = Number(vehicle.price);
+    const priceChanged = priceNum && currentPrice && priceNum !== currentPrice;
     if (user && priceNum && currentPrice && priceNum < currentPrice) {
         const currency = editState.currency || vehicle.currency || "ARS";
         await sendPriceDropNotifications(priceNum, currentPrice, currency);
     }
 
     const kmNum = editState.km ? Number(editState.km) : null;
-    const rateNum = editState.finRate ? Number(editState.finRate) : null;
-    const monthsNum = editState.finMonths ? Number(editState.finMonths) : null;
+    const finDP = editState.finDownPayment ? Number(editState.finDownPayment) : 0;
+    const finMonthsNum = editState.finMonths ? Number(editState.finMonths) : null;
+    const finRateNum = editState.finType === "sin_interes" ? 0 : (editState.finRate ? Number(editState.finRate) : null);
     const airbagsNum = editState.airbags ? Number(editState.airbags) : null;
     const windowsAutoNum = editState.windowsAuto ? Number(editState.windowsAuto) : null;
     const featuresArr = String(editState.featuresText || "")
       .split(",")
       .map((x) => x.trim())
       .filter((x) => x.length > 0);
+
+    let riskUpdate: any = {};
+    try {
+      const finalPrice = typeof priceNum === "number" && !Number.isNaN(priceNum) ? priceNum : null;
+      const brand = vehicle.brand;
+      const model = vehicle.model;
+      const yearValue = vehicle.year;
+            if (finalPrice && brand && model && yearValue) {
+        const yearNum = Number(yearValue);
+        if (!Number.isNaN(yearNum)) {
+          const currency = (editState.currency as "ARS" | "USD") || (vehicle.currency as "ARS" | "USD") || "ARS";
+          const description = typeof editState.description === "string" && editState.description.length > 0
+            ? editState.description
+            : (typeof vehicle.description === "string" ? vehicle.description : "");
+          const coverImage =
+            editState.cover ||
+            vehicle.images?.cover ||
+            vehicle.coverImage ||
+            "";
+          const trustLevel = (vehicle.sellerTrustLevel as string) || profile?.trustLevel || "new";
+          const userId = String(vehicle.userId || "");
+
+          if (userId) {
+            const now = new Date();
+            const from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+            const flags: string[] = [];
+            let score = 0;
+
+            try {
+              const analysis = await analyzeMarketPrice(
+                String(brand),
+                String(model),
+                yearNum,
+                currency,
+                vehicle.id
+              );
+              if (analysis.avg > 0) {
+                if (finalPrice > analysis.avg * 1.5) {
+                  showAlert(
+                    "Precio muy alto",
+                    "El precio que cargaste está más de 50% por encima del valor de mercado estimado. Revisá el precio sugerido y ajustalo antes de guardar.",
+                    "info"
+                  );
+                  return;
+                }
+                if (finalPrice < analysis.avg * 0.6) {
+                  flags.push("price_outlier");
+                  score += 4;
+                } else if (finalPrice > analysis.avg * 1.5) {
+                  flags.push("price_high_outlier");
+                  score += 3;
+                }
+                const currentYear = now.getFullYear();
+                if (yearNum >= currentYear && finalPrice < analysis.avg * 0.8) {
+                  flags.push("year_price_mismatch");
+                  score += 2;
+                }
+              }
+            } catch {}
+
+            try {
+              const qRecent = query(
+                collection(db, "vehicles"),
+                where("userId", "==", userId),
+                where("createdAt", ">=", Timestamp.fromDate(from))
+              );
+              const snapRecent = await getDocs(qRecent);
+              if (snapRecent.docs.length >= 3 && trustLevel !== "verified") {
+                flags.push("new_user_mass");
+                score += 3;
+              }
+            } catch {}
+
+            if (description) {
+              const text = description.toLowerCase();
+              const hasPhone = /\d{8,}/.test(text);
+              const hasLink =
+                text.includes("http://") ||
+                text.includes("https://") ||
+                text.includes("www.") ||
+                text.includes(".com");
+              if (hasPhone || hasLink) {
+                flags.push("external_contact");
+                score += 2;
+              }
+            }
+
+            try {
+              if (coverImage) {
+                const qDup = query(
+                  collection(db, "vehicles"),
+                  where("userId", "==", userId),
+                  where("images.cover", "==", coverImage)
+                );
+                const snapDup = await getDocs(qDup);
+                if (snapDup.docs.some((d) => d.id !== vehicle.id)) {
+                  flags.push("duplicate_image");
+                  score += 2;
+                }
+              }
+            } catch {}
+
+            riskUpdate = {
+              riskFlags: Array.from(new Set(flags)),
+              riskScore: score,
+            };
+          }
+        }
+      }
+    } catch {}
+
+    const statusUpdate: any = {};
+    if (vehicle.status === "rejected") {
+      statusUpdate.status = "pending_review";
+      statusUpdate.published = false;
+      statusUpdate.rejectionReason = null;
+      statusUpdate.rejectedAt = null;
+    }
+
     await updateDoc(ref, {
       price: priceNum,
       km: kmNum,
@@ -1056,10 +1626,16 @@ export default function CarDetailsScreen() {
       wheelType: editState.wheelType || null,
       engine: editState.engine || null,
       acceptsFinancing: !!editState.acceptsFinancing,
-      financing: !!editState.acceptsFinancing
+      financing: !!editState.acceptsFinancing && (finDP > 0 || editState.finType || finMonthsNum)
         ? {
-            rate: rateNum ?? 25,
-            months: monthsNum ?? 24,
+            downPayment: finDP > 0 ? finDP : null,
+            type: editState.finType || null,
+            entity: editState.finType === "banco" ? (editState.finEntity || null) : null,
+            months: finMonthsNum || null,
+            rate: finRateNum ?? null,
+            monthlyPayment: priceNum && finMonthsNum && finRateNum !== null
+              ? calcPMT(priceNum, finDP, finRateNum ?? 0, finMonthsNum)
+              : null,
           }
         : null,
       history: Array.isArray(editState.historyItems) ? editState.historyItems : [],
@@ -1080,7 +1656,19 @@ export default function CarDetailsScreen() {
           gallery: editState.gallery || []
       },
       updatedAt: serverTimestamp(),
+      ...(priceChanged ? {
+        priceHistory: arrayUnion({ price: priceNum, currency: editState.currency || vehicle.currency || "ARS", changedAt: Timestamp.now() }),
+      } : {}),
+      ...riskUpdate,
+      ...statusUpdate,
     });
+    if (vehicle.status === "rejected") {
+      showAlert(
+        "Enviado a revisión",
+        "Tu publicación fue enviada nuevamente al equipo de moderación para su revisión.",
+        "success"
+      );
+    }
     setEditing(false);
   }
 
@@ -1096,17 +1684,17 @@ export default function CarDetailsScreen() {
     setAlertLoading(true);
     try {
         const vehicleId = Array.isArray(id) ? id[0] : id;
-        console.log("Toggling alert for vehicle:", vehicleId, "User:", user.uid);
+        logger.log("Toggling alert for vehicle:", vehicleId, "User:", user.uid);
         
         const ref = doc(db, "vehicles", vehicleId, "price_alerts", user.uid);
         const userAlertRef = doc(db, "users", user.uid, "price_alerts", vehicleId);
 
         if (subscribed) {
-            console.log("Removing alert...");
+            logger.log("Removing alert...");
             await deleteDoc(ref);
             await deleteDoc(userAlertRef);
         } else {
-            console.log("Adding alert...");
+            logger.log("Adding alert...");
             const alertData = {
                 userId: user.uid,
                 initialPrice: vehicle?.price || 0,
@@ -1130,7 +1718,7 @@ export default function CarDetailsScreen() {
                  await toggleFavorite();
             }
 
-            console.log("Alert added successfully");
+            logger.log("Alert added successfully");
             showAlert("¡Listo!", "Te avisaremos si este auto baja de precio.", "success");
         }
     } catch (error) {
@@ -1141,42 +1729,43 @@ export default function CarDetailsScreen() {
     }
   };
 
-  const handleShareVehicle = async () => {
-    if (!vehicle) return;
-    try {
-      await shareVehicle(vehicle);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
   const renderResumen = () => {
     const daysSincePublished = vehicle.createdAt
       ? Math.floor((new Date().getTime() - (vehicle.createdAt.toDate ? vehicle.createdAt.toDate() : new Date(vehicle.createdAt)).getTime()) / (1000 * 60 * 60 * 24))
       : 0;
 
-    const highInterest = (vehicle.views > 50 && daysSincePublished < 7) || (vehicle.likesCount > 5);
+    const highInterest = ((vehicle.views ?? 0) > 50 && daysSincePublished < 7) || ((vehicle.likesCount ?? 0) > 5);
     const activeSeller = vehicle.sellerTrustLevel === 'active' || vehicle.sellerTrustLevel === 'verified' || (vehicle.images?.gallery?.length || 0) >= 5;
-    
-    const priceDrop = vehicle.originalPrice && vehicle.price < vehicle.originalPrice
-      ? Math.round(((vehicle.originalPrice - vehicle.price) / vehicle.originalPrice) * 100)
+
+    const priceDrop = vehicle.originalPrice && (vehicle.price ?? 0) < vehicle.originalPrice
+      ? Math.round(((vehicle.originalPrice - (vehicle.price ?? 0)) / vehicle.originalPrice) * 100)
       : 0;
 
-    const showPriceRecommendation = 
-        user && 
-        user.uid === vehicle.userId && 
-        (vehicle.userPlan === 'pro_dealer' || profile?.plan === 'pro_dealer') && 
-        !isSold && 
+    const showPriceRecommendation =
+        user &&
+        user.uid === vehicle.userId &&
+        (vehicle.userPlan === 'pro_dealer' || profile?.plan === 'pro_dealer') &&
+        !isSold &&
         !hideRecommendation &&
         priceSuggestion.avg > 0 &&
-        vehicle.price > priceSuggestion.avg;
+        (vehicle.price ?? 0) > priceSuggestion.avg;
 
     return (
     <View style={styles.sectionCard}>
       {isSold && (
-        <View style={{ backgroundColor: "#ef4444", padding: 12, borderRadius: 8, marginBottom: 16, alignItems: "center" }}>
+        <View style={{ backgroundColor: "#ef4444", borderRadius: 8, marginBottom: 16, overflow: "hidden" }}>
+          <View style={{ padding: 12, alignItems: "center" }}>
             <Text style={{ color: "#FFF", fontWeight: "800", fontSize: 16 }}>¡VENDIDO!</Text>
             <Text style={{ color: "#FFF", fontSize: 12 }}>Este vehículo ya no está disponible.</Text>
+          </View>
+          {(profile?.role === "admin" || profile?.role === "moderator" || isOwner) && (
+            <TouchableOpacity
+              onPress={handleReactivate}
+              style={{ backgroundColor: "rgba(0,0,0,0.2)", paddingVertical: 10, alignItems: "center", borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.2)" }}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>Reactivar publicación</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
       {user && user.uid === vehicle.userId && (
@@ -1204,7 +1793,7 @@ export default function CarDetailsScreen() {
         <PriceRecommendation
             currentPrice={Number(vehicle.price)}
             avgPrice={priceSuggestion.avg}
-            currency={vehicle.currency}
+            currency={vehicle.currency || "ARS"}
             onLowerPrice={handleQuickPriceUpdate}
             onIgnore={() => setHideRecommendation(true)}
         />
@@ -1318,15 +1907,44 @@ export default function CarDetailsScreen() {
         )}
       </View>
 
-      <TouchableOpacity 
-          onPress={handleShare}
-          style={{ 
-            flexDirection: 'row', 
-            alignItems: 'center', 
+      {/* Match Score breakdown — only for buyers viewing someone else's listing */}
+      {profile?.buyerPreferences && user?.uid !== vehicle.userId && (() => {
+        const { score, breakdown } = calcMatchScore(vehicle as any, profile.buyerPreferences!);
+        if (score === 0 || breakdown.length === 0) return null;
+        return (
+          <View style={{ backgroundColor: theme.card, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: `${theme.accent}33` }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Ionicons name="sparkles" size={16} color={theme.accent} />
+              <Text style={{ color: theme.title, fontWeight: "700", fontSize: 14 }}>
+                {score}% para vos
+              </Text>
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>— Por qué coincide</Text>
+            </View>
+            {breakdown.map((c, i) => (
+              <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <Ionicons
+                  name={c.matched ? "checkmark-circle" : "close-circle"}
+                  size={16}
+                  color={c.matched ? "#10B981" : theme.textMuted}
+                />
+                <Text style={{ color: c.matched ? theme.text : theme.textMuted, fontSize: 13 }}>
+                  {c.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+        );
+      })()}
+
+      <TouchableOpacity
+          onPress={() => setShareSheetVisible(true)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: theme.accent, 
-            paddingHorizontal: 16, 
-            paddingVertical: 8, 
+            backgroundColor: theme.accent,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
             borderRadius: 8,
             gap: 8,
             marginBottom: 16,
@@ -1351,6 +1969,14 @@ export default function CarDetailsScreen() {
              <Text style={{ fontSize: 12, color: theme.textMuted }}>Publicado hace</Text>
              <Text style={{ fontSize: 12, color: theme.text, fontWeight: "600" }}>{daysSincePublished} días</Text>
         </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+             <Text style={{ fontSize: 12, color: theme.textMuted }}>Vistas totales</Text>
+             <Text style={{ fontSize: 12, color: theme.text, fontWeight: "600" }}>{vehicle.views || 0}</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+             <Text style={{ fontSize: 12, color: theme.textMuted }}>Guardado en favoritos</Text>
+             <Text style={{ fontSize: 12, color: theme.text, fontWeight: "600" }}>{vehicle.likesCount || 0} veces</Text>
+        </View>
         {priceDrop > 0 && (
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
                 <Text style={{ fontSize: 12, color: theme.textMuted }}>Precio original</Text>
@@ -1358,14 +1984,14 @@ export default function CarDetailsScreen() {
             </View>
         )}
         {priceDrop > 0 && (
-             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ fontSize: 12, color: theme.accent }}>Rebaja</Text>
+             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                <Text style={{ fontSize: 12, color: theme.textMuted }}>Rebaja total</Text>
                 <Text style={{ fontSize: 12, color: theme.accent, fontWeight: "800" }}>⬇ {priceDrop}% OFF</Text>
             </View>
         )}
-        {vehicle.updatedAt && (
-             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-                <Text style={{ fontSize: 12, color: theme.textMuted }}>Última actualización</Text>
+        {priceDrop > 0 && vehicle.updatedAt && (
+             <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                <Text style={{ fontSize: 12, color: theme.textMuted }}>Último cambio de precio</Text>
                 <Text style={{ fontSize: 12, color: theme.text }}>
                     {vehicle.updatedAt?.toDate 
                         ? vehicle.updatedAt.toDate().toLocaleDateString("es-AR") 
@@ -1373,6 +1999,57 @@ export default function CarDetailsScreen() {
                 </Text>
             </View>
         )}
+        {vehicle.updatedAt && (
+             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
+                <Text style={{ fontSize: 12, color: theme.textMuted }}>Última actualización</Text>
+                <Text style={{ fontSize: 12, color: theme.text }}>
+                    {vehicle.updatedAt?.toDate
+                        ? vehicle.updatedAt.toDate().toLocaleDateString("es-AR")
+                        : "Reciente"}
+                </Text>
+            </View>
+        )}
+        {vehicle.priceHistory && vehicle.priceHistory.length > 1 && (() => {
+          const sorted = [...vehicle.priceHistory].sort((a, b) => {
+            const ta = a.changedAt?.seconds ?? 0;
+            const tb = b.changedAt?.seconds ?? 0;
+            return tb - ta;
+          });
+          return (
+            <View style={{ marginTop: 14 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: theme.text, marginBottom: 8 }}>
+                Historial de precio
+              </Text>
+              {sorted.map((entry, idx) => {
+                const next = sorted[idx + 1];
+                const pct = next ? Math.round(((entry.price - next.price) / next.price) * 100) : null;
+                const date = entry.changedAt?.toDate
+                  ? entry.changedAt.toDate().toLocaleDateString("es-AR")
+                  : entry.changedAt?.seconds
+                    ? new Date(entry.changedAt.seconds * 1000).toLocaleDateString("es-AR")
+                    : "—";
+                return (
+                  <View key={idx} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 5, borderBottomWidth: idx < sorted.length - 1 ? 1 : 0, borderBottomColor: theme.likeBoxBackground }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: idx === 0 ? theme.accent : theme.textMuted }} />
+                      <Text style={{ fontSize: 12, color: idx === 0 ? theme.text : theme.textMuted, fontWeight: idx === 0 ? "600" : "400" }}>
+                        {entry.currency} {entry.price.toLocaleString("es-AR")}
+                      </Text>
+                      {pct !== null && (
+                        <View style={{ backgroundColor: pct < 0 ? "#22c55e22" : "#ef444422", paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 10, fontWeight: "700", color: pct < 0 ? "#22c55e" : "#ef4444" }}>
+                            {pct > 0 ? "+" : ""}{pct}%
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={{ fontSize: 11, color: theme.textMuted }}>{date}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })()}
       </View>
 
       <View style={styles.chipsRow}>
@@ -1419,14 +2096,14 @@ export default function CarDetailsScreen() {
                 {ownerProfile?.photoURL ? (
                     <Image source={{ uri: ownerProfile.photoURL }} style={{ width: 48, height: 48 }} />
                 ) : (
-                    <Text style={{ color: "#FFF", fontSize: 18, fontWeight: "bold" }}>{ownerProfile?.initials || (vehicle.userName || vehicle.sellerName || "U").slice(0, 2).toUpperCase()}</Text>
+                    <Text style={{ color: "#FFF", fontSize: 18, fontWeight: "bold" }}>{ownerProfile?.initials || (vehicle.userName || "U").slice(0, 2).toUpperCase()}</Text>
                 )}
             </View>
             <View style={{ flex: 1 }}>
                 <Text style={styles.ownerLabel}>Publicado por</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Text style={styles.ownerName} numberOfLines={1}>
-                      {vehicle.userName || vehicle.sellerName || "Usuario desconocido"}
+                      {vehicle.userName || "Usuario desconocido"}
                     </Text>
                     {(ownerProfile?.plan?.includes('pro_dealer') || vehicle.userPlan?.includes('pro_dealer')) && (
                         <Ionicons name="checkmark-circle" size={14} color="#9013FE" />
@@ -1439,15 +2116,35 @@ export default function CarDetailsScreen() {
                         <Text style={{ color: "#9013FE", fontSize: 12, fontWeight: "700" }}>Agencia Verificada</Text>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
                             <Ionicons name="star" size={12} color="#F5A623" />
-                            <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>{Number(vehicle.sellerRating || ownerProfile?.sellerRating || 0).toFixed(1)}</Text>
-                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>({vehicle.sellerReviewCount || ownerProfile?.sellerReviewCount || 0})</Text>
+                            <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>
+                              {Number(
+                                (ownerProfile?.sellerRating ?? vehicle.sellerRating ?? 0)
+                              ).toFixed(1)}
+                            </Text>
+                            <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                              (
+                              {ownerProfile?.sellerReviewCount ??
+                                vehicle.sellerReviewCount ??
+                                0}
+                              )
+                            </Text>
                         </View>
                     </View>
                 ) : ((vehicle.sellerRating !== undefined && vehicle.sellerRating !== null) || (ownerProfile?.sellerRating !== undefined && ownerProfile?.sellerRating !== null) || (vehicle.sellerReviewCount || 0) > 0 || (ownerProfile?.sellerReviewCount || 0) > 0) ? (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
                         <Ionicons name="star" size={14} color="#F5A623" />
-                        <Text style={{ color: theme.text, fontSize: 13, fontWeight: "700" }}>{Number(vehicle.sellerRating || ownerProfile?.sellerRating || 0).toFixed(1)}</Text>
-                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>({vehicle.sellerReviewCount || ownerProfile?.sellerReviewCount || 0} ventas)</Text>
+                        <Text style={{ color: theme.text, fontSize: 13, fontWeight: "700" }}>
+                          {Number(
+                            (ownerProfile?.sellerRating ?? vehicle.sellerRating ?? 0)
+                          ).toFixed(1)}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                          (
+                          {ownerProfile?.sellerReviewCount ??
+                            vehicle.sellerReviewCount ??
+                            0}{" "}
+                          ventas)
+                        </Text>
                     </View>
                 ) : (
                     <Text style={{ 
@@ -1470,15 +2167,6 @@ export default function CarDetailsScreen() {
               ? vehicle.createdAt.toDate().toLocaleDateString("es-AR")
               : new Date(vehicle.createdAt).toLocaleDateString("es-AR")}
           </Text>
-        )}
-        {user && user.uid !== vehicle.userId && Platform.OS !== 'web' && (
-          <TouchableOpacity
-            disabled={isSold}
-            style={[styles.ctaButton, { marginTop: 12, backgroundColor: isSold ? theme.textMuted : theme.primary, opacity: isSold ? 0.6 : 1 }]}
-            onPress={() => !isSold && handleContact()}
-          >
-            <Text style={styles.ctaButtonText}>{isSold ? "No disponible" : "Enviar mensaje"}</Text>
-          </TouchableOpacity>
         )}
         
         {Platform.OS === 'web' && (
@@ -1576,95 +2264,83 @@ export default function CarDetailsScreen() {
   );
 
   const renderFinanciacion = () => {
-    if (!vehicle.acceptsFinancing || !vehicle.financing) {
-       return (
-         <View style={styles.sectionCard}>
-           <Text style={styles.sectionTitle}>Financiación</Text>
-           <Text style={styles.mutedText}>Este vehículo no acepta financiación.</Text>
-         </View>
-       );
+    const fin = vehicle.financing;
+    const hasFinancing = vehicle.acceptsFinancing && fin && (fin.downPayment || fin.monthlyPayment || fin.type);
+
+    if (!hasFinancing) {
+      return (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Financiación</Text>
+          <Text style={styles.mutedText}>Este vehículo no tiene financiación configurada.</Text>
+        </View>
+      );
     }
-    const { rate, months } = vehicle.financing;
-    const quota = calculateQuota();
-    const currency = vehicle.currency || "$";
+
+    const sym = vehicle.currency === "USD" ? "USD" : "$";
+    const quota = fin.monthlyPayment || 0;
+
+    const typeLabel: Record<string, string> = { propio: "Financiación Propia", banco: "Banco", sin_interes: "Sin Interés (0%)" };
+    const typeColor: Record<string, string> = { propio: "#7C3AED", banco: "#1D4ED8", sin_interes: "#D97706" };
+    const typeBg: Record<string, string> = { propio: "#F3E8FF", banco: "#EFF6FF", sin_interes: "#FFF9E6" };
 
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Calculadora de Cuotas</Text>
-        
+        <Text style={styles.sectionTitle}>Financiación</Text>
+
+        {/* Type + Entity badges */}
+        {fin.type && (
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: typeBg[fin.type] || theme.badgeBackground, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+              <Ionicons name={fin.type === "banco" ? "business-outline" : fin.type === "propio" ? "person-outline" : "gift-outline"} size={13} color={typeColor[fin.type] || theme.textMuted} />
+              <Text style={{ fontSize: 12, fontWeight: "700", color: typeColor[fin.type] || theme.text }}>{typeLabel[fin.type] || fin.type}</Text>
+            </View>
+            {fin.type === "banco" && fin.entity && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EFF6FF", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#1D4ED8" }}>{fin.entity}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         <View style={styles.financeBox}>
-           {/* Info Principal */}
-           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 16 }}>
-              <View>
-                  <Text style={styles.financeLabel}>Tasa Anual</Text>
-                  <Text style={styles.financeValue}>{rate}%</Text>
+          {/* Anticipo row */}
+          {fin.downPayment && fin.downPayment > 0 && (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.badgeBorder }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="cash-outline" size={18} color="#166534" />
+                <Text style={{ color: theme.text, fontSize: 14 }}>Anticipo</Text>
               </View>
-              <View>
-                  <Text style={styles.financeLabel}>Plazo Máximo</Text>
-                  <Text style={styles.financeValue}>{months} meses</Text>
-              </View>
-           </View>
+              <Text style={{ color: "#166534", fontWeight: "800", fontSize: 16 }}>{sym} {fin.downPayment.toLocaleString("es-AR")}</Text>
+            </View>
+          )}
 
-           {/* Calculadora */}
-           <View style={{ gap: 12 }}>
-              <View>
-                  <Text style={styles.specLabel}>Tu Anticipo ({currency})</Text>
-                  <TextInput 
-                    style={[styles.input, { backgroundColor: theme.background }]}
-                    value={calcDownPayment}
-                    onChangeText={(t) => {
-                        const numeric = t.replace(/\D/g, '');
-                        const formatted = numeric.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-                        setCalcDownPayment(formatted);
-                    }}
-                    keyboardType="numeric"
-                    placeholder="Ej: 5.000.000"
-                    returnKeyType="done"
-                    inputAccessoryViewID="doneAccessory"
-                    onSubmitEditing={Keyboard.dismiss}
-                />
-                  <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>
-                      Sugerido: {vehicle.financing.initialPercent || 30}% ({currency} {Math.floor(vehicle.price * ((vehicle.financing.initialPercent || 30)/100)).toLocaleString()})
-                  </Text>
+          {/* Cuotas row */}
+          {fin.months && fin.months > 0 && (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderBottomWidth: fin.rate ? 1 : 0, borderBottomColor: theme.badgeBorder }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="calendar-outline" size={18} color="#1D4ED8" />
+                <Text style={{ color: theme.text, fontSize: 14 }}>Cuota Mensual</Text>
               </View>
+              <Text style={{ color: "#1D4ED8", fontWeight: "800", fontSize: 16 }}>
+                {fin.months}x {sym} {quota > 0 ? quota.toLocaleString("es-AR") : "—"}
+              </Text>
+            </View>
+          )}
 
-              <View>
-                  <Text style={styles.specLabel}>Plazo (Meses)</Text>
-                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                      {[12, 24, 36, 48, 60].filter(m => m <= months).map(m => (
-                          <TouchableOpacity 
-                              key={m}
-                              onPress={() => setCalcMonths(m)}
-                              style={{ 
-                                  backgroundColor: calcMonths === m ? theme.accent : theme.badgeBackground,
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 8
-                              }}
-                          >
-                              <Text style={{ color: calcMonths === m ? theme.buttonText : theme.text, fontWeight: "600" }}>{m}</Text>
-                          </TouchableOpacity>
-                      ))}
-                      {/* Custom input if needed, or just standard options */}
-                  </View>
+          {/* Rate row */}
+          {fin.type !== "sin_interes" && fin.rate != null && fin.rate > 0 && (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="trending-up-outline" size={18} color={theme.textMuted} />
+                <Text style={{ color: theme.text, fontSize: 14 }}>Tasa Anual</Text>
               </View>
-
-              <View style={{ height: 1, backgroundColor: theme.badgeBorder, marginVertical: 8 }} />
-              
-              <View style={{ alignItems: "center", padding: 12, backgroundColor: theme.badgeBackground, borderRadius: 12 }}>
-                  <Text style={{ fontSize: 14, color: theme.textMuted, marginBottom: 4 }}>Cuota Estimada Mensual</Text>
-                  <Text style={{ fontSize: 24, fontWeight: "800", color: theme.accent }}>
-                      {currency} {quota.toLocaleString("es-AR")}
-                  </Text>
-                  <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 4 }}>
-                      * Cálculo aproximado (Sistema Francés). No incluye gastos administrativos ni seguro.
-                  </Text>
-              </View>
-           </View>
+              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 14 }}>{fin.rate}%</Text>
+            </View>
+          )}
         </View>
 
-        <TouchableOpacity style={styles.ctaButton} onPress={handleContact}>
-           <Text style={styles.ctaButtonText}>Consultar financiación</Text>
+        <TouchableOpacity style={[styles.ctaButton, { marginTop: 16 }]} onPress={handleContact}>
+          <Text style={styles.ctaButtonText}>Consultar financiación</Text>
         </TouchableOpacity>
       </View>
     );
@@ -1730,8 +2406,8 @@ export default function CarDetailsScreen() {
   };
 
   const handleGenerateDescription = async () => {
-    if (!profile?.plan?.includes('pro')) {
-        showAlert("Función Premium", "La generación de descripción con IA es exclusiva para usuarios Pro. ¡Mejorá tu plan para acceder!", "info", () => router.push("/(screens)/subscribe"));
+    if (!profile?.plan || !['pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => profile.plan.includes(p))) {
+        showAlert("Función Premium", "La generación de descripción con IA es exclusiva para usuarios Pro Plus o superiores. ¡Mejorá tu plan para acceder!", "info", () => router.push("/(screens)/subscribe"));
         return;
     }
 
@@ -2021,44 +2697,126 @@ export default function CarDetailsScreen() {
                 />
             </View>
         );
-      case "financiacion":
+      case "financiacion": {
+        const sym = editState.currency || vehicle?.currency || "ARS";
+        const previewDP = editState.finDownPayment ? Number(editState.finDownPayment) : 0;
+        const previewMonths = editState.finMonths ? Number(editState.finMonths) : 0;
+        const previewRate = editState.finType === "sin_interes" ? 0 : (editState.finRate ? Number(editState.finRate) : 0);
+        const previewPrice = editState.price ? Number(editState.price) : Number(vehicle?.price ?? 0);
+        const previewPmt = previewPrice && previewMonths ? calcPMT(previewPrice, previewDP, previewRate, previewMonths) : 0;
         return (
-            <View style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>Editar Financiación</Text>
-                
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                    <Text style={{ color: theme.text, fontWeight: "600" }}>Acepta Financiación</Text>
-                    <Switch
-                        value={!!editState.acceptsFinancing}
-                        onValueChange={(v) => setEditState({...editState, acceptsFinancing: v})}
-                        trackColor={{ false: theme.inputBackground, true: theme.accent }}
-                    />
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Editar Financiación</Text>
+
+            {/* Toggle */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ color: theme.text, fontWeight: "600" }}>Acepta Financiación</Text>
+              <Switch
+                value={!!editState.acceptsFinancing}
+                onValueChange={(v) => setEditState({ ...editState, acceptsFinancing: v })}
+                trackColor={{ false: theme.inputBackground, true: theme.accent }}
+              />
+            </View>
+
+            {editState.acceptsFinancing && (
+              <View style={{ gap: 16 }}>
+                {/* Anticipo */}
+                <View>
+                  <Text style={styles.specLabel}>Anticipo ({sym === "USD" ? "USD" : "$"})</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editState.finDownPayment}
+                    onChangeText={(t) => setEditState({ ...editState, finDownPayment: t.replace(/\D/g, '') })}
+                    keyboardType="numeric"
+                    placeholder="Ej: 5000000"
+                    inputAccessoryViewID="doneAccessory"
+                  />
+                  {previewDP > 0 && previewPrice > 0 && (
+                    <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 3 }}>
+                      {((previewDP / previewPrice) * 100).toFixed(1)}% del precio
+                    </Text>
+                  )}
                 </View>
 
-                {editState.acceptsFinancing && (
-                    <>
-                        <Text style={styles.specLabel}>Tasa anual (%)</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={editState.finRate}
-                            onChangeText={(t) => setEditState({...editState, finRate: t})}
-                            keyboardType="numeric"
-                            placeholder="Ej: 25"
-                            inputAccessoryViewID="doneAccessory"
-                        />
-                        <Text style={[styles.specLabel, { marginTop: 12 }]}>Plazo (meses)</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={editState.finMonths}
-                            onChangeText={(t) => setEditState({...editState, finMonths: t})}
-                            keyboardType="numeric"
-                            placeholder="Ej: 24"
-                            inputAccessoryViewID="doneAccessory"
-                        />
-                    </>
+                {/* Tipo de financiación */}
+                <View>
+                  <Text style={styles.specLabel}>Tipo de Financiación</Text>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {[
+                      { v: "propio", l: "Propia" },
+                      { v: "banco", l: "Banco" },
+                      { v: "sin_interes", l: "0% Interés" },
+                    ].map(opt => (
+                      <TouchableOpacity
+                        key={opt.v}
+                        onPress={() => setEditState({ ...editState, finType: editState.finType === opt.v ? "" : opt.v })}
+                        style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: editState.finType === opt.v ? theme.accent : theme.badgeBorder, backgroundColor: editState.finType === opt.v ? theme.accent + "20" : "transparent" }}
+                      >
+                        <Text style={{ fontSize: 13, color: editState.finType === opt.v ? theme.accent : theme.text, fontWeight: editState.finType === opt.v ? "700" : "400" }}>{opt.l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Entidad (solo banco) */}
+                {editState.finType === "banco" && (
+                  <View>
+                    <Text style={styles.specLabel}>Entidad Bancaria</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editState.finEntity}
+                      onChangeText={(t) => setEditState({ ...editState, finEntity: t })}
+                      placeholder="Ej: Banco Nación"
+                      inputAccessoryViewID="doneAccessory"
+                    />
+                  </View>
                 )}
-            </View>
+
+                {/* Plazo */}
+                <View>
+                  <Text style={styles.specLabel}>Plazo Máximo</Text>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {[12, 24, 36, 48, 60].map(m => (
+                      <TouchableOpacity
+                        key={m}
+                        onPress={() => setEditState({ ...editState, finMonths: String(m) })}
+                        style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: editState.finMonths === String(m) ? theme.accent : theme.badgeBorder, backgroundColor: editState.finMonths === String(m) ? theme.accent + "20" : "transparent" }}
+                      >
+                        <Text style={{ fontSize: 13, color: editState.finMonths === String(m) ? theme.accent : theme.text, fontWeight: editState.finMonths === String(m) ? "700" : "400" }}>{m}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Tasa (no sin_interes) */}
+                {editState.finType !== "sin_interes" && (
+                  <View>
+                    <Text style={styles.specLabel}>Tasa Anual (%)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editState.finRate}
+                      onChangeText={(t) => setEditState({ ...editState, finRate: t })}
+                      keyboardType="numeric"
+                      placeholder="Ej: 45"
+                      inputAccessoryViewID="doneAccessory"
+                    />
+                  </View>
+                )}
+
+                {/* Preview */}
+                {previewMonths > 0 && previewPmt > 0 && (
+                  <View style={{ alignItems: "center", padding: 12, backgroundColor: theme.badgeBackground, borderRadius: 12 }}>
+                    <Text style={{ fontSize: 12, color: theme.textMuted, marginBottom: 4 }}>Vista previa cuota mensual</Text>
+                    <Text style={{ fontSize: 20, fontWeight: "800", color: theme.accent }}>
+                      {previewMonths}x {sym === "USD" ? "USD" : "$"} {previewPmt.toLocaleString("es-AR")}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
         );
+      }
       case "fotos":
         return (
             <View style={styles.sectionCard}>
@@ -2225,15 +2983,13 @@ export default function CarDetailsScreen() {
         return;
     }
 
-    // Check Plan Access
-    const hasAccess = profile?.role === 'admin' || 
-                      profile?.plan?.includes('pro_plus') || 
-                      profile?.plan?.includes('pro_dealer');
+    // Check Plan Access for PDF export
+    const hasAccess = profile?.role === 'admin' || canExportPDF(profile?.plan || "");
 
     if (!hasAccess) {
         showAlert(
             "Función Premium",
-            "Generar la ficha PDF con QR es exclusivo para planes Pro Plus y Pro Dealer. ¡Mejorá tu plan para acceder!",
+            "Generar la ficha PDF con QR es exclusivo para planes Pro Plus o superiores. ¡Mejorá tu plan para acceder!",
             "info",
             () => router.push("/(screens)/subscribe"), // Redirect to subscribe
             true,
@@ -2372,7 +3128,6 @@ export default function CarDetailsScreen() {
     
     // Generamos el link con el esquema personalizado (matchcars://car/ID)
     // Esto permitirá abrir la app directamente si se tiene instalada.
-    const schemeLink = Linking.createURL(`/car/${vehicle.id}`);
     
     // Link Web Universal (https://matchcars.app/car/ID)
     // Al tener configurado Universal Links, este link abrirá la app si está instalada,
@@ -2385,22 +3140,35 @@ export default function CarDetailsScreen() {
 
     try {
       if (Platform.OS === 'ios') {
-          await Share.share({
-              message: message + downloadLinks,
-              url: webLink // iOS usa esto para previsualizar y abrir
-          });
+        await Share.share({
+          message: message + downloadLinks,
+          url: webLink
+        });
       } else {
-          await Share.share({
-              message: `${message}${downloadLinks}`,
-              title: 'MatchCars'
-          });
+        await Share.share({
+          message: `${message}${downloadLinks}`,
+          title: 'MatchCars',
+        });
       }
-    } catch (error: any) {
-      // ignore
+    } catch {
     }
   };
 
   return (
+    <>
+      <Head>
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+        <link rel="canonical" href={`https://matchcars.app/car/${normalizedId}`} />
+        {vehicleStructuredData && (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify(vehicleStructuredData),
+            }}
+          />
+        )}
+      </Head>
     <SafeAreaView style={styles.container}>
       {Platform.OS === 'ios' && (
           <InputAccessoryView nativeID="doneAccessory">
@@ -2419,6 +3187,10 @@ export default function CarDetailsScreen() {
         <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity onPress={handleGoHome} style={styles.homePill}>
                 <Ionicons name="home" size={18} color={theme.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => setShareSheetVisible(true)} style={styles.homePill}>
+                <Ionicons name="share-social-outline" size={18} color={theme.text} />
             </TouchableOpacity>
 
             {user && user.uid === vehicle.userId && (
@@ -2443,11 +3215,27 @@ export default function CarDetailsScreen() {
       <KeyboardAwareScrollView 
           style={styles.scrollArea} 
           showsVerticalScrollIndicator={false} 
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 120 }}
           enableOnAndroid={true}
           extraScrollHeight={Platform.OS === 'ios' ? 20 : 0}
           keyboardShouldPersistTaps="handled"
       >
+          {editing && vehicle?.status === "rejected" && (
+            <View style={{ marginHorizontal: 12, marginBottom: 8, padding: 10, borderRadius: 10, backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FECACA" }}>
+              <Text style={{ color: "#B91C1C", fontWeight: "700", marginBottom: 4 }}>
+                Publicación rechazada
+              </Text>
+              {vehicle.rejectionReason ? (
+                <Text style={{ color: "#7F1D1D", fontSize: 13 }}>
+                  Motivo: {vehicle.rejectionReason}
+                </Text>
+              ) : (
+                <Text style={{ color: "#7F1D1D", fontSize: 13 }}>
+                  Revisá los datos y ajustá el precio para reenviar a revisión.
+                </Text>
+              )}
+            </View>
+          )}
           <View style={styles.heroContainer}>
               {heroItems.length > 0 ? (
                   <ScrollView 
@@ -2455,14 +3243,14 @@ export default function CarDetailsScreen() {
                     pagingEnabled 
                     showsHorizontalScrollIndicator={false}
                     onMomentumScrollEnd={(e) => {
-                        const newIndex = Math.round(e.nativeEvent.contentOffset.x / (Dimensions.get("window").width - 24));
+                        const newIndex = Math.round(e.nativeEvent.contentOffset.x / heroWidth);
                         setActiveHeroIndex(newIndex);
                     }}
                   >
                     {heroItems.map((item, idx) => (
                         <View 
                             key={idx} 
-                            style={{ width: Dimensions.get("window").width - 24, height: (Dimensions.get("window").width - 24) * 0.65, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}
+                            style={{ width: heroWidth, height: heroHeight, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}
                         >
                             {item.type === 'video' ? (
                                 <ReplayableVideo
@@ -2600,6 +3388,69 @@ export default function CarDetailsScreen() {
       </KeyboardAwareScrollView>
       </View>
 
+      {/* Sticky bottom CTA bar — visible to buyers on native */}
+      {!editing && user && user.uid !== vehicle.userId && Platform.OS !== 'web' && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16, borderTopWidth: 1, borderColor: theme.badgeBorder, backgroundColor: theme.card }}>
+          {/* Compact offer status — no Modal inside, avoids conflicts */}
+          {activeOffer && activeOffer.status !== "rejected" && activeOffer.status !== "withdrawn" && activeOffer.status !== "expired" && (() => {
+            const isAccepted = activeOffer.status === "accepted";
+            const isCountered = activeOffer.status === "countered";
+            const offerStatusColor = isAccepted ? "#10B981" : isCountered ? "#6366F1" : "#F59E0B";
+            const offerStatusLabel = isAccepted ? "Aceptada ✓" : isCountered ? "Contraoferta recibida" : "Pendiente de respuesta";
+            // Show the negotiated amount (counter-offer takes precedence)
+            const displayAmount = (isAccepted || isCountered) && activeOffer.counterAmount
+              ? activeOffer.counterAmount : activeOffer.amount;
+            const displayCurrency = (isAccepted || isCountered) && activeOffer.counterCurrency
+              ? activeOffer.counterCurrency : activeOffer.currency;
+            return (
+              <View style={{ marginBottom: 10 }}>
+                <TouchableOpacity
+                  onPress={handleContact}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: offerStatusColor + "18", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: offerStatusColor + "44" }}
+                >
+                  <Ionicons name={isAccepted ? "checkmark-circle" : "pricetag"} size={14} color={offerStatusColor} />
+                  <Text style={{ color: offerStatusColor, fontWeight: "700", fontSize: 12, flex: 1 }}>
+                    {displayCurrency} {Number(displayAmount).toLocaleString("es-AR")} · {offerStatusLabel}
+                  </Text>
+                  <Text style={{ color: offerStatusColor, fontSize: 11 }}>Ver →</Text>
+                </TouchableOpacity>
+                {isAccepted && (
+                  <TouchableOpacity
+                    onPress={() => showAlert(
+                      "Cancelar acuerdo",
+                      "¿Estás seguro? Esto retirará la oferta y podrás volver a negociar.",
+                      "warning",
+                      handleWithdrawOffer,
+                      true, undefined, "Sí, cancelar", "No"
+                    )}
+                    style={{ alignSelf: "flex-end", paddingTop: 6, paddingHorizontal: 4 }}
+                  >
+                    <Text style={{ color: theme.textMuted, fontSize: 11, textDecorationLine: "underline" }}>Cancelar acuerdo</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })()}
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TouchableOpacity
+              disabled={isSold}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 10, backgroundColor: isSold ? theme.textMuted : theme.primary, alignItems: "center", opacity: isSold ? 0.6 : 1 }}
+              onPress={() => !isSold && handleContact()}
+            >
+              <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 15 }}>{isSold ? "No disponible" : "Mensaje"}</Text>
+            </TouchableOpacity>
+            {!isSold && (!activeOffer || activeOffer.status === "rejected" || activeOffer.status === "withdrawn" || activeOffer.status === "expired") && (
+              <TouchableOpacity
+                style={{ flex: 1, paddingVertical: 14, borderRadius: 10, backgroundColor: "#10B981", alignItems: "center" }}
+                onPress={() => setOfferModalVisible(true)}
+              >
+                <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 15 }}>Hacer oferta</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
+
       {editing && (
           <View style={{ padding: 12, borderTopWidth: 1, borderColor: theme.badgeBorder, backgroundColor: theme.card }}>
               <TouchableOpacity onPress={handleSaveEdits} style={[styles.ctaButton, { marginTop: 0 }]}>
@@ -2671,7 +3522,7 @@ export default function CarDetailsScreen() {
           </View>
       </Modal>
 
-      <CustomAlert 
+      <CustomAlert
         visible={alertConfig.visible}
         title={alertConfig.title}
         message={alertConfig.message}
@@ -2683,7 +3534,133 @@ export default function CarDetailsScreen() {
         cancelText={alertConfig.cancelText}
         options={alertConfig.options}
       />
+
+      {/* Offer Modal */}
+      <Modal visible={offerModalVisible} transparent animationType="slide" onRequestClose={() => setOfferModalVisible(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" }}>
+          <View style={{ backgroundColor: theme.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: theme.inputBackground }}>
+              <View>
+                <Text style={{ color: theme.text, fontSize: 17, fontWeight: "700" }}>Hacer oferta</Text>
+                {vehicle && <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{vehicle.brand} {vehicle.model} {vehicle.year}</Text>}
+              </View>
+              <TouchableOpacity onPress={() => setOfferModalVisible(false)}>
+                <Ionicons name="close" size={26} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ paddingHorizontal: 20 }} showsVerticalScrollIndicator={false}>
+              {/* Currency */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginTop: 20, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>Moneda</Text>
+              <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
+                {(["ARS", "USD"] as const).map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => setOfferCurrency(c)}
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: "center", backgroundColor: offerCurrency === c ? theme.primary : theme.inputBackground, borderWidth: 1.5, borderColor: offerCurrency === c ? theme.primary : theme.likeBoxBackground }}
+                  >
+                    <Text style={{ color: offerCurrency === c ? "#FFF" : theme.text, fontWeight: "700" }}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Amount */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>Monto de la oferta</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                <TextInput
+                  value={offerAmount}
+                  onChangeText={(t) => {
+                    const digits = t.replace(/\./g, "").replace(/[^0-9]/g, "");
+                    setOfferAmount(digits ? formatNumber(digits) : "");
+                  }}
+                  placeholder={`Ej: ${offerCurrency === "ARS" ? "15.000.000" : "12.000"}`}
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                  style={{ flex: 1, backgroundColor: theme.inputBackground, color: theme.text, padding: 14, borderRadius: 10, fontSize: 20, fontWeight: "700", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+                <TouchableOpacity
+                  onPress={() => Keyboard.dismiss()}
+                  style={{ backgroundColor: theme.inputBackground, borderRadius: 10, paddingHorizontal: 14, justifyContent: "center", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                >
+                  <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 14 }}>Listo</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Conditions */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 10, textTransform: "uppercase", letterSpacing: 0.8 }}>Condiciones</Text>
+              <TouchableOpacity onPress={() => setOfferTradeIn(!offerTradeIn)} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8, padding: 12, backgroundColor: theme.inputBackground, borderRadius: 10, borderWidth: 1, borderColor: offerTradeIn ? theme.primary : theme.likeBoxBackground }}>
+                <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: offerTradeIn ? theme.primary : theme.textMuted, backgroundColor: offerTradeIn ? theme.primary : "transparent", alignItems: "center", justifyContent: "center" }}>
+                  {offerTradeIn && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                </View>
+                <Text style={{ color: theme.text, fontSize: 14 }}>Incluye permuta</Text>
+              </TouchableOpacity>
+              {offerTradeIn && (
+                <TextInput
+                  value={offerTradeInDesc}
+                  onChangeText={setOfferTradeInDesc}
+                  placeholder="Describí el auto que ofrecés en parte de pago..."
+                  placeholderTextColor={theme.textMuted}
+                  multiline
+                  style={{ backgroundColor: theme.inputBackground, color: theme.text, padding: 12, borderRadius: 10, marginBottom: 8, minHeight: 60, textAlignVertical: "top", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+              )}
+              <TouchableOpacity onPress={() => setOfferFinancing(!offerFinancing)} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: offerFinancing ? 8 : 16, padding: 12, backgroundColor: theme.inputBackground, borderRadius: 10, borderWidth: 1, borderColor: offerFinancing ? theme.primary : theme.likeBoxBackground }}>
+                <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: offerFinancing ? theme.primary : theme.textMuted, backgroundColor: offerFinancing ? theme.primary : "transparent", alignItems: "center", justifyContent: "center" }}>
+                  {offerFinancing && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.text, fontSize: 14 }}>Necesito financiación</Text>
+                  {!offerFinancing && <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>Banco, cuotas, préstamo personal, etc.</Text>}
+                </View>
+              </TouchableOpacity>
+              {offerFinancing && (
+                <TextInput
+                  value={offerFinancingNote}
+                  onChangeText={setOfferFinancingNote}
+                  placeholder="¿Qué tipo de financiación necesitás? Ej: banco hipotecario, 60 cuotas, etc."
+                  placeholderTextColor={theme.textMuted}
+                  multiline
+                  style={{ backgroundColor: theme.inputBackground, color: theme.text, padding: 12, borderRadius: 10, marginBottom: 16, minHeight: 60, textAlignVertical: "top", borderWidth: 1, borderColor: theme.primary + "66" }}
+                />
+              )}
+
+              {/* Note */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>Nota (opcional)</Text>
+              <TextInput
+                value={offerNote}
+                onChangeText={setOfferNote}
+                placeholder="Cualquier aclaración para el vendedor..."
+                placeholderTextColor={theme.textMuted}
+                multiline
+                maxLength={200}
+                style={{ backgroundColor: theme.inputBackground, color: theme.text, padding: 12, borderRadius: 10, marginBottom: 20, minHeight: 70, textAlignVertical: "top", borderWidth: 1, borderColor: theme.likeBoxBackground }}
+              />
+              <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: "right", marginTop: -16, marginBottom: 16 }}>{offerNote.length}/200</Text>
+
+              <TouchableOpacity
+                onPress={handleSubmitOffer}
+                disabled={submittingOffer || !offerAmount.trim()}
+                style={{ backgroundColor: "#10B981", borderRadius: 12, padding: 16, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, opacity: (submittingOffer || !offerAmount.trim()) ? 0.6 : 1, marginBottom: 8 }}
+              >
+                {submittingOffer && <ActivityIndicator size="small" color="#FFF" />}
+                <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 16 }}>{submittingOffer ? "Enviando..." : "Enviar oferta"}</Text>
+              </TouchableOpacity>
+              <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: "center", marginBottom: 8 }}>
+                La oferta expira en 48 hs si no hay respuesta.
+              </Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <ShareSheet
+        visible={shareSheetVisible}
+        onClose={() => setShareSheetVisible(false)}
+        url={`https://matchcars.app/car/${vehicle?.id ?? normalizedId}`}
+        title={`${displayTitle} · ${priceText}`}
+        theme={theme}
+      />
     </SafeAreaView>
+    </>
   );
 }
 

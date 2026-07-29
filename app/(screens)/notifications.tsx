@@ -7,7 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { collection, doc, getDoc, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type ConversationItem = { id: string; peerId: string; peerName: string; lastMessage?: string; updatedAt?: any; vehicleData?: any; vehicleId?: string; lastSenderId?: string; readBy?: string[] };
@@ -24,7 +24,9 @@ export default function NotificationsScreen() {
   const [activeTab, setActiveTab] = useState<"messages" | "likes" | "matches" | "alerts">("messages");
   const [loading, setLoading] = useState(true);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
-  const [priceAlerts, setPriceAlerts] = useState<any[]>([]); // New state for price alerts
+  const [priceAlerts, setPriceAlerts] = useState<any[]>([]);
+  const [ratingReminders, setRatingReminders] = useState<any[]>([]);
+  const [offerNotifications, setOfferNotifications] = useState<any[]>([]);
   const [likesReceived, setLikesReceived] = useState<Map<string, number>>(new Map());
   const [profiles, setProfiles] = useState<Map<string, { name: string; initials: string; avatarColor: string; photoUrl?: string }>>(new Map());
   const [likersOfMine, setLikersOfMine] = useState<Map<string, Set<string>>>(new Map());
@@ -109,7 +111,6 @@ export default function NotificationsScreen() {
     router.push(`/car/${item.vehicleId}`);
   };
 
-  // Listen for Price Alerts
   useEffect(() => {
       if (!user) return;
       const q = query(
@@ -128,6 +129,66 @@ export default function NotificationsScreen() {
       });
       return () => unsub();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "users", user.uid, "rating_notifications"));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => {
+        const tA = a.createdAt?.seconds || 0;
+        const tB = b.createdAt?.seconds || 0;
+        return tB - tA;
+      });
+      setRatingReminders(list);
+    });
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "users", user.uid, "offer_notifications"));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      setOfferNotifications(list);
+    });
+    return () => unsub();
+  }, [user]);
+
+  const handleOfferNotificationPress = async (item: any) => {
+    if (!user) return;
+    try {
+      if (!item.read) {
+        await setDoc(doc(db, "users", user.uid, "offer_notifications", item.id), { read: true }, { merge: true });
+      }
+    } catch {}
+    // Navigate to the OTHER party in the conversation
+    const peerUid = item.buyerId === user.uid ? item.sellerId : item.buyerId;
+    if (!peerUid) return;
+    router.push({
+      pathname: "/(screens)/chat/[uid]",
+      params: {
+        uid: peerUid,
+        vehicleId: item.vehicleId,
+        vehicleData: item.vehicleSnapshot ? JSON.stringify(item.vehicleSnapshot) : undefined,
+      },
+    } as any);
+  };
+
+  const handleRatingReminderPress = async (item: any) => {
+    if (!user) return;
+    try {
+      if (!item.read) {
+        await setDoc(doc(db, "users", user.uid, "rating_notifications", item.id), { read: true }, { merge: true });
+      }
+    } catch (e) {
+      console.error("Error marking rating reminder as read", e);
+    }
+    router.push("/profile" as any);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -320,7 +381,7 @@ export default function NotificationsScreen() {
                  }}>
                    {labels[tab]}
                  </Text>
-                 {tab === "alerts" && priceAlerts.some((a) => !a.read) && (
+                 {tab === "alerts" && (priceAlerts.some((a) => !a.read) || ratingReminders.some((r) => !r.read) || offerNotifications.some((o) => !o.read)) && (
                    <View style={{ position: "absolute", top: 6, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: "#EF4444" }} />
                  )}
                </TouchableOpacity>
@@ -335,28 +396,96 @@ export default function NotificationsScreen() {
         ) : (
           <View style={{ flex: 1, paddingHorizontal: 16 }}>
             {activeTab === "alerts" && (
-              <FlatList
-                data={priceAlerts}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity 
-                    onPress={() => handlePriceAlertPress(item)}
-                    style={{ 
-                      backgroundColor: theme.card, 
-                      padding: 16, 
-                      marginBottom: 1, 
-                      flexDirection: 'row', 
-                      alignItems: 'center',
-                      opacity: item.read ? 0.7 : 1
-                    }}
+              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+                {offerNotifications.map((item) => {
+                  const vs = item.vehicleSnapshot ?? {};
+                  const bs = item.buyerSnapshot ?? {};
+                  const buyerName = [bs.firstName, bs.lastName].filter(Boolean).join(" ") || "Un interesado";
+                  const amt = item.amount ? `${item.currency} ${Number(item.amount).toLocaleString("es-AR")}` : "";
+                  const accentColor = item.type === "deal_canceled" ? "#EF4444" : (item.type === "offer_accepted" || item.type === "counter_accepted" || item.type === "vehicle_sold") ? "#6366F1" : "#10B981";
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => handleOfferNotificationPress(item)}
+                      style={{ backgroundColor: theme.card, padding: 16, marginBottom: 1, flexDirection: "row", alignItems: "center", opacity: item.read ? 0.7 : 1, borderLeftWidth: item.read ? 0 : 3, borderLeftColor: accentColor }}
+                    >
+                      <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: accentColor + "20", alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                        <Ionicons
+                          name={item.type === "deal_canceled" ? "close-circle" : item.type === "vehicle_sold" ? "car" : (item.type === "offer_accepted" || item.type === "counter_accepted") ? "checkmark-circle" : "pricetag"}
+                          size={22}
+                          color={accentColor}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.text, fontWeight: "700", fontSize: 15 }}>
+                          {item.type === "counter_received" ? "Contraoferta recibida" :
+                           item.type === "offer_accepted" ? "¡Tu oferta fue aceptada!" :
+                           item.type === "counter_accepted" ? "¡Tu contraoferta fue aceptada!" :
+                           item.type === "vehicle_sold" ? "Auto marcado como vendido" :
+                           item.type === "deal_canceled" ? "Acuerdo cancelado" :
+                           "Nueva oferta recibida"}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+                          {item.type === "counter_received"
+                            ? `El vendedor contraofertó ${amt} por ${vs.brand} ${vs.model}`
+                            : item.type === "vehicle_sold"
+                            ? `${vs.brand} ${vs.model} fue marcado como vendido`
+                            : item.type === "deal_canceled"
+                            ? `El acuerdo por ${vs.brand} ${vs.model} fue cancelado`
+                            : item.type === "offer_accepted" || item.type === "counter_accepted"
+                            ? `${amt} · ${vs.brand} ${vs.model}`
+                            : `${buyerName} ofertó ${amt} por tu ${vs.brand} ${vs.model}`}
+                        </Text>
+                        {item.createdAt?.seconds && (
+                          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                            {new Date(item.createdAt.seconds * 1000).toLocaleDateString("es-AR")}
+                          </Text>
+                        )}
+                      </View>
+                      {!item.read && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#10B981" }} />}
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {ratingReminders.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    onPress={() => handleRatingReminderPress(item)}
+                    style={{ backgroundColor: theme.card, padding: 16, marginBottom: 1, flexDirection: "row", alignItems: "center", opacity: item.read ? 0.7 : 1 }}
                   >
-                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.background, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
+                      <Ionicons name="star" size={24} color={theme.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontWeight: "600", fontSize: 16 }}>
+                        {item.title || "Calificá tu experiencia"}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 14 }}>
+                        {item.message || "Ayudanos calificando al vendedor de tu última compra."}
+                      </Text>
+                      {item.createdAt?.seconds && (
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
+                          {new Date(item.createdAt.seconds * 1000).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+                    {!item.read && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.accent }} />}
+                  </TouchableOpacity>
+                ))}
+
+                {priceAlerts.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    onPress={() => handlePriceAlertPress(item)}
+                    style={{ backgroundColor: theme.card, padding: 16, marginBottom: 1, flexDirection: "row", alignItems: "center", opacity: item.read ? 0.7 : 1 }}
+                  >
+                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: theme.background, alignItems: "center", justifyContent: "center", marginRight: 12 }}>
                       <Ionicons name="pricetag" size={24} color={theme.accent} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: theme.text, fontWeight: '600', fontSize: 16 }}>¡Bajó de precio!</Text>
+                      <Text style={{ color: theme.text, fontWeight: "600", fontSize: 16 }}>¡Bajó de precio!</Text>
                       <Text style={{ color: theme.textMuted, fontSize: 14 }}>
-                         {item.brand} {item.model} bajó a {item.newPrice}
+                        {item.brand} {item.model} bajó a {item.newPrice}
                       </Text>
                       <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
                         {new Date(item.createdAt?.seconds * 1000).toLocaleDateString()}
@@ -364,16 +493,17 @@ export default function NotificationsScreen() {
                     </View>
                     {!item.read && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: theme.accent }} />}
                   </TouchableOpacity>
-                )}
-                ListEmptyComponent={
-                  <View style={{ padding: 32, alignItems: 'center' }}>
+                ))}
+
+                {offerNotifications.length === 0 && ratingReminders.length === 0 && priceAlerts.length === 0 && (
+                  <View style={{ padding: 32, alignItems: "center" }}>
                     <Ionicons name="notifications-off-outline" size={48} color={theme.textMuted} />
-                    <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 16 }}>
-                      No tienes alertas de precio por ahora.
+                    <Text style={{ color: theme.textMuted, textAlign: "center", marginTop: 16 }}>
+                      No tenés alertas por ahora.
                     </Text>
                   </View>
-                }
-              />
+                )}
+              </ScrollView>
             )}
 
             {activeTab === "messages" && (
@@ -385,7 +515,7 @@ export default function NotificationsScreen() {
                   </View>
                 ) : (
                   <FlatList
-                    data={filteredConversations.slice(0, 6)}
+                    data={filteredConversations}
                     keyExtractor={(item) => item.id}
                     showsVerticalScrollIndicator={false}
                     renderItem={({ item }) => {
@@ -442,9 +572,14 @@ export default function NotificationsScreen() {
             {activeTab === "likes" && (
               <>
                 {likesList.length === 0 ? (
-                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
                     <Ionicons name="heart-outline" size={48} color={theme.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
-                    <Text style={{ color: theme.textMuted }}>Todavía no recibiste likes.</Text>
+                    <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 4 }}>
+                      Todavía no recibiste likes.
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
+                      Cuando alguien marque like en tus autos, te vamos a avisar acá.
+                    </Text>
                   </View>
                 ) : (
                   <FlatList
@@ -479,9 +614,14 @@ export default function NotificationsScreen() {
             {activeTab === "matches" && (
               <>
                 {matchesList.length === 0 ? (
-                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                  <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
                     <Ionicons name="git-network-outline" size={48} color={theme.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
-                    <Text style={{ color: theme.textMuted }}>Todavía no tenés matches.</Text>
+                    <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 4 }}>
+                      Todavía no tenés matches.
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
+                      Cuando tengas un match, vas a verlo acá para empezar la conversación.
+                    </Text>
                   </View>
                 ) : (
                   <FlatList

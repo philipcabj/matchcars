@@ -1,4 +1,5 @@
 import { CarCard } from "@/components/cards/carcard";
+import { SkeletonList } from "@/components/SkeletonLoader";
 import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
@@ -7,11 +8,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { shareProfile } from "@/lib/share";
-import type { SaleRecord } from "@/types/commerce";
 import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { addDoc, collection, doc, getDoc, getDocs, increment, limit, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -31,7 +31,13 @@ export default function MyCarsTab() {
   const { theme } = useTheme();
   const { user, profile, refreshTrustLevel } = useAuth();
   const router = useRouter();
+  const { saleVehicleId, saleBuyerId, leadId } = useLocalSearchParams<{
+    saleVehicleId?: string;
+    saleBuyerId?: string;
+    leadId?: string;
+  }>();
   const [loading, setLoading] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(true);
   const [myVehicles, setMyVehicles] = useState<Vehicle[]>([]);
 
   // Alert State
@@ -90,6 +96,12 @@ export default function MyCarsTab() {
   const [isSearchingBuyer, setIsSearchingBuyer] = useState(false);
   const [recentBuyers, setRecentBuyers] = useState<any[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(false);
+  const [leadToSync, setLeadToSync] = useState<{
+    id: string;
+    buyerId?: string;
+  } | null>(null);
+
+  const [activeFilter, setActiveFilter] = useState<"published" | "review" | "rejected" | "sold">("published");
 
   // Calculate quota
   
@@ -133,9 +145,38 @@ export default function MyCarsTab() {
 
   const quotaLimit = getFeaturedLimit();
   const pubLimit = getPublicationLimit();
-  const featuredCount = myVehicles.filter(v => v.isFeatured).length;
-  // Para el límite de publicaciones, contamos todos los vehículos no eliminados
-  const totalVehiclesCount = myVehicles.length;
+  // Only count vehicles whose featured status hasn't expired (7-day window)
+  const featuredCount = myVehicles.filter(v => {
+    if (!v.isFeatured) return false;
+    if (quotaLimit === Infinity) return true; // Dealer plans: unlimited, no expiry concern
+    return getDaysRemaining((v as any).featuredAt) > 0;
+  }).length;
+  const totalVehiclesCount = myVehicles.filter(v => {
+    const status = v.status || "available";
+    if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold") return false;
+    return true;
+  }).length;
+
+  const filteredVehicles = myVehicles.filter((v) => {
+    const status = v.status || "available";
+    if (activeFilter === "published") {
+      if (!v.published) return false;
+      if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold") return false;
+      return true;
+    }
+    if (activeFilter === "review") {
+      if (status === "pending" || status === "pending_review") return true;
+      return false;
+    }
+    if (activeFilter === "rejected") {
+      if (status === "rejected" || status === "rejected_limit" || status === "blocked") return true;
+      return false;
+    }
+    if (activeFilter === "sold") {
+      return status === "sold";
+    }
+    return true;
+  });
 
   const handleToggleFeature = async (vehicle: Vehicle) => {
     if (!vehicle.id) return;
@@ -209,6 +250,22 @@ export default function MyCarsTab() {
     setSaleModalVisible(true);
   };
 
+  useEffect(() => {
+    if (loading) {
+      setShowSkeleton(true);
+    } else {
+      const t = setTimeout(() => setShowSkeleton(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [loading]);
+
+  useEffect(() => {
+    if (!saleVehicleId || !myVehicles.length) return;
+    const veh = myVehicles.find((v) => v.id === saleVehicleId);
+    if (!veh) return;
+    openSaleModal(veh);
+  }, [saleVehicleId, myVehicles]);
+
   const searchBuyers = async (text: string) => {
     setBuyerSearchQuery(text);
     if (text.length < 3) {
@@ -245,6 +302,26 @@ export default function MyCarsTab() {
     setBuyerSearchQuery("");
     setBuyerSearchResults([]);
   };
+
+  useEffect(() => {
+    const preselectBuyer = async () => {
+      if (!saleBuyerId || !saleModalVisible || selectedBuyer || !user) return;
+      try {
+        const buyerDoc = await getDoc(doc(db, "users", saleBuyerId as string));
+        if (buyerDoc.exists()) {
+          const data = { id: buyerDoc.id, ...buyerDoc.data() };
+          setLeadToSync({
+            id: (leadId as string) || "",
+            buyerId: buyerDoc.id,
+          });
+          selectBuyer(data);
+        }
+      } catch (e) {
+        console.error("Error preselecting buyer from params", e);
+      }
+    };
+    preselectBuyer();
+  }, [saleBuyerId, saleModalVisible, selectedBuyer, user, leadId]);
 
   useEffect(() => {
     if (saleModalVisible && user) {
@@ -291,27 +368,69 @@ export default function MyCarsTab() {
 
   const confirmSale = async () => {
     if (!selectedVehicle || !finalPrice || !user) return;
+
+    if (selectedBuyer?.id && selectedBuyer.id === user.uid) {
+      showAlert("Error", "No podés registrarte como comprador de tu propio auto.", "error");
+      return;
+    }
     setSubmittingSale(true);
     try {
-      // 1. Create Sale Record
-      const saleData: Omit<SaleRecord, "id"> = {
+      const vehicleSnapshot: any = {
+        brand: selectedVehicle.brand || "Desconocido",
+        model: selectedVehicle.model || "Desconocido",
+        year:
+          typeof selectedVehicle.year === "string"
+            ? parseInt(selectedVehicle.year) || 0
+            : selectedVehicle.year || 0,
+      };
+      if (selectedVehicle.coverImage) {
+        vehicleSnapshot.coverImage = selectedVehicle.coverImage;
+      }
+
+      const saleData: any = {
         vehicleId: selectedVehicle.id,
         sellerId: user.uid,
         sellerName: user.displayName || user.email || "Vendedor",
-        buyerId: selectedBuyer?.id || undefined,
-        buyerName: selectedBuyer ? buyerName : (buyerSearchQuery || "Comprador Externo"),
+        buyerName: selectedBuyer ? buyerName : buyerSearchQuery || "Comprador Externo",
         finalPrice: parseFloat(finalPrice) || 0,
         currency: (selectedVehicle.currency as "ARS" | "USD") || "USD",
         soldAt: serverTimestamp(),
         source: selectedBuyer ? "matchcars" : "external",
-        vehicleSnapshot: {
-            brand: selectedVehicle.brand || "Desconocido",
-            model: selectedVehicle.model || "Desconocido",
-            year: typeof selectedVehicle.year === 'string' ? parseInt(selectedVehicle.year) || 0 : selectedVehicle.year || 0,
-            coverImage: selectedVehicle.coverImage
-        }
+        vehicleSnapshot,
       };
-      await addDoc(collection(db, "sales"), saleData);
+
+      if (selectedBuyer?.id) {
+        saleData.buyerId = selectedBuyer.id;
+      }
+
+      // ID = vehicleId → garantiza un único documento de venta por vehículo, sin duplicados
+      const saleDocId = selectedVehicle.id;
+      await setDoc(doc(db, "sales", saleDocId), saleData, { merge: true });
+
+      try {
+        if (saleData.buyerId && saleData.source === "matchcars") {
+          const notifRef = doc(collection(db, "users", saleData.buyerId, "rating_notifications"));
+          await setDoc(notifRef, {
+            type: "rate_seller",
+            title: "Calificá tu experiencia",
+            message: `Contanos cómo fue la compra de tu ${vehicleSnapshot.brand} ${vehicleSnapshot.model}.`,
+            saleId: saleDocId,
+            sellerId: saleData.sellerId,
+            sellerName: saleData.sellerName,
+            vehicleId: saleData.vehicleId,
+            vehicle: {
+              brand: vehicleSnapshot.brand,
+              model: vehicleSnapshot.model,
+              year: vehicleSnapshot.year,
+              coverImage: vehicleSnapshot.coverImage || null
+            },
+            read: false,
+            createdAt: serverTimestamp()
+          });
+        }
+      } catch (e) {
+        console.error("Error creating rating notification", e);
+      }
 
       // 2. Update Vehicle Status
       const vehicleRef = doc(db, "vehicles", selectedVehicle.id);
@@ -320,6 +439,25 @@ export default function MyCarsTab() {
         published: false,
         soldAt: serverTimestamp()
       });
+
+      // 2b. Sync lead (if coming from CRM)
+      try {
+        if (leadToSync?.id) {
+          const priceNum = parseFloat(finalPrice);
+          const dealPrice = isNaN(priceNum) ? undefined : priceNum;
+          const currency = (selectedVehicle.currency as "ARS" | "USD") || "USD";
+          const ref = doc(db, "leads", leadToSync.id);
+          const updates: any = {
+            status: "won",
+            wonAt: serverTimestamp(),
+          };
+          if (dealPrice && dealPrice > 0) updates.dealPrice = dealPrice;
+          updates.dealCurrency = currency;
+          await updateDoc(ref, updates);
+        }
+      } catch (e) {
+        console.error("Error syncing lead after sale", e);
+      }
 
       // 3. Update User Stats
       const userRef = doc(db, "users", user.uid);
@@ -352,14 +490,15 @@ export default function MyCarsTab() {
       const items: Vehicle[] = [];
       snap.forEach((doc) => {
         const data = doc.data() as Vehicle;
-        // Filter out rejected or deleted vehicles from view
-        if (data.status === 'rejected' || data.status === 'deleted') return;
+        if (data.status === 'deleted') return;
         items.push({ ...data, id: doc.id });
       });
       // Sort: Pending first, then Active, then Sold
       items.sort((a, b) => {
-          if (a.status === 'pending' && b.status !== 'pending') return -1;
-          if (b.status === 'pending' && a.status !== 'pending') return 1;
+          const aPending = a.status === 'pending' || a.status === 'pending_review';
+          const bPending = b.status === 'pending' || b.status === 'pending_review';
+          if (aPending && !bPending) return -1;
+          if (bPending && !aPending) return 1;
           if (a.status === 'sold' && b.status !== 'sold') return 1;
           if (b.status === 'sold' && a.status !== 'sold') return -1;
           // Then by date
@@ -375,7 +514,7 @@ export default function MyCarsTab() {
 
   if (!user) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1, backgroundColor: theme.background }}>
         <WebContainer>
         <Header />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -397,7 +536,7 @@ export default function MyCarsTab() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={{ flex: 1, backgroundColor: theme.background }}>
       <CustomAlert
         visible={alertVisible}
         title={alertConfig.title}
@@ -472,54 +611,177 @@ export default function MyCarsTab() {
              </View>
         </View>
 
-        {loading ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={theme.accent} />
-          </View>
-        ) : myVehicles.length === 0 ? (
+        <View style={{ flexDirection: "row", marginBottom: 12, backgroundColor: theme.card, borderRadius: 999, padding: 4, borderWidth: 1, borderColor: theme.inputBackground }}>
+          <TouchableOpacity
+            onPress={() => setActiveFilter("published")}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: activeFilter === "published" ? theme.accent : "transparent",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ color: activeFilter === "published" ? "#FFF" : theme.text, fontSize: 12, fontWeight: "700" }}>
+              Publicados
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveFilter("review")}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: activeFilter === "review" ? theme.accent : "transparent",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ color: activeFilter === "review" ? "#FFF" : theme.text, fontSize: 12, fontWeight: "700" }}>
+              En revisión
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveFilter("rejected")}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: activeFilter === "rejected" ? theme.accent : "transparent",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ color: activeFilter === "rejected" ? "#FFF" : theme.text, fontSize: 12, fontWeight: "700" }}>
+              Rechazados
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveFilter("sold")}
+            style={{
+              flex: 1,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: activeFilter === "sold" ? theme.accent : "transparent",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <Text style={{ color: activeFilter === "sold" ? "#FFF" : theme.text, fontSize: 12, fontWeight: "700" }}>
+              Vendidos
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {showSkeleton ? (
+          <SkeletonList count={4} />
+        ) : filteredVehicles.length === 0 ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 20 }}>
              <Ionicons name="car-sport-outline" size={48} color={theme.textMuted} />
-             <Text style={{ color: theme.textMuted, marginTop: 12, fontSize: 16, textAlign: "center" }}>Todavía no publicaste ningún auto.</Text>
+             <Text style={{ color: theme.text, marginTop: 12, fontSize: 16, textAlign: "center", fontWeight: "600" }}>
+               Todavía no publicaste ningún auto.
+             </Text>
+             <Text style={{ color: theme.textMuted, marginTop: 8, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
+               Publicar es gratis y te ayudamos a llegar a más compradores interesados.
+             </Text>
           </View>
         ) : (
           <FlatList
             style={{ marginTop: 12, flex: 1 }}
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
-            data={myVehicles}
+            data={filteredVehicles}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <View style={{ marginBottom: 16 }}>
-                <CarCard 
-                  vehicle={item} 
-                  hideLike 
-                  showEdit 
-                  showMetrics={!!(profile?.plan && profile.plan !== 'free')} 
-                  showPriceAnalysis={!!(profile?.plan && ['pro_plus', 'pro_dealer'].includes(profile.plan))}
+              <View style={{ marginBottom: 12 }}>
+                <CarCard
+                  vehicle={item}
+                  hideLike
+                  showEdit
+                  showMetrics={item.published && !!(profile?.plan && profile.plan !== 'free')}
+                  showPriceAnalysis={item.published && !!(profile?.plan && ['pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => profile.plan.includes(p)))}
                 />
+                {/* Stats row */}
+                {item.published && item.status === "available" && (
+                  <View style={{ flexDirection: "row", backgroundColor: theme.card, marginHorizontal: 0, marginTop: -4, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, paddingVertical: 8, paddingHorizontal: 16, gap: 20, borderTopWidth: 1, borderTopColor: theme.background }}>
+                    {[
+                      { icon: "eye-outline", value: (item as any).views ?? 0, label: "vistas" },
+                      { icon: "heart-outline", value: item.likesCount ?? 0, label: "likes" },
+                      { icon: "pricetag-outline", value: (item as any).offerCount ?? 0, label: "ofertas" },
+                    ].map(s => (
+                      <View key={s.label} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Ionicons name={s.icon as any} size={14} color={theme.textMuted} />
+                        <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>{s.value}</Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>{s.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
 
                 {/* Status Indicators */}
-                {!item.published && item.status === "pending" && (
-                   <View style={{ marginTop: 4, marginBottom: 10, backgroundColor: "#F59E0B", padding: 10, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+                {!item.published && (item.status === "pending" || item.status === "pending_review") && (
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: "#F59E0B", padding: 10, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
                       <Ionicons name="time-outline" size={20} color="#FFF" />
                       <Text style={{ color: "#FFF", fontWeight: "700" }}>Pendiente de Aprobación</Text>
                    </View>
                 )}
                 
                 {!item.published && item.status === "rejected" && (
-                   <View style={{ marginTop: 4, marginBottom: 10, backgroundColor: "#EF4444", padding: 10, borderRadius: 12, alignItems: "center", justifyContent: "center" }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                        <Ionicons name="alert-circle-outline" size={20} color="#FFF" />
-                        <Text style={{ color: "#FFF", fontWeight: "700" }}>Publicación Rechazada</Text>
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: "#EF4444", padding: 10, borderRadius: 12 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                          <Ionicons name="alert-circle-outline" size={20} color="#FFF" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: "#FFF", fontWeight: "700" }}>Publicación rechazada</Text>
+                            {item.rejectionReason ? (
+                              <Text style={{ color: "#FFF", marginTop: 2, fontSize: 13 }}>
+                                Motivo: {item.rejectionReason}
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => {
+                            router.push({
+                              pathname: "/car/[id]" as any,
+                              params: { id: item.id, edit: "true" },
+                            });
+                          }}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 999,
+                            backgroundColor: "#FFF"
+                          }}
+                        >
+                          <Text style={{ color: "#EF4444", fontWeight: "700", fontSize: 13 }}>Corregir</Text>
+                        </TouchableOpacity>
                       </View>
-                      {item.rejectionReason ? (
-                        <Text style={{ color: "#FFF", marginTop: 4, textAlign: "center", fontSize: 13 }}>
-                          Motivo: {item.rejectionReason}
-                        </Text>
-                      ) : null}
+                   </View>
+                )}
+                {!item.published && item.status === "rejected_limit" && (
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: "#F97316", padding: 10, borderRadius: 12 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                          <Ionicons name="lock-closed-outline" size={20} color="#FFF" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: "#FFF", fontWeight: "700" }}>Límite de plan alcanzado</Text>
+                            <Text style={{ color: "#FFF", fontSize: 12, marginTop: 2 }}>
+                              {item.rejectedReason || "Actualizá tu plan para publicar más autos."}
+                            </Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => router.push("/(screens)/subscribe")}
+                          style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: "#FFF" }}
+                        >
+                          <Text style={{ color: "#F97316", fontWeight: "700", fontSize: 13 }}>Mejorar plan</Text>
+                        </TouchableOpacity>
+                      </View>
                    </View>
                 )}
                 {!item.published && item.status === "blocked" && (
-                   <View style={{ marginTop: 4, marginBottom: 10, backgroundColor: "#EF4444", padding: 10, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: "#EF4444", padding: 10, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
                       <Ionicons name="ban-outline" size={20} color="#FFF" />
                       <Text style={{ color: "#FFF", fontWeight: "700" }}>Bloqueado por Administración</Text>
                    </View>
@@ -532,8 +794,8 @@ export default function MyCarsTab() {
                     alignItems: "center", 
                     justifyContent: "space-between", 
                     backgroundColor: theme.card, 
-                    marginTop: -10, 
-                    marginBottom: 10,
+                    marginTop: 4, 
+                    marginBottom: 8,
                     padding: 10,
                     borderBottomLeftRadius: 14,
                     borderBottomRightRadius: 14,
@@ -541,12 +803,20 @@ export default function MyCarsTab() {
                     borderTopColor: theme.background
                   }}>
                     <View>
-                        <Text style={{ color: theme.text, fontSize: 12 }}>
-                        {item.isFeatured ? "🌟 Destacado activo" : "☆ Destacar publicación"}
+                        <Text style={{ color: item.isFeatured && getDaysRemaining(item.featuredAt) === 0 ? "#FF6B35" : theme.text, fontSize: 12 }}>
+                        {item.isFeatured
+                            ? getDaysRemaining(item.featuredAt) === 0
+                                ? "⚠️ Destacado expirado"
+                                : "🌟 Destacado activo"
+                            : "☆ Destacar publicación"}
                         </Text>
                         {item.isFeatured && (
-                            <Text style={{ color: theme.textMuted, fontSize: 10, marginTop: 2 }}>
-                                Quedan {getDaysRemaining(item.featuredAt)} días
+                            <Text style={{ color: getDaysRemaining(item.featuredAt) === 0 ? "#FF6B35" : getDaysRemaining(item.featuredAt) <= 1 ? "#FFA500" : theme.textMuted, fontSize: 10, marginTop: 2 }}>
+                                {getDaysRemaining(item.featuredAt) === 0
+                                    ? "Renovalo para seguir destacado"
+                                    : getDaysRemaining(item.featuredAt) === 1
+                                        ? "Vence mañana"
+                                        : `Quedan ${getDaysRemaining(item.featuredAt)} días`}
                             </Text>
                         )}
                     </View>
@@ -570,6 +840,36 @@ export default function MyCarsTab() {
                   </View>
                 )}
 
+                {/* Financing Button */}
+                {item.published && item.status !== "sold" && (
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: "/(screens)/car-financing/[id]" as any, params: { id: item.id } })}
+                    style={{
+                      marginTop: 4,
+                      marginBottom: 4,
+                      backgroundColor: item.financing?.downPayment || item.acceptsFinancing ? "#EFF6FF" : theme.inputBackground,
+                      padding: 10,
+                      borderRadius: 12,
+                      alignItems: "center",
+                      flexDirection: "row",
+                      justifyContent: "center",
+                      gap: 6,
+                      borderWidth: 1,
+                      borderColor: item.financing?.downPayment || item.acceptsFinancing ? "#1D4ED8" : theme.badgeBorder,
+                    }}
+                  >
+                    <Ionicons name="cash-outline" size={16} color={item.financing?.downPayment || item.acceptsFinancing ? "#1D4ED8" : theme.textMuted} />
+                    <Text style={{ color: item.financing?.downPayment || item.acceptsFinancing ? "#1D4ED8" : theme.textMuted, fontWeight: "700", fontSize: 13 }}>
+                      {item.financing?.downPayment || item.acceptsFinancing ? "Editar Financiación" : "Agregar Financiación"}
+                    </Text>
+                    {(item.financing?.downPayment || item.financing?.monthlyPayment) && (
+                      <View style={{ backgroundColor: "#1D4ED8", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "800" }}>ACTIVA</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                )}
+
                 {/* Mark as Sold Button */}
                 {item.published && item.status !== "sold" && (
                   <TouchableOpacity
@@ -582,8 +882,7 @@ export default function MyCarsTab() {
                       alignItems: "center",
                       flexDirection: "row",
                       justifyContent: "center",
-                      gap: 8,
-                      marginBottom: 10
+                      gap: 8
                     }}
                   >
                     <Text style={{ color: "#FFF", fontWeight: "700" }}>🤝 Marcar como Vendido</Text>
@@ -591,7 +890,7 @@ export default function MyCarsTab() {
                 )}
                 
                 {item.status === "sold" && (
-                   <View style={{ marginTop: 4, marginBottom: 10, backgroundColor: theme.card, padding: 10, borderRadius: 12, alignItems: "center" }}>
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: theme.card, padding: 10, borderRadius: 12, alignItems: "center" }}>
                       <Text style={{ color: "#2ecc71", fontWeight: "700" }}>✅ Vendido</Text>
                    </View>
                 )}

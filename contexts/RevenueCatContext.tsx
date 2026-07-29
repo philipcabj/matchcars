@@ -1,5 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useState } from "react";
 import { Platform } from "react-native";
+import { logger } from "@/lib/logger";
 import type {
     CustomerInfo,
     PurchasesOffering,
@@ -16,15 +17,13 @@ if (Platform.OS !== 'web') {
         Purchases = mod.default;
         LOG_LEVEL = mod.LOG_LEVEL;
     } catch (e) {
-        console.warn("RevenueCat module not found", e);
+        logger.warn("RevenueCat module not found", e);
     }
 }
 
-// Configuración de RevenueCat
-// Reemplaza con tus claves reales. Es buena práctica usar variables de entorno.
 const API_KEYS = {
-  apple: "appl_NzHflNAUCeKiobbwhCtXBBIRAyk", 
-  google: "goog_KCNbClBzwAahNywCbmqvcHpiuiM",
+  apple: process.env.EXPO_PUBLIC_REVENUECAT_APPLE_KEY ?? "",
+  google: process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_KEY ?? "",
 };
 
 // Mapeo de Entitlements (Identificadores de permisos en RevenueCat)
@@ -60,50 +59,42 @@ export function RevenueCatProvider({ children }: { children: ReactNode }) {
 
   // 1. Inicializar SDK
   useEffect(() => {
+    if (Platform.OS === 'web') {
+      setIsReady(true);
+      return;
+    }
     const init = async () => {
-      if (Platform.OS === 'web') {
-        setIsReady(true);
-        return;
-      }
-
       try {
-        if (Platform.OS === 'android') {
-          await Purchases.configure({ apiKey: API_KEYS.google });
-        } else if (Platform.OS === 'ios') {
-          await Purchases.configure({ apiKey: API_KEYS.apple });
+        if (!Purchases) throw new Error("react-native-purchases no disponible");
+
+        const apiKey = Platform.OS === 'android' ? API_KEYS.google : API_KEYS.apple;
+        if (!apiKey) throw new Error("API key de RevenueCat no configurada");
+
+        await Purchases.configure({ apiKey });
+
+        if (LOG_LEVEL) {
+          await Purchases.setLogLevel(LOG_LEVEL.DEBUG);
         }
-        setDebugInfo(prev => ({ ...prev, isConfigured: true }));
 
-        // Nivel de logs para debug
-        await Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+        setDebugInfo(prev => ({ ...prev, isConfigured: true, initError: null }));
 
-        // Cargar info inicial
         const info = await Purchases.getCustomerInfo();
         setCustomerInfo(info);
-        
+
         const offerings = await Purchases.getOfferings();
-        setDebugInfo(prev => ({ 
-            ...prev, 
-            allOfferings: Object.keys(offerings.all) 
-        }));
+        const offeringKeys = Object.keys(offerings.all || {});
+        setDebugInfo(prev => ({ ...prev, allOfferings: offeringKeys }));
 
         if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
-            setCurrentOffering(offerings.current);
-        } else {
-             // Si no hay current, intentamos buscar 'default' o el primero disponible para fallback
-             const fallback = offerings.all['default'] || Object.values(offerings.all)[0];
-             if (fallback) {
-                 setCurrentOffering(fallback);
-             }
+          setCurrentOffering(offerings.current);
         }
       } catch (e: any) {
         console.error("Error initializing RevenueCat:", e);
-        setDebugInfo(prev => ({ ...prev, initError: e.message || String(e) }));
+        setDebugInfo(prev => ({ ...prev, initError: e?.message || String(e), isConfigured: false }));
       } finally {
         setIsReady(true);
       }
     };
-
     init();
   }, []);
 
@@ -112,13 +103,14 @@ export function RevenueCatProvider({ children }: { children: ReactNode }) {
     const identifyUser = async () => {
       if (!isReady) return;
       if (Platform.OS === 'web') return; // Skip on web
+      if (!debugInfo.isConfigured || !Purchases) return;
 
       if (user?.uid) {
         try {
           const { customerInfo } = await Purchases.logIn(user.uid);
           setCustomerInfo(customerInfo);
         } catch (e) {
-          console.error("Error logging in to RevenueCat:", e);
+          logger.log("Error logging in to RevenueCat:", e);
         }
       } else {
         // Si no hay usuario (logout), reseteamos o manejamos anónimo
@@ -127,12 +119,12 @@ export function RevenueCatProvider({ children }: { children: ReactNode }) {
             const info = await Purchases.logOut();
             setCustomerInfo(info);
         } catch (e) {
-            console.error("Error logging out from RevenueCat:", e);
+            logger.log("Error logging out from RevenueCat:", e);
         }
       }
     };
     identifyUser();
-  }, [user, isReady]);
+  }, [user, isReady, debugInfo.isConfigured]);
 
   // Helper para verificar entitlement
   const isPro = React.useMemo(() => {
@@ -146,13 +138,16 @@ export function RevenueCatProvider({ children }: { children: ReactNode }) {
       alert("Las compras no están disponibles en la web. Descarga la App.");
       throw new Error("Not supported on web");
     }
+    if (!debugInfo.isConfigured || !Purchases) {
+      throw new Error("RevenueCat no está configurado");
+    }
     try {
       const { customerInfo } = await Purchases.purchasePackage(pack);
       setCustomerInfo(customerInfo);
       return { customerInfo };
     } catch (e: any) {
       if (!e.userCancelled) {
-        console.error("Error purchasing package:", e);
+        logger.log("Error purchasing package:", e);
       }
       throw e;
     }
@@ -161,15 +156,17 @@ export function RevenueCatProvider({ children }: { children: ReactNode }) {
   const restorePurchases = async () => {
     if (Platform.OS === 'web') return;
     try {
+      if (!debugInfo.isConfigured || !Purchases) return;
       const info = await Purchases.restorePurchases();
       setCustomerInfo(info);
     } catch (e) {
-      console.error("Error restoring purchases:", e);
+      logger.log("Error restoring purchases:", e);
     }
   };
 
   const checkTrialOrIntroductoryPriceEligibility = async (productIdentifiers: string[]) => {
     if (Platform.OS === 'web') return {};
+    if (!debugInfo.isConfigured || !Purchases) return {};
     return await Purchases.checkTrialOrIntroductoryPriceEligibility(productIdentifiers);
   };
 

@@ -1,167 +1,314 @@
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
-export type EmailType = "like" | "match" | "message";
+export type EmailType =
+  | "like"
+  | "match"
+  | "message"
+  | "moderation_rejected"
+  | "vehicle_approved"
+  | "offer_received"
+  | "offer_accepted"
+  | "counter_accepted"
+  | "counter_received"
+  | "vehicle_sold"
+  | "deal_canceled"
+  | "price_drop";
 
 interface EmailData {
   recipientUid: string;
-  recipientName?: string; // Optional, for personalization
+  recipientName?: string;
   senderName: string;
-  senderUid?: string; // Required for deep linking to chat
+  senderUid?: string;
   subject: string;
-  // Specific fields
-  carModel?: string; // For like/match
-  messagePreview?: string; // For message
-  ctaLink?: string; // Deep link override
+  carModel?: string;
+  messagePreview?: string;
+  ctaLink?: string;
+  amount?: string;
+  newPrice?: string;
 }
 
-const LOGO_URL = "https://matchcars.app/logo.png";
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
-const APP_NAME = "Matchcars";
+const APP_NAME = "MatchCars";
 const ACCENT_COLOR = "#00A3FF";
+const APP_URL = "https://matchcars.app";
 const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
-const APPLE_SEARCH_URL = "https://apps.apple.com/app/id6757968664";
+const APPLE_URL = "https://apps.apple.com/app/id6757968664";
 
-const getHtmlTemplate = (title: string, body: string, ctaText: string, ctaLink: string) => {
-  return `
-<!DOCTYPE html>
-<html>
+const buildTemplate = (
+  icon: string,
+  title: string,
+  body: string,
+  ctaText: string,
+  ctaLink: string
+): string => `<!DOCTYPE html>
+<html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .header { background-color: #0E1117; padding: 20px; text-align: center; }
-    .header img { max-width: 120px; height: auto; display: block; margin: 0 auto; }
-    .header h1 { color: #ffffff; font-size: 24px; margin: 0; display: inline-block; vertical-align: middle; }
-    .content { padding: 30px 20px; text-align: center; }
-    .content h2 { color: #0E1117; font-size: 20px; margin-bottom: 16px; }
-    .content p { font-size: 16px; line-height: 1.5; color: #555555; margin-bottom: 24px; }
-    .btn { display: inline-block; background-color: ${ACCENT_COLOR}; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 999px; font-weight: bold; font-size: 16px; margin-bottom: 24px; }
-    .footer { background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #999999; }
-    .store-links { margin-top: 0px; display: flex; justify-content: center; align-items: center; gap: 16px; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <!-- Logo con enlace a la app/match -->
-      <a href="${ctaLink}" style="text-decoration: none;">
-        <img src="${LOGO_URL}" alt="${APP_NAME}" />
-      </a>
-    </div>
-    <div class="content">
-      <h2>${title}</h2>
-      <p>${body}</p>
-      <a href="${ctaLink}" class="btn">${ctaText}</a>
-      <div class="store-links">
-        <a href="${APPLE_SEARCH_URL}" style="display: inline-block; text-decoration: none;">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Download_on_the_App_Store_Badge.svg/320px-Download_on_the_App_Store_Badge.svg.png" alt="App Store" style="height: 40px; width: auto; display: block;" />
-        </a>
-        <a href="${PLAY_URL}" style="display: inline-block; text-decoration: none;">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Google_Play_Store_badge_EN.svg/320px-Google_Play_Store_badge_EN.svg.png" alt="Google Play" style="height: 54px; width: auto; display: block; margin-top: -8px;" />
-        </a>
-      </div>
-    </div>
-    <div class="footer">
-      <p>Estás recibiendo este correo porque tenés una cuenta en ${APP_NAME}.</p>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#333;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:560px;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#0E1117;padding:24px 32px;text-align:center;">
+            <span style="font-size:26px;font-weight:800;color:#fff;letter-spacing:-0.5px;">
+              Match<span style="color:${ACCENT_COLOR};">Cars</span>
+            </span>
+          </td>
+        </tr>
+
+        <!-- Icon -->
+        <tr>
+          <td style="padding:36px 32px 0;text-align:center;">
+            <div style="display:inline-block;background:#f0f7ff;border-radius:50%;width:64px;height:64px;line-height:64px;font-size:30px;text-align:center;">
+              ${icon}
+            </div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:24px 40px 8px;text-align:center;">
+            <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#0E1117;">${title}</h1>
+            <p style="margin:0;font-size:15px;line-height:1.6;color:#555;">${body}</p>
+          </td>
+        </tr>
+
+        <!-- CTA -->
+        <tr>
+          <td style="padding:28px 40px 36px;text-align:center;">
+            <a href="${ctaLink}"
+               style="display:inline-block;background:${ACCENT_COLOR};color:#fff;text-decoration:none;padding:14px 32px;border-radius:50px;font-weight:700;font-size:15px;">
+              ${ctaText}
+            </a>
+          </td>
+        </tr>
+
+        <!-- Divider -->
+        <tr>
+          <td style="padding:0 40px;">
+            <hr style="border:none;border-top:1px solid #eee;margin:0;" />
+          </td>
+        </tr>
+
+        <!-- App links -->
+        <tr>
+          <td style="padding:24px 40px;text-align:center;">
+            <p style="margin:0 0 12px;font-size:13px;color:#888;">También podés abrir la app desde acá:</p>
+            <a href="${APPLE_URL}" style="display:inline-block;margin:0 6px;color:${ACCENT_COLOR};font-size:13px;font-weight:600;text-decoration:none;">📱 App Store</a>
+            <span style="color:#ccc;">·</span>
+            <a href="${PLAY_URL}" style="display:inline-block;margin:0 6px;color:${ACCENT_COLOR};font-size:13px;font-weight:600;text-decoration:none;">🤖 Google Play</a>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f8f9fa;padding:20px 40px;text-align:center;border-top:1px solid #eee;">
+            <p style="margin:0;font-size:12px;color:#aaa;line-height:1.5;">
+              Recibís este correo porque tenés una cuenta en ${APP_NAME}.<br/>
+              <a href="${APP_URL}" style="color:#aaa;text-decoration:underline;">${APP_URL}</a>
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
 </body>
-</html>
-  `;
-};
+</html>`;
 
 export const sendNotificationEmail = async (type: EmailType, data: EmailData) => {
   try {
-    let html = "";
+    const ctaLink = data.ctaLink ?? APP_URL;
     let subject = data.subject;
-    
-    // Use correct store links
-    const getStoreLink = () => {
-        // You can return a universal link (e.g. your website that redirects) or just the App Store link for now
-        // Ideally, use a Firebase Dynamic Link or a universal link service
-        return APPLE_SEARCH_URL;
-    };
-
-    // Calculate deep link for main CTA (Logo and Button)
-    // If data.ctaLink is provided, use it. Otherwise, use the website URL which serves as the Universal Link base
-    const getDeepLink = () => {
-        if (data.ctaLink) return data.ctaLink;
-        return "https://matchcars.app";
-    };
-
-    let ctaLink = getDeepLink();
-
-    // Base styles
-    const containerStyle = "max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;";
-    const headerStyle = "background-color: #0E1117; padding: 20px; text-align: center;";
-    const contentStyle = "padding: 30px 20px; text-align: center; color: #333;";
-    const buttonStyle = `display: inline-block; background-color: ${ACCENT_COLOR}; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 999px; font-weight: bold; font-size: 16px; margin-top: 20px;`;
-    const footerStyle = "background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #999999;";
-
-    const ctaText = "Abrir Matchcars";
+    let html = "";
 
     switch (type) {
-      case "like":
-        html = getHtmlTemplate(
+      case "like": {
+        const sender = escapeHtml(data.senderName);
+        const car = escapeHtml(data.carModel || "tu auto");
+        subject = subject || `${data.senderName} le dio Like a ${data.carModel || "tu auto"}`;
+        html = buildTemplate(
+          "❤️",
           "¡Tenés un nuevo Like!",
-          `<strong>${data.senderName}</strong> le dio like a tu <strong>${data.carModel || "auto"}</strong>. ¡Entrá a la app para ver si hay Match!`,
-          ctaText,
+          `<strong>${sender}</strong> le dio like a tu <strong>${car}</strong>.<br/>Entrá a la app para ver si hay un Match.`,
+          "Ver en MatchCars",
           ctaLink
         );
         break;
-      case "match":
-        html = getHtmlTemplate(
-          "¡Es un Match! 🚗💨",
-          `¡Buenas noticias! Hacés match con <strong>${data.senderName}</strong>. Ambos se dieron like. ¡Hablen ahora para cerrar el trato!`,
-          ctaText,
+      }
+
+      case "match": {
+        const sender = escapeHtml(data.senderName);
+        const car = data.carModel ? escapeHtml(data.carModel) : null;
+        subject = subject || `¡Match con ${data.senderName}!`;
+        html = buildTemplate(
+          "🤝",
+          "¡Es un Match!",
+          `¡Buenas noticias! Vos y <strong>${sender}</strong>${car ? ` se dieron like en el <strong>${car}</strong>` : " se dieron like"}.<br/>Ahora pueden hablar directamente para cerrar el trato.`,
+          "Ir al chat",
           ctaLink
         );
         break;
-      case "message":
-        const msgTitle = data.carModel ? `Consulta por ${data.carModel}` : "Nuevo Mensaje";
-        const msgBody = data.carModel 
-          ? `<strong>${data.senderName}</strong> te envió un mensaje sobre <strong>${data.carModel}</strong>: <br/><br/><em>"${data.messagePreview}"</em>`
-          : `<strong>${data.senderName}</strong> te envió un mensaje: <br/><br/><em>"${data.messagePreview}"</em>`;
-        
-        html = getHtmlTemplate(
-          msgTitle,
-          msgBody,
-          ctaText,
+      }
+
+      case "message": {
+        const sender = escapeHtml(data.senderName);
+        const car = data.carModel ? escapeHtml(data.carModel) : null;
+        const preview = data.messagePreview ? escapeHtml(data.messagePreview) : "";
+        subject = subject || `Nuevo mensaje de ${data.senderName}`;
+        const bodyText = car
+          ? `<strong>${sender}</strong> te escribió sobre <strong>${car}</strong>:<br/><br/><em style="color:#444;">"${preview}"</em>`
+          : `<strong>${sender}</strong> te envió un mensaje:<br/><br/><em style="color:#444;">"${preview}"</em>`;
+        html = buildTemplate(
+          "💬",
+          car ? `Consulta por ${car}` : "Nuevo mensaje",
+          bodyText,
+          "Responder",
           ctaLink
         );
         break;
+      }
+
+      case "moderation_rejected": {
+        const car = data.carModel ? escapeHtml(data.carModel) : "tu publicación";
+        const reason = data.messagePreview ? escapeHtml(data.messagePreview) : null;
+        subject = subject || `Tu publicación fue rechazada`;
+        html = buildTemplate(
+          "⚠️",
+          "Publicación rechazada",
+          `Un moderador revisó <strong>${car}</strong> y la marcó como rechazada para que la corrijas.${reason ? `<br/><br/>Motivo: <em>"${reason}"</em>` : ""}<br/><br/>Corregí los datos y volvé a publicarla.`,
+          "Editar publicación",
+          ctaLink
+        );
+        break;
+      }
+
+      case "vehicle_approved": {
+        const car = data.carModel ? escapeHtml(data.carModel) : "Tu publicación";
+        subject = subject || `¡${data.carModel || "Tu publicación"} ya está publicado!`;
+        html = buildTemplate(
+          "✅",
+          "¡Tu publicación ya está activa!",
+          `Revisamos <strong>${car}</strong> y ya está publicado. A partir de ahora es visible para todos los compradores en MatchCars.`,
+          "Ver mi publicación",
+          ctaLink
+        );
+        break;
+      }
+
+      case "offer_received": {
+        const sender = escapeHtml(data.senderName);
+        const car = escapeHtml(data.carModel || "tu auto");
+        const amount = data.amount ? escapeHtml(data.amount) : "";
+        subject = subject || `${data.senderName} ofertó por ${data.carModel || "tu auto"}`;
+        html = buildTemplate(
+          "💰",
+          "¡Recibiste una oferta!",
+          `<strong>${sender}</strong> ofertó${amount ? ` <strong>${amount}</strong>` : ""} por tu <strong>${car}</strong>.<br/>Entrá a la app para responder.`,
+          "Ver oferta",
+          ctaLink
+        );
+        break;
+      }
+
+      case "offer_accepted":
+      case "counter_accepted": {
+        const car = escapeHtml(data.carModel || "el auto");
+        const amount = data.amount ? escapeHtml(data.amount) : "";
+        subject = subject || `¡Tu oferta por ${data.carModel || "el auto"} fue aceptada!`;
+        html = buildTemplate(
+          "🤝",
+          type === "offer_accepted" ? "¡Tu oferta fue aceptada!" : "¡Tu contraoferta fue aceptada!",
+          `Llegaron a un acuerdo${amount ? ` por <strong>${amount}</strong>` : ""} por el <strong>${car}</strong>.<br/>Coordiná los detalles finales por el chat.`,
+          "Ir al chat",
+          ctaLink
+        );
+        break;
+      }
+
+      case "counter_received": {
+        const sender = escapeHtml(data.senderName);
+        const car = escapeHtml(data.carModel || "el auto");
+        const amount = data.amount ? escapeHtml(data.amount) : "";
+        subject = subject || `Te hicieron una contraoferta por ${data.carModel || "el auto"}`;
+        html = buildTemplate(
+          "🔄",
+          "Te hicieron una contraoferta",
+          `<strong>${sender}</strong> te contraofertó${amount ? ` <strong>${amount}</strong>` : ""} por el <strong>${car}</strong>.<br/>Entrá a la app para responder.`,
+          "Ver contraoferta",
+          ctaLink
+        );
+        break;
+      }
+
+      case "vehicle_sold": {
+        const car = escapeHtml(data.carModel || "el auto");
+        subject = subject || `¡Venta confirmada! ${data.carModel || ""}`.trim();
+        html = buildTemplate(
+          "🎉",
+          "¡Venta confirmada!",
+          `El vendedor marcó el <strong>${car}</strong> como vendido.<br/>¡Felicitaciones por tu compra!`,
+          "Ver detalles",
+          ctaLink
+        );
+        break;
+      }
+
+      case "deal_canceled": {
+        const car = escapeHtml(data.carModel || "el auto");
+        subject = subject || `El acuerdo por ${data.carModel || "el auto"} fue cancelado`;
+        html = buildTemplate(
+          "⚠️",
+          "Acuerdo cancelado",
+          `El acuerdo por el <strong>${car}</strong> fue cancelado por la otra parte.`,
+          "Ver chat",
+          ctaLink
+        );
+        break;
+      }
+
+      case "price_drop": {
+        const car = escapeHtml(data.carModel || "un auto que te interesa");
+        const newPrice = data.newPrice ? escapeHtml(data.newPrice) : "";
+        subject = subject || `¡Bajó de precio! ${data.carModel || ""}`.trim();
+        html = buildTemplate(
+          "🏷️",
+          "¡Bajó de precio!",
+          `El <strong>${car}</strong> que te interesa bajó${newPrice ? ` a <strong>${newPrice}</strong>` : " de precio"}.`,
+          "Ver publicación",
+          ctaLink
+        );
+        break;
+      }
     }
 
-    // Try to fetch recipient email explicitly
-    let recipientEmail = "";
-    try {
-        const userSnap = await getDoc(doc(db, "users", data.recipientUid));
-        if (userSnap.exists()) {
-            recipientEmail = userSnap.data().email || "";
-        }
-    } catch (e) {
-        console.log("Error fetching user email:", e);
-    }
+    // Fetch recipient email
+    const userSnap = await getDoc(doc(db, "users", data.recipientUid));
+    if (!userSnap.exists()) return;
+    const recipientEmail: string = userSnap.data().email || "";
+    if (!recipientEmail) return;
 
-    const mailData: any = {
+    await addDoc(collection(db, "mail"), {
+      to: [recipientEmail],
       toUids: [data.recipientUid],
-      message: {
-        subject: subject,
-        html: html,
-      },
-      from: "Matchcars <noreply@matchcars.app>",
+      from: `${APP_NAME} <noreply@matchcars.app>`,
+      message: { subject, html },
       createdAt: new Date(),
-    };
-
-    if (recipientEmail) {
-        mailData.to = [recipientEmail];
-    }
-
-    await addDoc(collection(db, "mail"), mailData);
-    console.log(`Email notification (${type}) sent to ${data.recipientUid} (email: ${recipientEmail || "unknown"})`);
+    });
   } catch (error) {
     console.error("Error sending email notification:", error);
   }

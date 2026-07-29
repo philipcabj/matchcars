@@ -2,6 +2,8 @@ import { WebContainer } from '@/components/WebContainer';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { db, storage } from '@/lib/firebase';
+import { logger } from '@/lib/logger';
+import { isDealerPlan } from '@/lib/planChecks';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
@@ -34,6 +36,27 @@ export default function BulkImportScreen() {
   const { user, profile } = useAuth();
   const { theme } = useTheme();
   const router = useRouter();
+
+  // Security check: Only Dealer plans and admins
+  const hasAccess = isDealerPlan(profile?.plan) || profile?.role === 'admin';
+  
+  if (!hasAccess) {
+       return (
+           <WebContainer>
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Ionicons name="lock-closed" size={64} color={theme.textMuted} />
+                  <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Función exclusiva para Agencias</Text>
+                  <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 10 }}>La carga masiva por CSV está disponible únicamente para planes Dealer y Dealer Plus.</Text>
+                  <TouchableOpacity 
+                    onPress={() => router.push('/(screens)/subscribe')}
+                    style={{ backgroundColor: theme.primary, padding: 15, borderRadius: 10, marginTop: 20 }}
+                  >
+                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver Planes Dealer</Text>
+                  </TouchableOpacity>
+              </View>
+          </WebContainer>
+      );
+  }
   
   const [csvFile, setCsvFile] = useState<any>(null);
   const [parsedData, setParsedData] = useState<ImportedVehicle[]>([]);
@@ -65,7 +88,7 @@ export default function BulkImportScreen() {
   const processResults = (results: any) => {
       
       if (results.errors && results.errors.length > 0) {
-        console.warn("CSV Errors:", results.errors);
+        logger.warn("CSV Errors:", results.errors);
       }
 
       const vehicles: ImportedVehicle[] = results.data.map((row: any) => {
@@ -85,7 +108,7 @@ export default function BulkImportScreen() {
          };
       }).filter((v: any) => {
         const isValid = v.brand && v.model;
-        if (!isValid) console.log("Invalid vehicle row:", v);
+        if (!isValid) logger.log("Invalid vehicle row:", v);
         return isValid;
       }); 
 
@@ -232,7 +255,9 @@ export default function BulkImportScreen() {
 
         // Determine correct location from Profile (Agency Address)
         let locationStr = 'Ubicación a consultar';
-        if (profile?.businessAddress) {
+        if (profile?.address) {
+            locationStr = profile.address;
+        } else if (profile?.businessAddress) {
             locationStr = profile.businessAddress;
         }
 
@@ -247,8 +272,8 @@ export default function BulkImportScreen() {
             userImage: profile?.photoURL || user.photoURL || '',
             userEmail: user.email,
             location: locationStr, 
-            city: locationStr, // Ensure location is set in city
-            province: locationStr, // Ensure location is set in province
+            city: profile?.city || locationStr, 
+            province: profile?.province || locationStr, 
             userPlan: profile?.plan || 'free', 
             // Standardize image fields based on Vehicle type
             coverImage: imageUrls[0] || '',
@@ -256,8 +281,8 @@ export default function BulkImportScreen() {
             images: imageUrls, // Keep for backward compatibility
             category: 'auto', // Default
             createdAt: serverTimestamp(),
-            status: 'pending', // Send to moderation
-            published: false, // Not public yet
+            status: 'pending_review',
+            published: false,
             sold: false,
             likes: [],
             internal_id: id, // Keep it for reference

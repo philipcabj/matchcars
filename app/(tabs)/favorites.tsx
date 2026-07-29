@@ -11,8 +11,9 @@ import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { loadFavoritesCache, saveFavoritesCache } from "@/lib/offlineCache";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, Text, TouchableOpacity, View, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function FavoritesTab() {
@@ -20,9 +21,11 @@ export default function FavoritesTab() {
   const { user, profile } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [favVehicles, setFavVehicles] = useState<Vehicle[]>([]);
   const [likesRemaining, setLikesRemaining] = useState<number>(10);
+  const [refreshing, setRefreshing] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ 
     visible: false, 
     title: "", 
@@ -41,6 +44,23 @@ export default function FavoritesTab() {
   };
 
   // Nota: no usar early return antes de hooks para evitar violar reglas de hooks
+
+  // Seed from cache on mount
+  useEffect(() => {
+    if (!user) return;
+    loadFavoritesCache(user.uid).then((cached) => {
+      if (cached && cached.length > 0) {
+        setFavVehicles(cached);
+        setLoading(false);
+      }
+    });
+  }, [user?.uid]);
+
+  // Persist to cache whenever favVehicles updates
+  useEffect(() => {
+    if (!user || favVehicles.length === 0) return;
+    saveFavoritesCache(user.uid, favVehicles);
+  }, [favVehicles]);
 
   // Suscripción a favoritos del usuario
   useEffect(() => {
@@ -66,6 +86,10 @@ export default function FavoritesTab() {
       });
       setFavoriteIds(ids);
       setLikesRemaining(Math.max(0, 10 - todayCount));
+      setIsOffline(false);
+    }, () => {
+      setIsOffline(true);
+      setLoading(false);
     });
     return () => unsubFav();
   }, [user]);
@@ -183,16 +207,16 @@ export default function FavoritesTab() {
     if (isFav) {
       await deleteDoc(ref);
       try {
-        await updateDoc(vRef, { 
+        await updateDoc(vRef, {
           likedBy: arrayRemove(user.uid),
-          likesCount: increment(-1) 
+          likesCount: increment(-1)
         });
       } catch {
-        // Fallback: intentar sin decrementar si falla
         try {
           await updateDoc(vRef, { likedBy: arrayRemove(user.uid) });
         } catch {}
       }
+      showAlert("Favorito eliminado", "El auto fue quitado de tus favoritos.", "info");
     } else {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -247,6 +271,11 @@ export default function FavoritesTab() {
     }
   };
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 600);
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <WebContainer>
@@ -285,7 +314,7 @@ export default function FavoritesTab() {
               Todavía no tenés favoritos
             </Text>
             <Text style={{ color: theme.textMuted, textAlign: "center", marginBottom: 24, fontSize: 14, lineHeight: 20 }}>
-              Guardá los autos que más te gusten para compararlos o verlos más tarde.
+              Guardá los autos que más te gusten para compararlos o verlos más tarde. Solo vos ves esta lista.
             </Text>
             <TouchableOpacity 
               onPress={() => router.push("/")}
@@ -302,6 +331,13 @@ export default function FavoritesTab() {
             </TouchableOpacity>
           </View>
         ) : (
+          <>
+            {isOffline && (
+              <View style={{ backgroundColor: "#92400e", flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, marginBottom: 10 }}>
+                <Ionicons name="cloud-offline-outline" size={16} color="#fde68a" />
+                <Text style={{ color: "#fde68a", fontSize: 13, flex: 1 }}>Sin conexión — mostrando favoritos guardados</Text>
+              </View>
+            )}
           <FlatList
             data={favVehicles}
             keyExtractor={(item) => item.id}
@@ -313,7 +349,9 @@ export default function FavoritesTab() {
             );
           }}
             contentContainerStyle={{ paddingBottom: 24 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           />
+          </>
         )}
       </View>
       <CustomAlert 

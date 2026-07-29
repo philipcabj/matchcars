@@ -42,8 +42,26 @@ export default function RecentlyViewedScreen() {
         const sorted = viewedIds
             .map(id => allDocs.find(v => v.id === id))
             .filter(v => v !== undefined) as Vehicle[];
-            
-        setVehicles(sorted);
+
+        // Keep only active vehicles (no sold, blocked, rejected, deleted or unpublished)
+        const activeOnly = sorted.filter((v: any) => {
+          const status = v?.status;
+          const published = v?.published;
+          if (
+            status === "sold" ||
+            status === "pending" ||
+            status === "pending_review" ||
+            status === "rejected" ||
+            status === "blocked" ||
+            status === "deleted"
+          ) {
+            return false;
+          }
+          if (published === false) return false;
+          return true;
+        });
+
+        setVehicles(activeOnly);
       } catch (e) {
         console.error(e);
       } finally {

@@ -2,20 +2,25 @@ import { CustomAlert } from "@/components/CustomAlert";
 import type { Theme } from "@/config/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { getAvatarColorFromEmail } from "@/utils/avatarUtils";
 import { getAuthErrorMessage } from "@/utils/firebaseErrors";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+    Image,
+    Keyboard,
     Platform,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { auth, db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -31,35 +36,15 @@ if (Platform.OS !== 'web') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
   } catch {
-    console.log("GoogleSignin module not found. Check if you are running in Expo Go.");
+    logger.log("GoogleSignin module not found. Check if you are running in Expo Go.");
   }
 }
 
 // Necesario para completar el flujo en Expo Go
 WebBrowser.maybeCompleteAuthSession();
 
-// Helper local para color de avatar (mismo criterio que en AuthContext)
-const AVATAR_COLORS = [
-  "#FF6B6B",
-  "#FFB347",
-  "#F9D66B",
-  "#4ECDC4",
-  "#1B9CFC",
-  "#A66DD4",
-  "#FF7F50",
-];
+const appLogo = require("@/assets/images/icon.png");
 
-function getAvatarColorFromEmail(email: string): string {
-  if (!email) return AVATAR_COLORS[0];
-  let sum = 0;
-  for (let i = 0; i < email.length; i++) {
-    sum += email.charCodeAt(i);
-  }
-  const index = sum % AVATAR_COLORS.length;
-  return AVATAR_COLORS[index];
-}
-
-import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 
 export default function LoginScreen() {
   const { theme } = useTheme();
@@ -211,11 +196,19 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.appTitle}>MATCHCARS</Text>
-        <Text style={styles.subtitle}>
-          Iniciá sesión para empezar a matchear autos 🚗
-        </Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.content}>
+          <View style={{ alignItems: "center", marginBottom: 24 }}>
+            <Image
+              source={appLogo}
+              style={{ width: 104, height: 104, borderRadius: 52 }}
+              resizeMode="cover"
+            />
+            <Text style={styles.appTitle}>MATCHCARS</Text>
+            <Text style={styles.subtitle}>
+              Iniciá sesión para empezar a matchear autos 🚗
+            </Text>
+          </View>
 
         {/* Login por email */}
         <View style={styles.form}>
@@ -322,6 +315,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
         */}
       </View>
+      </TouchableWithoutFeedback>
       <CustomAlert
         visible={alertConfig.visible}
         title={alertConfig.title}

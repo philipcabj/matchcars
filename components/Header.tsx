@@ -4,12 +4,14 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import { Modal, Platform, Text, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { db } from "@/lib/firebase";
 
-const iconImage = require('@/assets/images/icono.png');
+const iconImage = require('@/assets/images/icon.png');
 
 export interface HeaderProps {
   title?: string;
@@ -18,18 +20,29 @@ export interface HeaderProps {
   customTitle?: React.ReactNode;
   hideRightOptions?: boolean;
   showHome?: boolean;
+  rightContent?: React.ReactNode;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, customTitle, hideRightOptions, showHome }) => {
+export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, customTitle, hideRightOptions, showHome, rightContent }) => {
   const { theme } = useTheme();
   const { user, profile, logout } = useAuth();
   const router = useRouter();
   const { totalUnreadCount } = useNotifications();
 
-  const [alertConfig, setAlertConfig] = useState({ 
-    visible: false, 
-    title: "", 
-    message: "", 
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [pendingVehiclesCount, setPendingVehiclesCount] = useState(0);
+  const isAdmin = profile?.role === "admin" || profile?.role === "moderator";
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const q = query(collection(db, "vehicles"), where("status", "in", ["pending", "pending_review"]));
+    const unsub = onSnapshot(q, (snap) => { setPendingVehiclesCount(snap.size); }, () => {});
+    return () => unsub();
+  }, [isAdmin]);
+  const [alertConfig, setAlertConfig] = useState({
+    visible: false,
+    title: "",
+    message: "",
     type: "info" as "success" | "error" | "info" | "warning",
     showCancel: false,
     onConfirm: () => {},
@@ -90,14 +103,6 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
     profile?.firstName || profile?.lastName
       ? `${profile?.firstName ?? ""} ${profile?.lastName ?? ""}`.trim()
       : user?.email ?? "";
-
-  const handleAvatarPress = () => {
-    if (!user) {
-      router.push("/login");
-    } else {
-      router.push("/profile");
-    }
-  };
 
   return (
     <View
@@ -187,24 +192,33 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
         )}
       </View>
 
-      {/* DERECHA: Campanita + logout + avatar */}
-      {!hideRightOptions && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => { if (!user) { router.push("/login"); } else { router.push("/(screens)/notifications"); } }}>
+      {/* DERECHA: contenido custom o campanita + logout + avatar */}
+      {rightContent ? (
+        <View style={{ flexDirection: "row", alignItems: "center" }}>{rightContent}</View>
+      ) : !hideRightOptions && (
+        <>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          {/* Campanita */}
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => { if (!user) { router.push("/login"); } else { router.push("/(screens)/notifications"); } }}
+            accessibilityLabel={totalUnreadCount > 0 ? `${totalUnreadCount} notificaciones sin leer` : "Notificaciones"}
+            accessibilityRole="button"
+          >
             <View>
               <Ionicons name="notifications-outline" size={24} color={theme.text} />
               {totalUnreadCount > 0 && (
-                <View style={{ 
-                  position: "absolute", 
-                  top: -6, 
-                  right: -6, 
-                  minWidth: 18, 
-                  height: 18, 
-                  borderRadius: 9, 
-                  backgroundColor: "#FF3B30", 
-                  alignItems: "center", 
+                <View style={{
+                  position: "absolute",
+                  top: -6,
+                  right: -6,
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  backgroundColor: "#FF3B30",
+                  alignItems: "center",
                   justifyContent: "center",
-                  paddingHorizontal: 4
+                  paddingHorizontal: 4,
                 }}>
                   <Text style={{ color: "white", fontSize: 10, fontWeight: "bold" }}>
                     {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
@@ -214,35 +228,15 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
             </View>
           </TouchableOpacity>
 
-          {user && (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
-                showAlert(
-                  "Cerrar sesión",
-                  "¿Seguro que querés salir?",
-                  "info",
-                  true,
-                  () => logout().catch(() => {}),
-                  "Salir",
-                  "Cancelar"
-                );
-              }}
-              style={{
-                backgroundColor: theme.removeButton,
-                borderRadius: 999,
-                paddingVertical: 8,
-                paddingHorizontal: 12,
-              }}
-            >
-              <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>Salir</Text>
-            </TouchableOpacity>
-          )}
-
+          {/* Avatar con dropdown */}
           <TouchableOpacity
-            onPress={handleAvatarPress}
+            onPress={() => user ? setMenuVisible(true) : router.push("/login")}
             activeOpacity={0.8}
-            style={{
+            accessibilityLabel={user ? "Menú de perfil" : "Iniciar sesión"}
+            accessibilityRole="button"
+            style={{ position: "relative" }}
+          >
+            <View style={{
               width: 38,
               height: 38,
               borderRadius: 19,
@@ -250,26 +244,172 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
               alignItems: "center",
               justifyContent: "center",
               overflow: "hidden",
-            }}
-          >
-            {profile?.photoURL ? (
-              <Image 
-                source={{ uri: profile.photoURL }} 
-                style={{ width: 38, height: 38 }} 
-                contentFit="cover"
-              />
-            ) : (
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  fontWeight: "700",
-                }}
-              >
-                {initials}
-              </Text>
+              borderWidth: profile?.plan && profile.plan !== "free" ? 2 : 0,
+              borderColor: (profile?.plan?.includes("dealer_pro_plus") || profile?.plan?.includes("pro_dealer")) ? "#9013FE" : profile?.plan?.includes("pro_plus") ? "#50E3C2" : theme.accent,
+            }}>
+              {profile?.photoURL ? (
+                <Image
+                  source={{ uri: profile.photoURL }}
+                  style={{ width: 38, height: 38 }}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={200}
+                  placeholder={{ color: avatarColor }}
+                />
+              ) : (
+                <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>
+                  {initials}
+                </Text>
+              )}
+            </View>
+            {/* Plan badge */}
+            {profile?.plan && profile.plan !== "free" && (
+              <View style={{
+                position: "absolute",
+                bottom: -4,
+                right: -4,
+                backgroundColor: (profile.plan.includes("dealer_pro_plus") || profile.plan.includes("pro_dealer")) ? "#9013FE" : profile.plan.includes("pro_plus") ? "#50E3C2" : theme.accent,
+                borderRadius: 4,
+                paddingHorizontal: 3,
+                paddingVertical: 1,
+              }}>
+                <Text style={{ color: "#fff", fontSize: 7, fontWeight: "800", letterSpacing: 0.3 }}>
+                  {(profile.plan.includes("dealer_pro_plus") || profile.plan.includes("pro_dealer")) ? "DLR" : profile.plan.includes("pro_plus") ? "PRO+" : "PRO"}
+                </Text>
+              </View>
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Dropdown menú de perfil */}
+        <Modal
+          visible={menuVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
+            <View style={{ flex: 1 }}>
+              <TouchableWithoutFeedback>
+                <View style={{
+                  position: "absolute",
+                  top: Platform.OS === "ios" ? 90 : 70,
+                  right: 16,
+                  backgroundColor: theme.card,
+                  borderRadius: 14,
+                  paddingVertical: 6,
+                  width: 230,
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 12,
+                  elevation: 8,
+                  borderWidth: 1,
+                  borderColor: theme.badgeBorder,
+                }}>
+                  {/* Cabecera del menú */}
+                  <View style={{ paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.badgeBorder }}>
+                    <Text style={{ color: theme.text, fontWeight: "700", fontSize: 15 }} numberOfLines={1}>
+                      {fullName || "Mi cuenta"}
+                    </Text>
+                    {profile?.plan && (
+                      <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 1 }}>
+                        Plan {profile.plan === "free" ? "Gratuito" : (profile.plan.includes("dealer_pro_plus")) ? "Dealer PRO+" : profile.plan.includes("pro_dealer") ? "Dealer" : profile.plan.includes("pro_plus") ? "PRO Plus" : "PRO"}
+                      </Text>
+                    )}
+                  </View>
+
+                  {/* Ver perfil */}
+                  <TouchableOpacity
+                    onPress={() => { setMenuVisible(false); router.push("/profile"); }}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="person-outline" size={20} color={theme.text} />
+                    <Text style={{ color: theme.text, fontSize: 14 }} numberOfLines={1}>Ver perfil</Text>
+                  </TouchableOpacity>
+
+                  {/* Configuración */}
+                  <TouchableOpacity
+                    onPress={() => { setMenuVisible(false); router.push("/(screens)/edit-profile"); }}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="settings-outline" size={20} color={theme.text} />
+                    <Text style={{ color: theme.text, fontSize: 14 }} numberOfLines={1}>Configuración</Text>
+                  </TouchableOpacity>
+
+                  {/* Agencias */}
+                  <TouchableOpacity
+                    onPress={() => { setMenuVisible(false); router.push("/(screens)/agencias" as any); }}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="business-outline" size={20} color={theme.text} />
+                    <Text style={{ color: theme.text, fontSize: 14 }} numberOfLines={1}>Agencias</Text>
+                  </TouchableOpacity>
+
+                  {/* Planes / Suscripción */}
+                  <TouchableOpacity
+                    onPress={() => { setMenuVisible(false); router.push("/(screens)/subscribe"); }}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="star-outline" size={20} color={theme.accent} />
+                    <Text style={{ color: theme.text, fontSize: 14, flex: 1 }} numberOfLines={1}>Planes y suscripción</Text>
+                    {profile?.plan && profile.plan !== "free" && (
+                      <View style={{ backgroundColor: theme.accent, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>ACTIVO</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Panel Admin (solo admins/moderadores) */}
+                  {isAdmin && (
+                    <TouchableOpacity
+                      onPress={() => { setMenuVisible(false); router.push("/(admin)/dashboard"); }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="shield-checkmark-outline" size={20} color="#10B981" />
+                      <Text style={{ color: theme.text, fontSize: 14, flex: 1 }} numberOfLines={1}>Panel de Admin</Text>
+                      {pendingVehiclesCount > 0 && (
+                        <View style={{ backgroundColor: "#FF3B30", borderRadius: 10, minWidth: 20, height: 20, alignItems: "center", justifyContent: "center", paddingHorizontal: 5 }}>
+                          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800" }}>{pendingVehiclesCount > 99 ? "99+" : pendingVehiclesCount}</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Separador */}
+                  <View style={{ height: 1, backgroundColor: theme.badgeBorder, marginHorizontal: 12 }} />
+
+                  {/* Cerrar sesión */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setMenuVisible(false);
+                      showAlert(
+                        "Cerrar sesión",
+                        "¿Seguro que querés salir?",
+                        "info",
+                        true,
+                        () => logout().catch(() => {}),
+                        "Salir",
+                        "Cancelar"
+                      );
+                    }}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="log-out-outline" size={20} color="#FF3B30" />
+                    <Text style={{ color: "#FF3B30", fontSize: 14, fontWeight: "600" }} numberOfLines={1}>Cerrar sesión</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+        </>
       )}
 
       <CustomAlert 

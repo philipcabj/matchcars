@@ -1,5 +1,6 @@
 import { Audio } from 'expo-av';
 import { Platform } from 'react-native';
+import { logger } from './logger';
 
 // Short "pop" or "click" sound
 const CLICK_SOUND_URL = 'https://codeskulptor-demos.commondatastorage.googleapis.com/pang/pop.mp3';
@@ -16,7 +17,7 @@ const initAudio = async () => {
       playThroughEarpieceAndroid: false,
     });
   } catch (error) {
-    console.log('Error setting audio mode:', error);
+    logger.error('Error setting audio mode:', error);
   }
 };
 
@@ -50,7 +51,7 @@ export const playLikeSound = async () => {
       }
     });
   } catch (error) {
-    console.log('Error playing sound:', error);
+    logger.error('Error playing sound:', error);
   }
 };
 

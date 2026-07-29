@@ -2,6 +2,9 @@
 import { useCompare } from "@/contexts/CompareContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
+import { db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
+import { getPlanBadgeInfo, isDealerPlan } from "@/lib/planChecks";
 import { playLikeSound } from "@/lib/sounds";
 import type { Vehicle } from "@/types/vehicle";
 import { formatTimeAgo } from "@/utils/dateUtils";
@@ -10,17 +13,44 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
-import React from "react";
+import { doc, getDoc } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
 import { Platform, Pressable, Image as RNImage, Text, TouchableOpacity, View } from "react-native";
 
-type Props = { vehicle: Vehicle; liked?: boolean; likeDisabled?: boolean; onToggleLike?: () => void; hideLike?: boolean; hideCompare?: boolean; showEdit?: boolean; onEdit?: () => void; compact?: boolean; horizontal?: boolean; onMessage?: () => void; showMetrics?: boolean; showPriceAnalysis?: boolean };
+type Props = { vehicle: Vehicle; liked?: boolean; likeDisabled?: boolean; onToggleLike?: () => void; hideLike?: boolean; hideCompare?: boolean; showEdit?: boolean; onEdit?: () => void; compact?: boolean; horizontal?: boolean; onMessage?: () => void; showMetrics?: boolean; showPriceAnalysis?: boolean; matchScore?: number };
 
-export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggleLike, hideLike = false, hideCompare = false, showEdit = false, onEdit, compact = false, horizontal = false, onMessage, showMetrics = false, showPriceAnalysis = false }: Props) {
+export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggleLike, hideLike = false, hideCompare = false, showEdit = false, onEdit, compact = false, horizontal = false, onMessage, showMetrics = false, showPriceAnalysis = false, matchScore }: Props) {
   const router = useRouter();
   const { theme } = useTheme();
   const { toggleVehicle, isSelected } = useCompare();
   
   const selected = isSelected(vehicle.id);
+  
+  const [sellerName, setSellerName] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const shouldFetch =
+      !!vehicle?.userId &&
+      isDealerPlan(vehicle?.userPlan) &&
+      !sellerName &&
+      !vehicle.userName; // Skip if parent already provided the name via userNamesCache
+    if (!shouldFetch) return;
+    (async () => {
+      try {
+        const ref = doc(db, "users", String(vehicle.userId));
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const data: any = snap.data();
+          const name =
+            data?.agencyName ||
+            (data?.firstName || data?.lastName
+              ? `${data?.firstName ?? ""} ${data?.lastName ?? ""}`.trim()
+              : data?.displayName || data?.email || "Agencia");
+          setSellerName(name);
+        }
+      } catch {}
+    })();
+  }, [vehicle?.userId, vehicle?.userPlan, sellerName]);
   
   const handleLikePress = async (e: any) => {
     e.stopPropagation();
@@ -64,10 +94,24 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
 
   const timeAgo = formatTimeAgo(vehicle.createdAt);
 
+  // Helper to render financing badge (anticipo only) below price
+  const renderFinancingBadges = () => {
+    const fin = vehicle.financing;
+    if (!fin?.downPayment || fin.downPayment <= 0) return null;
+    const sym = vehicle.currency === "USD" ? "U$D" : "$";
+    return (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2, backgroundColor: "#FFF4ED", paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, alignSelf: "flex-start", maxWidth: "100%" }}>
+        <Text style={{ color: "#C2410C", fontSize: 9, fontWeight: "700" }} numberOfLines={1} ellipsizeMode="tail">
+          Anticipo {sym} {fin.downPayment.toLocaleString("es-AR")}
+        </Text>
+      </View>
+    );
+  };
+
   // Helper to render Trust Badge
   const renderTrustBadge = () => {
       // Priority: Agency -> Rating -> TrustLevel
-      const isAgency = vehicle.userPlan?.includes('pro_dealer');
+      const isAgency = isDealerPlan(vehicle.userPlan);
       const rating = vehicle.sellerRating;
       const reviewCount = vehicle.sellerReviewCount || 0;
       const trustLevel = vehicle.sellerTrustLevel || "new"; 
@@ -77,7 +121,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                   <Ionicons name="business" size={14} color={theme.textMuted} />
                   <Text style={{ fontSize: 12, color: theme.textMuted, flex: 1 }} numberOfLines={1}>
-                      {vehicle.userName || "Agencia"}
+                      {sellerName || vehicle.userName || "Agencia"}
                   </Text>
                   {compact ? (
                       <Ionicons name="checkmark-circle" size={14} color="#9013FE" />
@@ -160,7 +204,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                 source={{ uri: imageUrl }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="cover"
-                onError={(e) => console.log("Web Image Error (Horizontal):", imageUrl, e.nativeEvent)}
+                onError={(e) => logger.log("Web Image Error (Horizontal):", imageUrl, e.nativeEvent)}
               />
             </View>
           ) : (
@@ -168,8 +212,9 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               source={{ uri: imageUrl }}
               style={{ width: compact ? 120 : 150, height: compact ? 90 : 110 }}
               contentFit="cover"
+              cachePolicy="memory-disk"
               transition={200}
-              onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
+              onError={(e) => logger.log("Error loading image:", imageUrl, e.error)}
             />
           )}
           <View style={{ flex: 1, padding: compact ? 10 : 12 }}>
@@ -211,11 +256,17 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}
             </Text>
+            {matchScore !== undefined && matchScore > 0 && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                <Ionicons name="sparkles" size={10} color={theme.accent} />
+                <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "700" }}>{matchScore}% para vos</Text>
+              </View>
+            )}
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 6 : 8 }}>
               <Text style={{ color: theme.price, fontSize: compact ? 14 : 16, fontWeight: "700" }}>
                 {vehicle.price != null && vehicle.currency ? `${vehicle.currency} ${vehicle.price.toLocaleString("es-AR")}` : "Consultar"}
               </Text>
-              
+
               {showPriceAnalysis && priceQuality && (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: priceQuality.color + "20", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
                       <Ionicons name={priceQuality.icon as any} size={12} color={priceQuality.color} />
@@ -234,6 +285,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                 </TouchableOpacity>
               )}
             </View>
+            {!compact && renderFinancingBadges()}
             {showMetrics && (
               <View style={{ flexDirection: "row", gap: 12, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: theme.likeBoxBackground }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -256,7 +308,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                 source={{ uri: imageUrl }}
                 style={{ width: "100%", height: "100%" }}
                 resizeMode="cover"
-                onError={(e) => console.log("Web Image Error (Vertical):", imageUrl, e.nativeEvent)}
+                onError={(e) => logger.log("Web Image Error (Vertical):", imageUrl, e.nativeEvent)}
               />
             </View>
           ) : (
@@ -264,8 +316,9 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               source={{ uri: imageUrl }}
               style={{ width: "100%", height: compact ? 130 : 200 }}
               contentFit="cover"
+              cachePolicy="memory-disk"
               transition={200}
-              onError={(e) => console.log("Error loading image:", imageUrl, e.error)}
+              onError={(e) => logger.log("Error loading image:", imageUrl, e.error)}
             />
           )}
           {vehicle.status === 'sold' && (
@@ -283,7 +336,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                 <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 24, transform: [{ rotate: '-15deg' }], borderWidth: 4, borderColor: '#FFF', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}>VENDIDO</Text>
              </View>
           )}
-          {vehicle.status === 'pending' && (
+          {(vehicle.status === 'pending' || vehicle.status === 'pending_review') && (
              <View style={{ 
                position: 'absolute', 
                left: 0, 
@@ -333,7 +386,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1, flexWrap: 'wrap' }}>
                 {(vehicle.brand ?? "")} {(vehicle.model ?? "")} {(vehicle.version ?? "")}
               </Text>
-               {vehicle.userPlan && vehicle.userPlan.includes('pro_dealer') && (
+               {isDealerPlan(vehicle.userPlan) && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#9013FE', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 4, alignSelf: 'flex-start' }}>
                     <Ionicons name="checkmark-circle" size={10} color="#FFF" />
                     <Text style={{ fontSize: 9, color: '#FFF', fontWeight: '800' }}>AGENCIA</Text>
@@ -348,6 +401,12 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}
             </Text>
+            {matchScore !== undefined && matchScore > 0 && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                <Ionicons name="sparkles" size={10} color={theme.accent} />
+                <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "700" }}>{matchScore}% para vos</Text>
+              </View>
+            )}
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: compact ? 6 : 8 }}>
               <Text style={{ color: theme.price, fontSize: compact ? 14 : 16, fontWeight: "700" }}>
                 {vehicle.price != null && vehicle.currency ? `${vehicle.currency} ${vehicle.price.toLocaleString("es-AR")}` : "Consultar"}
@@ -363,6 +422,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
                 </TouchableOpacity>
               )}
             </View>
+            {!compact && renderFinancingBadges()}
           </View>
         </>
       )}
@@ -373,11 +433,16 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>Destacado</Text>
           </View>
         )}
-        {vehicle.userPlan && vehicle.userPlan !== 'free' && (
-          <View style={{ backgroundColor: vehicle.userPlan === 'pro_dealer' ? '#9013FE' : vehicle.userPlan === 'pro_plus' ? '#50E3C2' : '#4A90E2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
-            <Text style={{ color: vehicle.userPlan === 'pro_plus' ? '#000' : '#FFF', fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>PRO</Text>
-          </View>
-        )}
+        {vehicle.userPlan && vehicle.userPlan !== 'free' && (() => {
+          const badgeInfo = getPlanBadgeInfo(vehicle.userPlan);
+          return badgeInfo ? (
+            <View style={{ backgroundColor: badgeInfo.color, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
+              <Text style={{ color: badgeInfo.textColor, fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>
+                {badgeInfo.label}
+              </Text>
+            </View>
+          ) : null;
+        })()}
         {vehicle.singleOwner && (
           <View style={{ backgroundColor: "#27ae60", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
             <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>1ra Mano</Text>

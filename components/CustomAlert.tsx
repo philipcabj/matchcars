@@ -28,7 +28,7 @@ export function CustomAlert({ visible, title, message, onClose, type = "error", 
   if (!visible) return null;
 
   return (
-    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onCancel ?? onClose}>
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: theme.card }]}>
           <View style={[styles.iconContainer, { backgroundColor: type === "error" ? "#FF6B6B20" : type === "success" ? "#4ECDC420" : "#1B9CFC20" }]}>

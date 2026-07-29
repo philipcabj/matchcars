@@ -7,16 +7,18 @@ import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db, storage } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { fetchDealerReportData, generateCSV, generatePDF, shareFile } from "@/lib/reporting";
 import { TrustLevel } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { useFocusEffect, useRouter } from "expo-router";
+import { addDoc, collection, doc, documentId, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { formatNumber } from "@/utils/format";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -25,6 +27,13 @@ export default function ProfileScreen() {
   const { user, profile, deleteAccount } = useAuth();
   const router = useRouter();
   const [dealerStats, setDealerStats] = useState({ cars: 0, views: 0, likes: 0 });
+  const [leadStats, setLeadStats] = useState({
+    total: 0,
+    nuevo: 0,
+    negociacion: 0,
+    vendido: 0,
+    perdido: 0,
+  });
   const [purchases, setPurchases] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]); // New: Sales State
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -34,7 +43,7 @@ export default function ProfileScreen() {
   
   // Price Suggestion State
   const [topSuggestion, setTopSuggestion] = useState<any>(null);
-  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  const [, setSuggestionLoading] = useState(false);
   const [hideDashboardSuggestion, setHideDashboardSuggestion] = useState(false);
 
   // Alert State
@@ -99,7 +108,7 @@ export default function ProfileScreen() {
         // Scroll with offset to ensure header visibility
         scrollViewRef.current.scrollTo({ y: transactionsY - 100, animated: true }); 
     } else {
-        console.warn("Scroll failed: Ref null or Y invalid", transactionsY);
+        logger.warn("Scroll failed: Ref null or Y invalid", transactionsY);
     }
   };
   
@@ -110,38 +119,46 @@ export default function ProfileScreen() {
   const [review, setReview] = useState("");
   const [submittingRating, setSubmittingRating] = useState(false);
 
-  const findTopSuggestion = async (vehicles: any[]) => {
+  const findTopSuggestion = useCallback(
+    async (vehicles: any[]) => {
       if (hideDashboardSuggestion) return;
       setSuggestionLoading(true);
       let maxDiff = 0;
-      let bestCandidate = null;
-      let bestAnalysis = null;
-      
-      // Filter published vehicles and take last 10 (assuming query order or just random subset)
-      const candidates = vehicles.filter(v => v.status !== 'sold' && v.status !== 'deleted').slice(0, 10);
+      let bestCandidate: any = null;
+      let bestAnalysis: any = null;
+
+      const candidates = vehicles
+        .filter((v) => v.status !== "sold" && v.status !== "deleted")
+        .slice(0, 10);
 
       for (const v of candidates) {
-          if (!v.brand || !v.model || !v.year || !v.price) continue;
-          
-          try {
-            const analysis = await analyzeMarketPrice(v.brand, v.model, Number(v.year), v.currency || "ARS");
-            if (analysis.avg > 0 && v.price > analysis.avg) {
-                const diff = ((v.price - analysis.avg) / analysis.avg) * 100;
-                // We want at least 5% diff to suggest
-                if (diff > 5 && diff > maxDiff) {
-                    maxDiff = diff;
-                    bestCandidate = v;
-                    bestAnalysis = analysis;
-                }
+        if (!v.brand || !v.model || !v.year || !v.price) continue;
+
+        try {
+          const analysis = await analyzeMarketPrice(
+            v.brand,
+            v.model,
+            Number(v.year),
+            v.currency || "ARS"
+          );
+          if (analysis.avg > 0 && v.price > analysis.avg) {
+            const diff = ((v.price - analysis.avg) / analysis.avg) * 100;
+            if (diff > 5 && diff > maxDiff) {
+              maxDiff = diff;
+              bestCandidate = v;
+              bestAnalysis = analysis;
             }
-          } catch(e) {}
+          }
+        } catch {}
       }
 
       if (bestCandidate && bestAnalysis) {
-          setTopSuggestion({ vehicle: bestCandidate, analysis: bestAnalysis });
+        setTopSuggestion({ vehicle: bestCandidate, analysis: bestAnalysis });
       }
       setSuggestionLoading(false);
-  };
+    },
+    [hideDashboardSuggestion]
+  );
 
   const handleDashboardPriceUpdate = async (targetPrice: number) => {
       if (!topSuggestion) return;
@@ -154,52 +171,79 @@ export default function ProfileScreen() {
           showAlert("Precio actualizado", "El precio se ha actualizado correctamente.", "success");
           setTopSuggestion(null); // Remove suggestion after action
       } catch (e) {
-          console.error(e);
+          logger.log(e);
           showAlert("Error", "No se pudo actualizar el precio.", "error");
       }
   };
 
   useEffect(() => {
-    if (user && profile?.plan && profile.plan.includes('pro_dealer')) {
+    if (user && profile?.plan && profile.plan.includes("pro_dealer")) {
       const fetchStats = async () => {
         try {
-          const q = query(collection(db, "vehicles"), where("userId", "==", user.uid));
-          const snap = await getDocs(q);
+          const vehiclesQuery = query(
+            collection(db, "vehicles"),
+            where("userId", "==", user.uid)
+          );
+          const leadsQuery = query(
+            collection(db, "leads"),
+            where("sellerId", "==", user.uid)
+          );
+
+          const [vehiclesSnap, leadsSnap]: any = await Promise.all([
+            getDocs(vehiclesQuery),
+            getDocs(leadsQuery),
+          ]);
+
           let totalViews = 0;
           let totalLikes = 0;
           const vehicles: any[] = [];
-
-          snap.forEach(d => {
+          const vehicleDocs: any[] = vehiclesSnap?.docs ?? [];
+          for (const d of vehicleDocs) {
             const data = d.data();
             vehicles.push({ id: d.id, ...data });
-            totalViews += (data.views || 0);
-            totalLikes += (data.likesCount || 0);
+            totalViews += data.views || 0;
+            totalLikes += data.likesCount || 0;
+          }
+          setDealerStats({
+            cars: vehicleDocs.length,
+            views: totalViews,
+            likes: totalLikes,
           });
-          setDealerStats({ cars: snap.size, views: totalViews, likes: totalLikes });
 
-          // Find suggestion
+          const leadDocs: any[] = leadsSnap?.docs ?? [];
+          const stats = {
+            total: leadDocs.length,
+            nuevo: 0,
+            negociacion: 0,
+            vendido: 0,
+            perdido: 0,
+          };
+          for (const d of leadDocs) {
+            const data: any = d.data();
+            if (data.status === "new") stats.nuevo += 1;
+            else if (data.status === "negotiation") stats.negociacion += 1;
+            else if (data.status === "won") stats.vendido += 1;
+            else if (data.status === "lost") stats.perdido += 1;
+          }
+          setLeadStats(stats);
+
           findTopSuggestion(vehicles);
         } catch (e) {
-          console.error("Error fetching dealer stats", e);
+          logger.log("Error fetching dealer stats", e);
         }
       };
       fetchStats();
     }
-  }, [user, profile]);
+  }, [user, profile, findTopSuggestion]);
 
-  useEffect(() => {
-    if (user) {
-        fetchTransactions();
-    }
-  }, [user]);
-
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     setLoadingTransactions(true);
-    console.log("DEBUG: Fetching transactions for user:", user?.uid);
-    
+
+    let pendingPurchases: any[] = [];
+    let pendingSales: any[] = [];
+
     try {
         if (!user?.uid) {
-            console.error("DEBUG: No user UID available for transactions");
             setLoadingTransactions(false);
             return;
         }
@@ -211,76 +255,95 @@ export default function ProfileScreen() {
         ]);
 
         // Process Purchases
-        if (purchasesResult.status === "fulfilled") {
-            const snapPurchases = purchasesResult.value;
-            console.log("DEBUG: Purchases query success, docs found:", snapPurchases.size);
+        if (purchasesResult.status === "fulfilled" && purchasesResult.value) {
+            const snapPurchases: any = purchasesResult.value;
+            const docsPurchases: any[] = snapPurchases?.docs ?? [];
+            logger.log("DEBUG: Purchases query success, docs found:", docsPurchases.length);
             
             const purchaseItems: any[] = [];
             const missingSellerIds = new Set<string>();
 
-            snapPurchases.forEach(d => {
-                const data = d.data();
-                // Check if seller name is missing OR looks like an ID (long alphanumeric without spaces)
-                const nameIsId = data.sellerName && /^[a-zA-Z0-9]{20,}$/.test(data.sellerName) && !data.sellerName.includes(" ");
-                
-                if ((!data.sellerName || nameIsId) && data.sellerId) {
-                    missingSellerIds.add(data.sellerId);
-                }
-                purchaseItems.push({ id: d.id, ...data });
-            });
+            for (const d of docsPurchases) {
+              const data = d.data();
+              const nameIsId =
+                data.sellerName &&
+                /^[a-zA-Z0-9]{20,}$/.test(data.sellerName) &&
+                !data.sellerName.includes(" ");
+              
+              if ((!data.sellerName || nameIsId) && data.sellerId) {
+                missingSellerIds.add(data.sellerId);
+              }
+              purchaseItems.push({ id: d.id, ...data });
+            }
 
             // Fetch missing seller names
             if (missingSellerIds.size > 0) {
-                console.log("DEBUG: Fetching missing seller names for IDs:", Array.from(missingSellerIds));
+                logger.log("DEBUG: Fetching missing seller names for IDs:", Array.from(missingSellerIds));
                 try {
                     const sellerPromises = Array.from(missingSellerIds).map(id => getDoc(doc(db, "users", id)));
                     const sellerSnaps = await Promise.all(sellerPromises);
                     const sellerMap = new Map<string, string>();
                     
-                    sellerSnaps.forEach((s: any) => {
-                        if (s.exists()) {
-                            const u = s.data();
-                            const name = `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.displayName || "Vendedor";
-                            sellerMap.set(s.id, name);
-                        }
-                    });
+                    const snapsArr: any[] = Array.isArray(sellerSnaps) ? sellerSnaps : [];
+                    for (const s of snapsArr) {
+                      if (s && typeof s.exists === "function" && s.exists()) {
+                        const u = s.data();
+                        const name =
+                          `${u.firstName || ""} ${u.lastName || ""}`.trim() ||
+                          u.displayName ||
+                          "Vendedor";
+                        sellerMap.set(s.id, name);
+                      }
+                    }
 
                     // Update items with fetched names
-                    purchaseItems.forEach(item => {
-                        const nameIsId = item.sellerName && /^[a-zA-Z0-9]{20,}$/.test(item.sellerName) && !item.sellerName.includes(" ");
+                    for (const item of purchaseItems) {
+                        const nameIsId =
+                          item.sellerName &&
+                          /^[a-zA-Z0-9]{20,}$/.test(item.sellerName) &&
+                          !item.sellerName.includes(" ");
                         if ((!item.sellerName || nameIsId) && item.sellerId && sellerMap.has(item.sellerId)) {
                             item.sellerName = sellerMap.get(item.sellerId);
                         }
-                    });
+                    }
                 } catch (err) {
-                    console.error("Error fetching seller details:", err);
+                    logger.log("Error fetching seller details:", err);
                 }
             }
 
-            setPurchases(purchaseItems);
-        } else {
-            console.error("DEBUG: Error fetching purchases:", purchasesResult.reason);
+            // Dedup por vehicleId — igual que ventas
+            pendingPurchases = Object.values(
+              purchaseItems.reduce((acc: Record<string, any>, item: any) => {
+                const vid = item.vehicleId ?? item.id;
+                const existing = acc[vid];
+                if (!existing || (item.soldAt?.seconds ?? 0) > (existing.soldAt?.seconds ?? 0)) acc[vid] = item;
+                return acc;
+              }, {})
+            ) as any[];
         }
 
         // Process Sales
-        if (salesResult.status === "fulfilled") {
-            const snapSales = salesResult.value;
-            console.log("DEBUG: Sales query success, docs found:", snapSales.size);
+        if (salesResult.status === "fulfilled" && salesResult.value) {
+            const snapSales: any = salesResult.value;
+            const docsSales: any[] = snapSales?.docs ?? [];
+            logger.log("DEBUG: Sales query success, docs found:", docsSales.length);
             
             const saleItems: any[] = [];
             const missingBuyerIds = new Set<string>();
 
-            snapSales.forEach(d => {
-                const data = d.data();
-                // Check if buyer name is missing, ID-like, or Email-like
-                const nameIsId = data.buyerName && /^[a-zA-Z0-9]{20,}$/.test(data.buyerName) && !data.buyerName.includes(" ");
-                const nameIsEmail = data.buyerName && data.buyerName.includes("@");
-                
-                if ((!data.buyerName || nameIsId || nameIsEmail) && data.buyerId) {
-                    missingBuyerIds.add(data.buyerId);
-                }
-                saleItems.push({ id: d.id, ...data });
-            });
+            for (const d of docsSales) {
+              const data = d.data();
+              const nameIsId =
+                data.buyerName &&
+                /^[a-zA-Z0-9]{20,}$/.test(data.buyerName) &&
+                !data.buyerName.includes(" ");
+              const nameIsEmail = data.buyerName && data.buyerName.includes("@");
+              
+              if ((!data.buyerName || nameIsId || nameIsEmail) && data.buyerId) {
+                missingBuyerIds.add(data.buyerId);
+              }
+              saleItems.push({ id: d.id, ...data });
+            }
 
             // Fetch missing buyer names
             if (missingBuyerIds.size > 0) {
@@ -289,41 +352,99 @@ export default function ProfileScreen() {
                     const buyerSnaps = await Promise.all(buyerPromises);
                     const buyerMap = new Map<string, string>();
                     
-                    buyerSnaps.forEach((s: any) => {
-                        if (s.exists()) {
-                            const u = s.data();
-                            const name = (u.firstName && u.lastName) 
-                                ? `${u.firstName} ${u.lastName}`.trim() 
-                                : (u.firstName || u.displayName || "Comprador");
-                            buyerMap.set(s.id, name);
-                        }
-                    });
+                    const buyersArr: any[] = Array.isArray(buyerSnaps) ? buyerSnaps : [];
+                    for (const s of buyersArr) {
+                      if (s && typeof s.exists === "function" && s.exists()) {
+                        const u = s.data();
+                        const name =
+                          (u.firstName && u.lastName)
+                            ? `${u.firstName} ${u.lastName}`.trim()
+                            : (u.firstName || u.displayName || "Comprador");
+                        buyerMap.set(s.id, name);
+                      }
+                    }
 
                     // Update items with fetched names
-                    saleItems.forEach(item => {
-                        const nameIsId = item.buyerName && /^[a-zA-Z0-9]{20,}$/.test(item.buyerName) && !item.buyerName.includes(" ");
+                    for (const item of saleItems) {
+                        const nameIsId =
+                          item.buyerName &&
+                          /^[a-zA-Z0-9]{20,}$/.test(item.buyerName) &&
+                          !item.buyerName.includes(" ");
                         const nameIsEmail = item.buyerName && item.buyerName.includes("@");
                         
                         if ((!item.buyerName || nameIsId || nameIsEmail) && item.buyerId && buyerMap.has(item.buyerId)) {
                             item.buyerName = buyerMap.get(item.buyerId);
                         }
-                    });
+                    }
                 } catch (err) {
-                    console.error("Error fetching buyer details:", err);
+                    logger.log("Error fetching buyer details:", err);
                 }
             }
 
-            setSales(saleItems);
-        } else {
-            console.error("DEBUG: Error fetching sales:", salesResult.reason);
+            // Deduplicar por vehicleId — si hay múltiples ventas del mismo auto, mostrar solo la más reciente
+            const dedupedSales = Object.values(
+              saleItems.reduce((acc: Record<string, any>, item: any) => {
+                const vid = item.vehicleId ?? item.id;
+                const existing = acc[vid];
+                if (!existing || (item.soldAt?.seconds ?? 0) > (existing.soldAt?.seconds ?? 0)) {
+                  acc[vid] = item;
+                }
+                return acc;
+              }, {})
+            ) as any[];
+            pendingSales = dedupedSales;
         }
 
+        // Filter out transactions whose vehicle is no longer sold (e.g. reactivated)
+        const allVehicleIds = [
+          ...new Set([
+            ...pendingPurchases.map((i: any) => i.vehicleId).filter(Boolean),
+            ...pendingSales.map((i: any) => i.vehicleId).filter(Boolean),
+          ]),
+        ];
+
+        if (allVehicleIds.length > 0) {
+          const vehicleStatuses = new Map<string, string>();
+          for (let i = 0; i < allVehicleIds.length; i += 30) {
+            try {
+              const chunk = allVehicleIds.slice(i, i + 30);
+              const vSnap = await getDocs(
+                query(collection(db, "vehicles"), where(documentId(), "in", chunk))
+              );
+              vSnap.forEach((d) => vehicleStatuses.set(d.id, d.data().status));
+            } catch { /* silent — show all if lookup fails */ }
+          }
+          if (vehicleStatuses.size > 0) {
+            pendingPurchases = pendingPurchases.filter(
+              (i: any) => vehicleStatuses.get(i.vehicleId) === "sold"
+            );
+            pendingSales = pendingSales.filter(
+              (i: any) => vehicleStatuses.get(i.vehicleId) === "sold"
+            );
+          }
+        }
+
+        setPurchases(pendingPurchases);
+        setSales(pendingSales);
+
     } catch (e: any) {
-        console.error("DEBUG: General Error details:", e);
+        logger.log("DEBUG: General Error details:", e);
     } finally {
         setLoadingTransactions(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchTransactions();
+    }
+  }, [user, fetchTransactions]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchTransactions();
+    }, [user, fetchTransactions])
+  );
 
   const openRatingModal = (purchase: any) => {
     setSelectedPurchase(purchase);
@@ -336,49 +457,99 @@ export default function ProfileScreen() {
     if (!selectedPurchase) return;
     setSubmittingRating(true);
     try {
-        const saleRef = doc(db, "sales", selectedPurchase.id);
+        // Write to canonical sale document (vehicleId as ID) so chat screen + profile stay in sync
+        const canonicalSaleId = selectedPurchase.vehicleId || selectedPurchase.id;
+        const saleRef = doc(db, "sales", canonicalSaleId);
         await updateDoc(saleRef, {
+            ratingByBuyer: { score: rating, comment: review, ratedAt: serverTimestamp(), ratedByUid: user?.uid },
             rating: rating,
-            review: review
+            review: review,
         });
 
-        // Recalculate seller rating immediately
+        if (selectedPurchase.sellerId && user) {
+          try {
+            await addDoc(collection(db, "reviews"), {
+              sellerId: selectedPurchase.sellerId,
+              reviewerId: user.uid,
+              reviewerName: (profile as any)?.displayName || (profile as any)?.firstName
+                ? `${(profile as any)?.firstName ?? ""} ${(profile as any)?.lastName ?? ""}`.trim()
+                : user.displayName || user.email || "Anónimo",
+              reviewerPhotoUrl: (profile as any)?.photoURL || user.photoURL || null,
+              saleId: selectedPurchase.id,
+              vehicleId: selectedPurchase.vehicleId || null,
+              vehicleBrand: selectedPurchase.vehicleBrand || null,
+              vehicleModel: selectedPurchase.vehicleModel || null,
+              rating,
+              review,
+              createdAt: serverTimestamp(),
+            });
+          } catch (e) {
+            logger.log("Error saving review to reviews collection", e);
+          }
+        }
+
         if (selectedPurchase.sellerId) {
              try {
                  const q = query(collection(db, "sales"), where("sellerId", "==", selectedPurchase.sellerId));
-                 const snap = await getDocs(q);
+                 const snap: any = await getDocs(q);
+                 const docs: any[] = snap?.docs ?? [];
                  let total = 0;
                  let count = 0;
-                 snap.forEach(d => {
-                     const data = d.data();
-                     let r = Number(data.rating);
-                     // Ensure we use the new values for the current sale
-                     if (d.id === selectedPurchase.id) r = rating;
-                     
-                     if (!isNaN(r) && r > 0) {
-                         total += r;
-                         count++;
-                     }
-                 });
                  
-                 if (count > 0) {
-                     const avg = total / count;
-                     await updateDoc(doc(db, "users", selectedPurchase.sellerId), {
-                         sellerRating: avg,
-                         sellerReviewCount: count
-                     });
+                 for (const d of docs) {
+                   const data = d.data();
+                   let r = Number(data.rating);
+                   if (d.id === selectedPurchase.id) r = rating;
+                   
+                   if (!isNaN(r) && r > 0) {
+                     total += r;
+                     count++;
+                   }
                  }
+                 
+                if (count > 0) {
+                  const avg = total / count;
+
+                  await updateDoc(doc(db, "users", selectedPurchase.sellerId), {
+                    sellerRating: avg,
+                    sellerReviewCount: count
+                  });
+
+                  try {
+                    const vehiclesQ = query(
+                      collection(db, "vehicles"),
+                      where("userId", "==", selectedPurchase.sellerId)
+                    );
+                    const vehiclesSnap: any = await getDocs(vehiclesQ);
+                    const vehiclesDocs: any[] = vehiclesSnap?.docs ?? [];
+
+                    for (const v of vehiclesDocs) {
+                      const vRef = doc(db, "vehicles", v.id);
+                      await updateDoc(vRef, {
+                        sellerRating: avg,
+                        sellerReviewCount: count
+                      });
+                    }
+                  } catch (syncError) {
+                    logger.log("Error syncing seller rating to vehicles", syncError);
+                  }
+                }
              } catch (e) {
-                 console.log("Error updating seller rating", e);
+                logger.log("Error updating seller rating", e);
              }
         }
         
-        // Update local state
-        setPurchases(prev => prev.map(p => p.id === selectedPurchase.id ? { ...p, rating, review } : p));
+        // Update local state — match on vehicleId so dedup'd item gets updated
+        const canonicalId = selectedPurchase.vehicleId || selectedPurchase.id;
+        setPurchases(prev => prev.map(p =>
+          (p.vehicleId === canonicalId || p.id === selectedPurchase.id)
+            ? { ...p, ratingByBuyer: { score: rating, comment: review }, rating, review }
+            : p
+        ));
         setRatingModalVisible(false);
         showAlert("Gracias", "Tu calificación ha sido enviada.", "success");
     } catch (e) {
-        console.error("Error submitting rating", e);
+        logger.log("Error submitting rating", e);
         showAlert("Error", "No se pudo enviar la calificación.", "error");
     } finally {
         setSubmittingRating(false);
@@ -492,7 +663,7 @@ export default function ProfileScreen() {
             resolve(xhr.response);
           };
           xhr.onerror = function (e) {
-            console.log(e);
+            logger.log(e);
             reject(new TypeError("Network request failed"));
           };
           xhr.responseType = "blob";
@@ -591,9 +762,9 @@ export default function ProfileScreen() {
       <WebContainer>
         <Header />
         <ScrollView ref={scrollViewRef} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-          {Platform.OS === 'web' && (
+          {Platform.OS === 'web' && !(profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus')) && (
             <View style={{ marginBottom: 16 }}>
-              <DownloadAppBanner message="Descargá la App para editar tu perfil y gestionar tu cuenta" />
+              <DownloadAppBanner message="Descargá la App para la mejor experiencia" />
             </View>
           )}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -653,6 +824,13 @@ export default function ProfileScreen() {
             </View>
           )}
 
+          {profile?.kycStatus === "verified" && (
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#10B98122", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 6, borderWidth: 1, borderColor: "#10B981" }}>
+              <Ionicons name="shield-checkmark" size={14} color="#10B981" style={{ marginRight: 4 }} />
+              <Text style={{ color: "#10B981", fontSize: 12, fontWeight: "700" }}>Identidad verificada</Text>
+            </View>
+          )}
+
           <Text style={{ color: theme.textLight, marginTop: 2, fontSize: 12 }}>{profile?.email ?? user.email ?? ""}</Text>
           {profile?.role && (
             <Text style={{ color: theme.subtext, marginTop: 2, fontSize: 12 }}>Rol: {profile.role}</Text>
@@ -675,11 +853,11 @@ export default function ProfileScreen() {
           >
              <Ionicons name="create-outline" size={16} color={theme.text} />
              <Text style={{ color: theme.text, fontWeight: "600", fontSize: 14 }}>
-               {profile?.plan && profile.plan.includes('pro_dealer') ? "Configurar Agencia" : "Editar Perfil"}
+               {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) ? "Configurar Agencia" : "Editar Perfil"}
              </Text>
           </TouchableOpacity>
 
-          {profile?.plan && profile.plan.includes('pro_dealer') && (
+          {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) && (
              <TouchableOpacity 
                 onPress={() => router.push(`/(screens)/user-profile/${user.uid}` as any)}
                 style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
@@ -691,7 +869,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={{ marginTop: 16, gap: 12 }}>
-          {profile?.plan && profile.plan.includes('pro_dealer') && (
+          {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) && (
             <View style={{ backgroundColor: theme.card, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#9013FE' }}>
               <View style={{ backgroundColor: '#9013FE', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                  <Ionicons name="bar-chart" size={20} color="#FFF" />
@@ -702,16 +880,70 @@ export default function ProfileScreen() {
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{dealerStats.cars}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Autos</Text>
                 </TouchableOpacity>
-                <View style={{ width: 1, backgroundColor: theme.likeBoxBackground }} />
+                <View style={{ width: 1, backgroundColor: theme.border }} />
                 <TouchableOpacity onPress={() => router.push("/(tabs)/mycars")} style={{ alignItems: 'center', flex: 1 }}>
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{dealerStats.views}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Vistas</Text>
                 </TouchableOpacity>
-                <View style={{ width: 1, backgroundColor: theme.likeBoxBackground }} />
+                <View style={{ width: 1, backgroundColor: theme.border }} />
                 <TouchableOpacity onPress={() => router.push("/(tabs)/interesados")} style={{ alignItems: 'center', flex: 1 }}>
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{dealerStats.likes}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Likes</Text>
                 </TouchableOpacity>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: theme.border, marginTop: 4 }} />
+
+              <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginBottom: 6, fontWeight: "600" }}>
+                  Leads / CRM
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  {[
+                    { label: "Total", value: leadStats.total },
+                    { label: "Nuevos", value: leadStats.nuevo },
+                    { label: "En negociación", value: leadStats.negociacion },
+                    { label: "Vendidos", value: leadStats.vendido },
+                    { label: "Perdidos", value: leadStats.perdido },
+                  ].map((s) => (
+                    <View
+                      key={s.label}
+                      style={{
+                        width: "48%",
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                        borderRadius: 10,
+                        backgroundColor: theme.inputBackground,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: theme.textMuted,
+                          fontSize: 11,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {s.label}
+                      </Text>
+                      <Text
+                        style={{
+                          color: theme.text,
+                          fontSize: 15,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {s.value}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
 
               {topSuggestion && !hideDashboardSuggestion && (
@@ -732,21 +964,21 @@ export default function ProfileScreen() {
                   </View>
               )}
               
-              <View style={{ height: 1, backgroundColor: theme.likeBoxBackground }} />
-              
+              <View style={{ height: 1, backgroundColor: theme.border }} />
+
               <View style={{ padding: 16, flexDirection: 'row', justifyContent: 'space-around' }}>
                 <TouchableOpacity onPress={() => scrollToTransactions("sales")} style={{ alignItems: 'center', flex: 1 }}>
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{sales.length}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Ventas</Text>
                 </TouchableOpacity>
-                <View style={{ width: 1, backgroundColor: theme.likeBoxBackground }} />
+                <View style={{ width: 1, backgroundColor: theme.border }} />
                 <TouchableOpacity onPress={() => scrollToTransactions("purchases")} style={{ alignItems: 'center', flex: 1 }}>
                   <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800' }}>{purchases.length}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>Compras</Text>
                 </TouchableOpacity>
               </View>
 
-              <View style={{ height: 1, backgroundColor: theme.likeBoxBackground }} />
+              <View style={{ height: 1, backgroundColor: theme.border }} />
               
               <View style={{ padding: 16 }}>
                  <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 8, fontWeight: '600' }}>REPORTES DE RENDIMIENTO</Text>
@@ -771,9 +1003,17 @@ export default function ProfileScreen() {
                  </View>
               </View>
 
-              <TouchableOpacity onPress={() => router.push("/(tabs)/mycars")} style={{ borderTopWidth: 1, borderTopColor: theme.likeBoxBackground, padding: 12, alignItems: 'center' }}>
-                <Text style={{ color: '#9013FE', fontWeight: '700', fontSize: 12 }}>GESTIONAR INVENTARIO COMPLETO →</Text>
-              </TouchableOpacity>
+              <View style={{ height: 1, backgroundColor: theme.likeBoxBackground }} />
+
+              <View style={{ padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <TouchableOpacity onPress={() => router.push("/(tabs)/mycars")} style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ color: '#9013FE', fontWeight: '700', fontSize: 12 }}>GESTIONAR INVENTARIO</Text>
+                </TouchableOpacity>
+                <View style={{ width: 1, backgroundColor: theme.likeBoxBackground }} />
+                <TouchableOpacity onPress={() => router.push("/(screens)/leads" as any)} style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ color: '#9013FE', fontWeight: '700', fontSize: 12 }}>VER LEADS / CRM</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -797,7 +1037,7 @@ export default function ProfileScreen() {
                   {planName}
                 </Text>
                 <Text style={{ color: theme.textLight, fontSize: 12 }}>
-                  {isPro ? "Beneficios activos" : "Límite: 2 autos"}
+                  {isPro ? "Beneficios activos" : "Límite: 1 auto"}
                 </Text>
               </View>
               <TouchableOpacity 
@@ -882,7 +1122,7 @@ export default function ProfileScreen() {
                 purchases.map((purchase) => (
                     <TouchableOpacity 
                         key={purchase.id} 
-                        style={{ marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: theme.background }}
+                        style={{ marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}
                         onPress={() => router.push(`/car/${purchase.vehicleId}`)}
                     >
                         <Text style={{ color: theme.text, fontWeight: "600" }}>
@@ -892,16 +1132,16 @@ export default function ProfileScreen() {
                             Vendedor: {purchase.sellerName || "Vendedor"}
                         </Text>
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                            Precio: {purchase.currency} {purchase.finalPrice}
+                            Precio: {purchase.currency} {formatNumber(purchase.finalPrice)}
                         </Text>
                         
-                        {purchase.rating ? (
+                        {(purchase.ratingByBuyer?.score ?? purchase.rating) ? (
                             <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                                <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(purchase.rating)}</Text>
+                                <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(purchase.ratingByBuyer?.score ?? purchase.rating)}</Text>
                                 <Text style={{ color: theme.textMuted, fontSize: 12, marginLeft: 4 }}>Calificado</Text>
                             </View>
                         ) : (
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 onPress={() => openRatingModal(purchase)}
                                 style={{ marginTop: 8, backgroundColor: theme.accent, padding: 8, borderRadius: 8, alignItems: "center" }}
                             >
@@ -921,7 +1161,7 @@ export default function ProfileScreen() {
                     sales.map((sale) => (
                         <TouchableOpacity 
                             key={sale.id} 
-                            style={{ marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: theme.background }}
+                            style={{ marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}
                             onPress={() => router.push(`/car/${sale.vehicleId}`)}
                         >
                             <Text style={{ color: theme.text, fontWeight: "600" }}>
@@ -931,16 +1171,18 @@ export default function ProfileScreen() {
                                 Comprador: {sale.buyerName || "Externo / No registrado"}
                             </Text>
                             <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                                Precio Final: {sale.currency} {sale.finalPrice}
+                                Precio Final: {sale.currency} {formatNumber(sale.finalPrice)}
                             </Text>
-                            {sale.rating && (
+                            {(sale.ratingByBuyer?.score ?? sale.rating) ? (
                                 <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-                                    <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(sale.rating)}</Text>
+                                    <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(sale.ratingByBuyer?.score ?? sale.rating)}</Text>
                                     <Text style={{ color: theme.textMuted, fontSize: 12, marginLeft: 4 }}>
-                                        "{sale.review || "Sin comentario"}"
+                                      {"\""}
+                                      {sale.ratingByBuyer?.comment ?? sale.review ?? "Sin comentario"}
+                                      {"\""}
                                     </Text>
                                 </View>
-                            )}
+                            ) : null}
                         </TouchableOpacity>
                     ))
                 )
@@ -988,19 +1230,100 @@ export default function ProfileScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                onPress={async () => {
+                  if (!user?.uid) return;
+                  const next = !profile?.hideHomeRecentlyViewed;
+                  try {
+                    await updateDoc(doc(db, "users", user.uid), {
+                      hideHomeRecentlyViewed: next,
+                    });
+                  } catch (e) {
+                    console.error("Error updating hideHomeRecentlyViewed", e);
+                  }
+                }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  backgroundColor: profile?.hideHomeRecentlyViewed ? theme.card : theme.accent,
+                  borderRadius: 999,
+                  paddingVertical: 6,
+                  paddingHorizontal: 10,
+                }}
+              >
+                <View
+                  style={{
+                    width: 28,
+                    height: 16,
+                    borderRadius: 999,
+                    backgroundColor: profile?.hideHomeRecentlyViewed ? theme.inputBackground : "#22C55E",
+                    marginRight: 8,
+                    justifyContent: "center",
+                    paddingHorizontal: 2,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: 999,
+                      backgroundColor: "#FFF",
+                      alignSelf: profile?.hideHomeRecentlyViewed ? "flex-start" : "flex-end",
+                    }}
+                  />
+                </View>
+                <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>
+                  {profile?.hideHomeRecentlyViewed ? "Seguí viendo oculto" : "Seguí viendo activo"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
 onPress={() => router.push("/(screens)/alerts" as any)}
                 style={{ backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
               >
                 <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Alertas</Text>
               </TouchableOpacity>
 
-              {(profile?.plan?.includes("pro_dealer") || profile?.role === "admin") && (
+              {profile?.kycStatus !== "verified" ? (
+                <TouchableOpacity
+                  onPress={() => router.push("/(screens)/verify-identity" as any)}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#10B98122", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: "#10B981" }}
+                >
+                  <Ionicons name="shield-checkmark-outline" size={14} color="#10B981" />
+                  <Text style={{ color: "#10B981", fontWeight: "600", fontSize: 12 }}>Verificar identidad</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#10B98122", borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1, borderColor: "#10B981" }}>
+                  <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                  <Text style={{ color: "#10B981", fontWeight: "600", fontSize: 12 }}>Identidad verificada</Text>
+                </View>
+              )}
+
+              {(profile?.plan?.includes("pro_dealer") || profile?.plan?.includes("dealer_pro_plus") || profile?.role === "admin") && (
+                Platform.OS === "web" ? (
                   <TouchableOpacity
                     onPress={() => router.push("/(screens)/bulk-import" as any)}
                     style={{ backgroundColor: theme.accent, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
                   >
                     <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Importar Stock</Text>
                   </TouchableOpacity>
+                ) : (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: theme.buttonBackground,
+                      borderRadius: 999,
+                      paddingVertical: 6,
+                      paddingHorizontal: 12,
+                      opacity: 0.5,
+                    }}
+                  >
+                    <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12, marginRight: 8 }}>
+                      Importar Stock
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>Solo disponible en web</Text>
+                  </View>
+                )
               )}
             </View>
           </View>

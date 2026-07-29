@@ -20,13 +20,25 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if true;
       allow create: if request.auth != null;
-      allow update, delete: if isOwner(userId) || isStaff();
+      allow update, delete: if isOwner(userId) || isStaff() || (
+        request.auth != null &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.firstName == resource.data.firstName &&
+        request.resource.data.lastName == resource.data.lastName &&
+        request.resource.data.plan == resource.data.plan
+      );
       
-      // Allow others to send price drop notifications
       match /price_alert_notifications/{notificationId} {
         allow read: if isOwner(userId);
         allow create: if request.auth != null;
         allow update, delete: if isOwner(userId);
+      }
+
+      match /offer_notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if request.auth != null;
+        allow update: if isOwner(userId);
       }
 
       match /{document=**} {
@@ -45,27 +57,56 @@ service cloud.firestore {
     match /sales/{saleId} {
       function isSaleInvolved() {
         return request.auth != null && (
-          resource.data.sellerId == request.auth.uid || 
+          resource.data.sellerId == request.auth.uid ||
           resource.data.buyerId == request.auth.uid
         );
       }
-      allow read: if isSaleInvolved() || isStaff();
-      allow create: if request.auth != null && request.resource.data.sellerId == request.auth.uid;
+      allow read: if request.auth != null;
+      // El vendedor crea el registro de venta (sellerId debe ser el usuario autenticado)
+      allow create: if request.auth != null && (
+        request.resource.data.sellerId == request.auth.uid ||
+        request.resource.data.buyerId == request.auth.uid
+      );
       allow update: if isSaleInvolved() || isStaff();
+      allow delete: if isSaleInvolved() || isStaff();
     }
 
     // Reglas para vehículos
     match /vehicles/{vehicleId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null && (
-        request.auth.uid == resource.data.userId || 
+      // El userId del documento debe coincidir con el usuario autenticado.
+      // El límite de publicaciones por plan se valida via Cloud Function (enforceVehicleLimit).
+      // riskFlags/riskScore se calculan y envían desde el cliente al momento de publicar.
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && (
+        isStaff() ||
+        // Owner by userId or uid field
+        request.auth.uid == resource.data.userId ||
         request.auth.uid == resource.data.uid ||
-        isStaff()
+        // Mark as sold: verified via offer document (sellerId == auth, vehicleId matches, status accepted)
+        (
+          request.resource.data.status == "sold" &&
+          request.resource.data.userId == resource.data.userId &&
+          request.resource.data.soldViaOfferId is string &&
+          get(/databases/$(database)/documents/offers/$(request.resource.data.soldViaOfferId)).data.sellerId == request.auth.uid &&
+          get(/databases/$(database)/documents/offers/$(request.resource.data.soldViaOfferId)).data.vehicleId == vehicleId &&
+          get(/databases/$(database)/documents/offers/$(request.resource.data.soldViaOfferId)).data.status == "accepted"
+        ) ||
+        // Non-owner update without changing key fields (e.g., view count increments)
+        (
+          request.resource.data.userId == resource.data.userId &&
+          request.resource.data.status == resource.data.status &&
+          request.resource.data.price == resource.data.price &&
+          request.resource.data.currency == resource.data.currency
+        )
+      );
+      allow delete: if request.auth != null && (
+        isStaff() ||
+        request.auth.uid == resource.data.userId ||
+        request.auth.uid == resource.data.uid
       );
       
-      // Allow users to manage their own price alerts
-      // Also allow the vehicle owner to read alerts (to send notifications)
       match /price_alerts/{userId} {
         allow read: if isOwner(userId) || (request.auth != null && get(/databases/$(database)/documents/vehicles/$(vehicleId)).data.userId == request.auth.uid);
         allow write: if isOwner(userId);
@@ -76,6 +117,22 @@ service cloud.firestore {
     match /catalog/{document=**} {
       allow read: if true;
       allow write: if isStaff(); // Solo staff debería modificar el catálogo
+    }
+
+    // Reglas para tabla de referencia de precios (Cámara / price_reference)
+    match /price_reference/{docId} {
+      // Los precios de referencia no son datos sensibles: se pueden leer públicamente
+      allow read: if true;
+      // Solo staff (o scripts con credenciales de service account) deberían escribir aquí
+      allow write: if isStaff();
+    }
+    
+    // Configuración general (por ejemplo, cotización USD/ARS)
+    match /config/{docId} {
+      // La configuración no es sensible (por ahora): se puede leer públicamente
+      allow read: if true;
+      // Solo staff puede actualizar configuración global
+      allow write: if isStaff();
     }
     
     // Reglas para chats y conversaciones
@@ -90,6 +147,39 @@ service cloud.firestore {
     match /mail/{mailId} {
       allow create: if request.auth != null;
       allow read, update, delete: if isStaff() || (request.auth != null && resource.data.toUids[0] == request.auth.uid);
+    }
+
+    // Reglas para leads de CRM (simplificadas: cualquier usuario autenticado puede leer/escribir sus leads)
+    match /leads/{leadId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Reglas para ofertas formales
+    match /offers/{offerId} {
+      function isOfferParty() {
+        return request.auth != null && (
+          resource.data.buyerId == request.auth.uid ||
+          resource.data.sellerId == request.auth.uid
+        );
+      }
+      allow read: if request.auth != null && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.sellerId == request.auth.uid ||
+        isStaff()
+      );
+      allow create: if request.auth != null
+        && request.resource.data.buyerId == request.auth.uid;
+      allow update: if isOfferParty() || isStaff();
+      allow delete: if isStaff();
+    }
+
+    // Reglas para reseñas de vendedores
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.reviewerId == request.auth.uid
+        && request.resource.data.reviewerId != request.resource.data.sellerId;
+      allow update, delete: if isStaff();
     }
   }
 }

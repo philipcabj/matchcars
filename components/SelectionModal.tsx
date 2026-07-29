@@ -114,10 +114,20 @@ export function SelectionModal({
             },
           ]}
         >
-           <Ionicons name="add-circle-outline" size={22} color={theme.accent} style={{ marginRight: 8 }} />
-           <Text style={[styles.optionText, { color: theme.accent, fontWeight: "600" }]}>
-             Agregar "{query}"
-           </Text>
+          <Ionicons
+            name="add-circle-outline"
+            size={22}
+            color={theme.accent}
+            style={{ marginRight: 8 }}
+          />
+          <Text
+            style={[
+              styles.optionText,
+              { color: theme.accent, fontWeight: "600" },
+            ]}
+          >
+            Agregar {`"${query}"`}
+          </Text>
         </TouchableOpacity>
       )}
 

@@ -1,4 +1,6 @@
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -9,7 +11,7 @@ import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Modal, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Modal, Platform, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function InteresadosTab() {
@@ -194,6 +196,26 @@ export default function InteresadosTab() {
     );
   }
 
+  if (Platform.OS === "web") {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <Header title="Interesados" />
+        <WebContainer>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <Ionicons name="people-outline" size={56} color={theme.textMuted} style={{ opacity: 0.4, marginBottom: 12 }} />
+            <Text style={{ color: theme.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 8 }}>
+              Interesados disponibles en la App
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", marginBottom: 24, maxWidth: 340, lineHeight: 22 }}>
+              Descargá la app para ver quiénes se interesaron en tus autos y ponerte en contacto con ellos.
+            </Text>
+            <DownloadAppBanner message="Descargá la App para ver tus interesados" compact />
+          </View>
+        </WebContainer>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <Header />
@@ -203,8 +225,36 @@ export default function InteresadosTab() {
             <ActivityIndicator color={theme.accent} />
           </View>
         ) : interestedList.length === 0 ? (
-          <Text style={{ color: theme.textMuted }}>Todavía no hay interesados en tus publicaciones.</Text>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
+            <Ionicons name="heart-outline" size={48} color={theme.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 4 }}>
+              Todavía no hay interesados en tus publicaciones.
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
+              A medida que tus autos reciban likes, los posibles compradores van a aparecer acá.
+            </Text>
+          </View>
         ) : (
+          <>
+            {/* Summary row */}
+            <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 0, paddingBottom: 8 }}>
+              <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: theme.border }}>
+                <Text style={{ color: theme.text, fontSize: 20, fontWeight: "800" }}>{interestedList.length}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11 }}>Interesados</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: "#FEF3C7", borderRadius: 10, padding: 10 }}>
+                <Text style={{ color: "#92400E", fontSize: 20, fontWeight: "800" }}>
+                  {interestedList.filter((i) => i.count >= 2).length}
+                </Text>
+                <Text style={{ color: "#92400E", fontSize: 11 }}>Muy interesados</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: theme.card, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: theme.border }}>
+                <Text style={{ color: theme.text, fontSize: 20, fontWeight: "800" }}>
+                  {interestedList.reduce((s, i) => s + i.count, 0)}
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 11 }}>Likes totales</Text>
+              </View>
+            </View>
           <FlatList
             data={interestedList}
             keyExtractor={(item) => item.userId}
@@ -251,8 +301,56 @@ export default function InteresadosTab() {
 
                 <TouchableOpacity style={{ flex: 1 }} onPress={() => handleChatPress(item.userId)}>
                   <View>
-                    <Text style={{ color: theme.text, fontWeight: "700", fontSize: 16 }}>{item.name}</Text>
-                    <Text style={{ color: theme.textMuted, fontSize: 14 }}>Le interesan {item.count} autos</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={{ color: theme.text, fontWeight: "700", fontSize: 16 }}>{item.name}</Text>
+                      {item.count >= 2 && (
+                        <View style={{ backgroundColor: "#FEF3C7", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 999, borderWidth: 1, borderColor: "#F59E0B" }}>
+                          <Text style={{ color: "#92400E", fontSize: 10, fontWeight: "700" }}>MUY INTERESADO</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={{ color: theme.textMuted, fontSize: 14 }}>Le {item.count === 1 ? "interesa" : "interesan"} {item.count} {item.count === 1 ? "auto" : "autos"}</Text>
+                    {(() => {
+                      const ids = Array.from(interestedMap.get(item.userId) || []);
+                      const vehicles = ids
+                        .map((id) => vehicleCache.get(id))
+                        .filter(Boolean) as Vehicle[];
+                      vehicles.sort((a: any, b: any) => {
+                        const ta = (a.updatedAt?.seconds ?? a.createdAt?.seconds ?? 0);
+                        const tb = (b.updatedAt?.seconds ?? b.createdAt?.seconds ?? 0);
+                        return tb - ta;
+                      });
+                      const thumbs = vehicles.slice(0, 3);
+                      const remaining = Math.max(0, (vehicles.length - thumbs.length));
+                      return (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                          {thumbs.map((v) => (
+                            <TouchableOpacity key={v.id} onPress={() => router.push(`/car/${v.id}` as any)}>
+                              <View style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden" }}>
+                                <Image
+                                  source={{ uri: v.coverImage || (v as any).images?.cover || (v as any).images?.gallery?.[0] || "https://placehold.co/64" }}
+                                  style={{ width: 32, height: 32, borderRadius: 6, opacity: v.status === 'sold' ? 0.5 : 1 }}
+                                  contentFit="cover"
+                                />
+                                {v.status === 'sold' && (
+                                  <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.15)" }} />
+                                )}
+                                {v.status === 'sold' && (
+                                  <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.35)", paddingVertical: 2 }}>
+                                    <Text style={{ color: "#fff", fontSize: 8, textAlign: "center", fontWeight: "700" }}>VENDIDO</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </TouchableOpacity>
+                          ))}
+                          {remaining > 0 && (
+                            <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
+                              <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>+{remaining}</Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </TouchableOpacity>
 
@@ -262,6 +360,7 @@ export default function InteresadosTab() {
               </View>
             )}
           />
+          </>
         )}
       </View>
 

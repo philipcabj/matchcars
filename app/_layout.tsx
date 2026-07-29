@@ -1,10 +1,14 @@
 // app/_layout.tsx
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { trackEvent } from "@/lib/analytics";
+import { logger } from "@/lib/logger";
+import { initializeMetaSDK } from "@/lib/metaSDK";
 import { Ionicons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import * as Linking from 'expo-linking';
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import React, { useEffect } from "react";
-import { ActivityIndicator, LogBox, Platform, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, LogBox, Platform, Text, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Ignorar logs de advertencia/error en pantalla (YellowBox/RedBox) para el usuario final
@@ -14,6 +18,13 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { RevenueCatProvider } from "@/contexts/RevenueCatContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+
+const webLogo = require('@/assets/images/icon.png');
+
+// Initialize Meta SDK on app start
+if (Platform.OS !== 'web') {
+  initializeMetaSDK();
+}
 
 export const linking = {
   prefixes: [Linking.createURL('/'), 'matchcars://', 'https://matchcars.app'],
@@ -47,9 +58,7 @@ import { CompareFloatButton } from "@/components/CompareFloatButton";
 import { CompareProvider } from "@/contexts/CompareContext";
 import { HistoryProvider } from "@/contexts/HistoryContext";
 
-function RootStack() {
-  const { theme } = useTheme();
-  const { user, profile, initializing, logout } = useAuth();
+function RootStackContent() {
   const pathname = usePathname();
   const router = useRouter();
   
@@ -57,9 +66,12 @@ function RootStack() {
     ...Ionicons.font,
   });
 
+  // Only try to access theme AFTER initial render to avoid context issues
+  const { theme } = useTheme();
+  const { user, profile, initializing, logout } = useAuth();
+
   useEffect(() => {
     if (Platform.OS === 'web') {
-      // Inyectar CSS global para Ionicons usando el archivo en /fonts/Ionicons.ttf
       const style = document.createElement('style');
       style.textContent = `
         @font-face {
@@ -73,14 +85,28 @@ function RootStack() {
     }
 
     if (Platform.OS === 'android') {
-      // Asegurar que la barra de navegación sea visible (reset de estado previo)
       try {
         const NavigationBar = require('expo-navigation-bar');
         NavigationBar.setVisibilityAsync('visible');
-      } catch (error) {
-        // Ignorar si no está instalado o falla
-      }
+      } catch (error) {}
     }
+
+    try {
+      const anyGlobal = global as any;
+      const errorUtils = anyGlobal.ErrorUtils;
+      if (errorUtils && typeof errorUtils.setGlobalHandler === "function") {
+        const prevHandler = typeof errorUtils.getGlobalHandler === "function" ? errorUtils.getGlobalHandler() : null;
+        errorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+          if (error && typeof error.message === "string" && error.message.includes("Cannot read property 'forEach' of null")) {
+            logger.log("Silenced forEach null error", error);
+            return;
+          }
+          if (prevHandler) {
+            prevHandler(error, isFatal);
+          }
+        });
+      }
+    } catch {}
   }, []);
 
   if (!fontsLoaded) {
@@ -101,7 +127,7 @@ function RootStack() {
           return (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background, padding: 20 }}>
                 <View style={{ maxWidth: 500, alignItems: 'center' }}>
-                    <Ionicons name="phone-portrait-outline" size={64} color={theme.textMuted} />
+                    <Image source={webLogo} style={{ width: 96, height: 96, marginBottom: 12 }} />
                     <Text style={{ fontSize: 24, fontWeight: 'bold', color: theme.text, marginTop: 20, textAlign: 'center' }}>
                         Descarga la App
                     </Text>
@@ -113,9 +139,25 @@ function RootStack() {
                     </Text>
 
                     <View style={{ flexDirection: 'row', gap: 10, marginTop: 30 }}>
-                        <Text onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.matchcars.app')} style={{ color: theme.accent, fontWeight: 'bold', cursor: 'pointer' }}>Android</Text>
+                        <Text
+                          onPress={() => {
+                            trackEvent("app_download_click", { platform: "android", location: "mobile_web_login_guard" });
+                            Linking.openURL('https://play.google.com/store/apps/details?id=com.matchcars.app');
+                          }}
+                          style={{ color: theme.accent, fontWeight: 'bold', cursor: 'pointer' }}
+                        >
+                          Android
+                        </Text>
                         <Text style={{ color: theme.textMuted }}>|</Text>
-                        <Text onPress={() => Linking.openURL('https://apps.apple.com/app/id6739093393')} style={{ color: theme.accent, fontWeight: 'bold', cursor: 'pointer' }}>iOS</Text>
+                        <Text
+                          onPress={() => {
+                            trackEvent("app_download_click", { platform: "ios", location: "mobile_web_login_guard" });
+                            Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6757968664');
+                          }}
+                          style={{ color: theme.accent, fontWeight: 'bold', cursor: 'pointer' }}
+                        >
+                          iOS
+                        </Text>
                     </View>
                     
                      <TouchableOpacity onPress={() => router.replace('/')} style={{ marginTop: 40 }}>
@@ -169,7 +211,7 @@ function RootStack() {
         return (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background, padding: 20 }}>
             <View style={{ maxWidth: 500, alignItems: 'center' }}>
-                <Ionicons name="phone-portrait-outline" size={64} color={theme.textMuted} />
+                <Image source={webLogo} style={{ width: 96, height: 96, marginBottom: 12 }} />
                 <Text style={{ fontSize: 24, fontWeight: 'bold', color: theme.text, marginTop: 20, textAlign: 'center' }}>
                     Experiencia Móvil
                 </Text>
@@ -181,13 +223,29 @@ function RootStack() {
                 </Text>
 
                 <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: 20, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }}>
-                    (Debug Info: Tu plan actual es "{profile.plan || 'gratis'}")
+                    {`(Debug Info: Tu plan actual es ${profile.plan || 'gratis'})`}
                 </Text>
 
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 30 }}>
-                    <Text onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.matchcars.app')} style={{ color: theme.accent, fontWeight: 'bold' }}>Android</Text>
+                    <Text
+                      onPress={() => {
+                        trackEvent("app_download_click", { platform: "android", location: "web_guard" });
+                        Linking.openURL('https://play.google.com/store/apps/details?id=com.matchcars.app');
+                      }}
+                      style={{ color: theme.accent, fontWeight: 'bold' }}
+                    >
+                      Android
+                    </Text>
                     <Text style={{ color: theme.textMuted }}>|</Text>
-                    <Text onPress={() => Linking.openURL('https://apps.apple.com/app/id6739093393')} style={{ color: theme.accent, fontWeight: 'bold' }}>iOS</Text>
+                    <Text
+                      onPress={() => {
+                        trackEvent("app_download_click", { platform: "ios", location: "web_guard" });
+                        Linking.openURL('https://apps.apple.com/ar/app/matchcars/id6757968664');
+                      }}
+                      style={{ color: theme.accent, fontWeight: 'bold' }}
+                    >
+                      iOS
+                    </Text>
                 </View>
                 
                  <TouchableOpacity onPress={() => logout()} style={{ marginTop: 40 }}>
@@ -197,9 +255,9 @@ function RootStack() {
                  </TouchableOpacity>
             </View>
         </View>
-     );
-  }
-}
+        );
+     }
+   }
 
   // Siempre tenemos las tabs; login/register son pantallas aparte
   return (
@@ -212,29 +270,35 @@ function RootStack() {
         <Stack.Screen name="legal-terms" options={{ headerShown: false }} />
         <Stack.Screen name="privacy" options={{ headerShown: false }} />
         <Stack.Screen name="(admin)" options={{ headerShown: false }} />
-        {/* acá podés agregar screens como add-car si no están dentro de tabs */}
       </Stack>
       <CompareFloatButton />
     </View>
   );
 }
 
+// Wrapper component to ensure all hooks are called within providers
+function RootStack() {
+  return <RootStackContent />;
+}
+
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <AuthProvider>
-          <NotificationProvider>
-            <RevenueCatProvider>
-              <CompareProvider>
-                <HistoryProvider>
-                  <RootStack />
-                </HistoryProvider>
-              </CompareProvider>
-            </RevenueCatProvider>
-          </NotificationProvider>
-        </AuthProvider>
-      </ThemeProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ThemeProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <RevenueCatProvider>
+                <CompareProvider>
+                  <HistoryProvider>
+                    <RootStack />
+                  </HistoryProvider>
+                </CompareProvider>
+              </RevenueCatProvider>
+            </NotificationProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

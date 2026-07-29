@@ -1,18 +1,22 @@
+import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { calcMatchScore } from "@/lib/matchScore";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from "react-native";
+import { FlatList, Image, Platform, RefreshControl, Text, TouchableOpacity, View } from "react-native";
+import { SkeletonList } from "@/components/SkeletonLoader";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function MatchesTab() {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { markMatchesAsSeen } = useNotifications();
   const router = useRouter();
 
@@ -22,6 +26,24 @@ export default function MatchesTab() {
     }, [])
   );
   const [loading, setLoading] = useState(true);
+  const [showSkeleton, setShowSkeleton] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (loading) {
+      setShowSkeleton(true);
+    } else {
+      const t = setTimeout(() => setShowSkeleton(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [loading]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setProfiles(new Map());
+    setOtherVehicles(new Map());
+    setTimeout(() => setRefreshing(false), 800);
+  };
   const [likersOfMine, setLikersOfMine] = useState<Map<string, Set<string>>>(new Map());
   const [ownersILiked, setOwnersILiked] = useState<Map<string, Set<string>>>(new Map());
   const [profiles, setProfiles] = useState<Map<string, { name: string; initials: string; avatarColor: string; photoUrl?: string | null }>>(new Map());
@@ -44,7 +66,14 @@ export default function MatchesTab() {
       snap.forEach((d) => {
         const data: any = d.data();
         const likedBy: string[] = Array.isArray(data?.likedBy) ? data.likedBy : [];
-        mine.set(d.id, { id: d.id, ...data, coverImage: data?.coverImage ?? data?.images?.cover ?? (data?.images?.gallery?.[0] ?? undefined) });
+        const resolvedCover = data?.coverImage
+          ?? data?.images?.cover
+          ?? data?.images?.gallery?.[0]
+          ?? (Array.isArray(data?.images) ? data.images[0] : undefined)
+          ?? data?.image
+          ?? data?.thumbnail
+          ?? undefined;
+        mine.set(d.id, { id: d.id, ...data, coverImage: resolvedCover });
         likedBy.forEach((uid: string) => {
           if (user && uid === user.uid) return;
           const set = likers.get(uid) || new Set<string>();
@@ -70,7 +99,14 @@ export default function MatchesTab() {
           const next = new Map(prev);
           if (snap.exists()) {
             const data: any = snap.data();
-            next.set(vid, { id: snap.id, ...data, coverImage: data?.coverImage ?? data?.images?.cover ?? (data?.images?.gallery?.[0] ?? undefined) });
+            const resolvedCover = data?.coverImage
+              ?? data?.images?.cover
+              ?? data?.images?.gallery?.[0]
+              ?? (Array.isArray(data?.images) ? data.images[0] : undefined)
+              ?? data?.image
+              ?? data?.thumbnail
+              ?? undefined;
+            next.set(vid, { id: snap.id, ...data, coverImage: resolvedCover });
           } else {
             next.delete(vid);
           }
@@ -208,20 +244,47 @@ export default function MatchesTab() {
     );
   }
 
+  if (Platform.OS === "web") {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <Header title="Matches" />
+        <WebContainer>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+            <Ionicons name="heart-outline" size={56} color={theme.textMuted} style={{ opacity: 0.4, marginBottom: 12 }} />
+            <Text style={{ color: theme.text, fontSize: 20, fontWeight: "800", textAlign: "center", marginBottom: 8 }}>
+              Matches disponibles en la App
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", marginBottom: 24, maxWidth: 340, lineHeight: 22 }}>
+              Descargá la app para ver tus matches y conectarte con otros usuarios que tienen lo que buscás.
+            </Text>
+            <DownloadAppBanner message="Descargá la App para ver tus matches" compact />
+          </View>
+        </WebContainer>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <Header />
       <View style={{ padding: 16, flex: 1 }}>
-        {loading ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator color={theme.accent} />
-          </View>
+        {showSkeleton ? (
+          <SkeletonList count={3} />
         ) : matchPairs.length === 0 ? (
-          <Text style={{ color: theme.textMuted }}>Todavía no tenés matches.</Text>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 }}>
+            <Ionicons name="git-network-outline" size={48} color={theme.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 4 }}>
+              Todavía no tenés matches.
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}>
+              Cuando haya un match entre tus autos y otros usuarios, vas a verlo acá.
+            </Text>
+          </View>
         ) : (
           <FlatList
             data={matchPairs}
             keyExtractor={(item) => item.userId}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
             renderItem={({ item }) => (
               <View style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: theme.likeBoxBackground }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
@@ -271,6 +334,15 @@ export default function MatchesTab() {
                     <Text style={{ color: theme.price, fontSize: 12, fontWeight: "700" }}>
                       {item.theirVehicle?.price != null && item.theirVehicle?.currency ? `${item.theirVehicle.currency} ${Number(item.theirVehicle.price).toLocaleString()}` : "Consultar"}
                     </Text>
+                    {profile?.buyerPreferences && item.theirVehicle && (() => {
+                      const { score } = calcMatchScore(item.theirVehicle, profile.buyerPreferences!);
+                      return score > 0 ? (
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 3 }}>
+                          <Ionicons name="sparkles" size={9} color={theme.accent} />
+                          <Text style={{ color: theme.accent, fontSize: 10, fontWeight: "700" }}>{score}% match</Text>
+                        </View>
+                      ) : null;
+                    })()}
                   </TouchableOpacity>
                 </View>
               </View>
