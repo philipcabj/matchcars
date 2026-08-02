@@ -1,11 +1,14 @@
+import { ShareCard } from "@/components/ShareCard";
 import { ShareSheet } from "@/components/ShareSheet";
 import { WebContainer } from "@/components/WebContainer";
 import { CarCard } from "@/components/cards/carcard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useAgencyProfile } from "@/hooks/useAgencyProfile";
 import { trackEvent } from "@/lib/analytics";
 import { db } from "@/lib/firebase";
 import { fetchDealerReportData } from "@/lib/reporting";
+import { generateAndShareCard } from "@/lib/shareCard";
 import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -34,6 +37,11 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+let QRCode: any = null;
+try {
+  QRCode = require("react-native-qrcode-svg").default;
+} catch {}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -156,7 +164,10 @@ export default function UserProfileScreen() {
   const { theme } = useTheme();
   const { user, profile } = useAuth();
   const router = useRouter();
-  const { uid } = useLocalSearchParams<{ uid: string }>();
+  const params = useLocalSearchParams<{ uid?: string; slug?: string }>();
+  const identifier = params.uid ?? params.slug;
+  const { uid, profileData, loading: profileLoading, notFound: profileNotFound } =
+    useAgencyProfile(identifier);
 
   // ── State ──
   const [loading, setLoading] = useState(true);
@@ -167,22 +178,40 @@ export default function UserProfileScreen() {
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [inventoryY, setInventoryY] = useState(0);
   const scrollViewRef = React.useRef<ScrollView>(null);
+  const shareCardRef = React.useRef<View>(null);
+  const qrSvgRef = React.useRef<any>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
-  const [profileName, setProfileName] = useState<string>("");
-  const [profileInitials, setProfileInitials] = useState<string>("");
-  const [profileColor, setProfileColor] = useState<string>(theme.accent);
-  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
-  const [profileData, setProfileData] = useState<any>(null);
   const [dealerReport, setDealerReport] = useState<any>(null);
   const [ratingStats, setRatingStats] = useState<{ avg: number; count: number } | null>(null);
   const [recentReviews, setRecentReviews] = useState<Review[]>([]);
 
+  // ── Profile display fields (derived from the resolved profileData) ──
+  const profileName = profileData
+    ? profileData.agencyName ||
+      (profileData.firstName || profileData.lastName
+        ? `${profileData.firstName ?? ""} ${profileData.lastName ?? ""}`.trim()
+        : profileData.displayName || profileData.email || "Usuario")
+    : profileNotFound
+    ? "Usuario"
+    : "";
+  const profileInitials = profileData
+    ? String(profileData.initials || "") ||
+      (String(profileData.displayName || "").trim().slice(0, 2).toUpperCase() || "MC")
+    : profileNotFound
+    ? "MC"
+    : "";
+  const profileColor = profileData?.avatarColor || theme.accent;
+  const profilePhotoUrl = profileData?.photoURL || profileData?.avatar || null;
+
   // ── Derived ──
-  const hasUid = typeof uid === "string" && uid.length > 0;
+  const hasUid = !!uid;
   const isOwnProfile = user?.uid && uid && user.uid === uid;
   const isBlocked = profile?.blockedUsers && uid && profile.blockedUsers.includes(uid);
   const uidString = String(uid ?? "");
   const profileUrl = `https://matchcars.app/user-profile/${uidString}`;
+  const slugUrl = profileData?.slug ? `https://matchcars.app/agencia/${profileData.slug}` : null;
+  const shareUrl = slugUrl ?? profileUrl;
 
   const isDealerProfile =
     !!profileData?.plan && String(profileData.plan).includes("pro_dealer");
@@ -233,7 +262,7 @@ export default function UserProfileScreen() {
           "@context": "https://schema.org",
           "@type": isDealerProfile ? "AutoDealer" : "Person",
           name: profileName,
-          url: profileUrl,
+          url: shareUrl,
           ...(foundedYear ? { foundingDate: String(foundedYear) } : {}),
           address:
             profileData?.city || profileData?.province
@@ -253,58 +282,30 @@ export default function UserProfileScreen() {
         }
       : null;
 
-  // ── Fetch profile ──
+  // ── Pre-render the QR (for the downloadable share card) to a PNG data-URI ──
   useEffect(() => {
-    if (!hasUid) return;
-    setLoading(true);
-    const unsub = onSnapshot(
-      doc(db, "users", uid!),
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const pd = docSnap.data() as any;
-          setProfileData(pd);
-          const name =
-            pd?.agencyName ||
-            (pd?.firstName || pd?.lastName
-              ? `${pd?.firstName ?? ""} ${pd?.lastName ?? ""}`.trim()
-              : pd?.displayName || pd?.email || "Usuario");
-          setProfileName(name);
-          let initials = String(pd?.initials || "");
-          if (!initials) {
-            const dn = String(pd?.displayName || "").trim();
-            initials = dn ? dn.slice(0, 2).toUpperCase() : "MC";
-          }
-          setProfileInitials(initials);
-          setProfileColor(pd?.avatarColor || theme.accent);
-          setProfilePhotoUrl(pd?.photoURL || pd?.avatar || null);
+    if (!shareUrl || !qrSvgRef.current?.toDataURL) return;
+    qrSvgRef.current.toDataURL((base64: string) => {
+      setQrDataUrl(`data:image/png;base64,${base64}`);
+    });
+  }, [shareUrl]);
 
-          const isDealer = !!pd?.plan && String(pd.plan).includes("pro_dealer");
-          if (isDealer && pd?.agencyName) {
-            (async () => {
-              try {
-                const vehiclesSnap = await getDocs(
-                  query(collection(db, "vehicles"), where("userId", "==", String(uid)))
-                );
-                for (const v of vehiclesSnap?.docs ?? []) {
-                  const data = v.data() as any;
-                  if (data.userName === pd.agencyName) continue;
-                  await updateDoc(v.ref, { userName: pd.agencyName });
-                }
-              } catch {}
-            })();
-          }
-        } else {
-          setProfileName("Usuario");
-          setProfileInitials("MC");
-          setProfileColor(theme.accent);
-          setProfilePhotoUrl(null);
+  // ── Keep vehicles' cached userName in sync with the agency name ──
+  useEffect(() => {
+    if (!uid || !isDealerProfile || !profileData?.agencyName) return;
+    (async () => {
+      try {
+        const vehiclesSnap = await getDocs(
+          query(collection(db, "vehicles"), where("userId", "==", String(uid)))
+        );
+        for (const v of vehiclesSnap?.docs ?? []) {
+          const data = v.data() as any;
+          if (data.userName === profileData.agencyName) continue;
+          await updateDoc(v.ref, { userName: profileData.agencyName });
         }
-        setLoading(false);
-      },
-      () => setLoading(false)
-    );
-    return () => unsub();
-  }, [uid, theme.accent, hasUid]);
+      } catch {}
+    })();
+  }, [uid, isDealerProfile, profileData?.agencyName]);
 
   // ── Fetch dealer report ──
   useEffect(() => {
@@ -432,6 +433,11 @@ export default function UserProfileScreen() {
     return activeVehicles.filter((v) => ids.includes(v.id)).slice(0, 6);
   }, [activeVehicles, profileData?.highlightedVehicleIds]);
 
+  const cardVehicles = useMemo(
+    () => (highlightedVehicles.length ? highlightedVehicles : activeVehicles).slice(0, 3),
+    [highlightedVehicles, activeVehicles]
+  );
+
   const availableBrands = useMemo(
     () =>
       [...new Set(activeVehicles.map((v) => v.brand).filter((b): b is string => !!b))].sort(),
@@ -480,6 +486,8 @@ export default function UserProfileScreen() {
     const clean = phone.replace(/\D/g, "");
     Linking.openURL(`tel:+${clean}`).catch(() => {});
   };
+
+  const handleDownloadCard = () => generateAndShareCard({ cardRef: shareCardRef, uid: uidString });
 
   // ── Sub-components ────────────────────────────────────────────────────────
 
@@ -1424,11 +1432,11 @@ export default function UserProfileScreen() {
       <Head>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
-        <link rel="canonical" href={profileUrl} />
+        <link rel="canonical" href={shareUrl} />
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={pageDescription} />
         <meta property="og:type" content="profile" />
-        <meta property="og:url" content={profileUrl} />
+        <meta property="og:url" content={shareUrl} />
         {(profilePhotoUrl || profileData?.bannerUrl) && (
           <meta property="og:image" content={profilePhotoUrl || profileData.bannerUrl} />
         )}
@@ -1848,14 +1856,36 @@ export default function UserProfileScreen() {
       <ShareSheet
         visible={shareSheetVisible}
         onClose={() => setShareSheetVisible(false)}
-        url={profileUrl}
+        url={shareUrl}
         title={
           isDealerProfile
             ? `Conocé la agencia ${profileName} en Matchcars`
             : `Mirá el perfil de ${profileName} en Matchcars`
         }
         theme={theme}
+        onDownloadCard={isDealerProfile ? handleDownloadCard : undefined}
+        analyticsId={uidString}
       />
+
+      {/* Off-screen: pre-rendered QR (feeds the share card) + the capturable share card itself */}
+      {QRCode && (
+        <View style={{ position: "absolute", left: -9999, top: 0, opacity: 0 }} pointerEvents="none">
+          <QRCode value={shareUrl} size={240} getRef={(r: any) => (qrSvgRef.current = r)} />
+        </View>
+      )}
+      <View style={{ position: "absolute", left: -9999, top: 0 }} pointerEvents="none">
+        <ShareCard
+          ref={shareCardRef}
+          agencyName={profileName || "Matchcars"}
+          logoUrl={profileData?.logoUrl || profilePhotoUrl}
+          city={profileData?.city}
+          province={profileData?.province}
+          rating={displayRating}
+          reviewCount={displayReviewCount}
+          vehicles={cardVehicles}
+          qrDataUrl={qrDataUrl}
+        />
+      </View>
     </>
   );
 }

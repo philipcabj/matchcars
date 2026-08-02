@@ -12,6 +12,20 @@
     ],
     "rewrites": [
       {
+        "source": "/user-profile/**",
+        "function": {
+          "functionId": "ogPreview",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/agencia/**",
+        "function": {
+          "functionId": "ogPreview",
+          "region": "us-central1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

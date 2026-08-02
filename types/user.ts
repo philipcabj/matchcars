@@ -50,6 +50,7 @@ export interface UserProfile {
 
   // Pro Dealer Profile Fields
   agencyName?: string;
+  slug?: string; // Friendly URL: matchcars.app/agencia/<slug>
   bannerUrl?: string;
   businessAddress?: string;
   address?: string; // Standard address field
@@ -83,6 +84,10 @@ export interface UserProfile {
   foundedYear?: number;
   brandSpecialties?: string[];
   showroomGallery?: string[];
+
+  // Marca de agua con logo en fotos de autos (planes pagos)
+  logoUrl?: string;
+  watermarkEnabled?: boolean;
 
   // Buyer preferences (for Match Score)
   buyerPreferences?: BuyerPreferences;

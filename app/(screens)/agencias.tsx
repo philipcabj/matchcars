@@ -23,6 +23,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type Agency = {
   id: string;
+  slug?: string | null;
   name: string;
   city?: string;
   province?: string;
@@ -102,6 +103,7 @@ export default function AgenciesDirectoryScreen() {
 
           items.push({
             id: docSnap.id,
+            slug: data.slug || null,
             name,
             city: data.location?.city ?? data.city ?? undefined,
             province: data.location?.province ?? data.province ?? undefined,
@@ -168,7 +170,7 @@ export default function AgenciesDirectoryScreen() {
           itemListElement: agencies.map((a, index) => ({
             "@type": "ListItem",
             position: index + 1,
-            url: `https://matchcars.app/user-profile/${a.id}`,
+            url: a.slug ? `https://matchcars.app/agencia/${a.slug}` : `https://matchcars.app/user-profile/${a.id}`,
             name: a.name,
           })),
         }
@@ -189,7 +191,11 @@ export default function AgenciesDirectoryScreen() {
 
     return (
       <TouchableOpacity
-        onPress={() => router.push(`/(screens)/user-profile/${item.id}` as any)}
+        onPress={() =>
+          router.push(
+            (item.slug ? `/(screens)/agencia/${item.slug}` : `/(screens)/user-profile/${item.id}`) as any
+          )
+        }
         style={{
           padding: 16,
           borderRadius: 16,

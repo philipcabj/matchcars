@@ -1,3 +1,4 @@
+import { Analytics } from "@/lib/analytics";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
@@ -22,12 +23,27 @@ interface ShareSheetProps {
   url: string;
   title: string;
   theme: any;
+  onDownloadCard?: () => void | Promise<void>;
+  analyticsId?: string;
 }
 
-export function ShareSheet({ visible, onClose, url, title, theme }: ShareSheetProps) {
+export function ShareSheet({ visible, onClose, url, title, theme, onDownloadCard, analyticsId }: ShareSheetProps) {
   const [copied, setCopied] = useState(false);
+  const [downloadingCard, setDownloadingCard] = useState(false);
+
+  const handleDownloadCard = async () => {
+    if (!onDownloadCard || downloadingCard) return;
+    setDownloadingCard(true);
+    try {
+      await onDownloadCard();
+      if (analyticsId) Analytics.logShare("card_download", analyticsId);
+    } finally {
+      setDownloadingCard(false);
+    }
+  };
 
   const handleCopy = async () => {
+    if (analyticsId) Analytics.logShare("copy_link", analyticsId);
     if (Platform.OS === "web") {
       try {
         await (navigator as any).clipboard.writeText(url);
@@ -42,6 +58,7 @@ export function ShareSheet({ visible, onClose, url, title, theme }: ShareSheetPr
   };
 
   const handleWhatsApp = () => {
+    if (analyticsId) Analytics.logShare("whatsapp", analyticsId);
     const msg = encodeURIComponent(`${title}\n${url}`);
     Linking.openURL(`https://wa.me/?text=${msg}`).catch(() => {});
   };
@@ -210,6 +227,31 @@ export function ShareSheet({ visible, onClose, url, title, theme }: ShareSheetPr
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Download branded card (WhatsApp Status / Instagram Story) */}
+            {onDownloadCard && (
+              <TouchableOpacity
+                onPress={handleDownloadCard}
+                disabled={downloadingCard}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  backgroundColor: theme.inputBackground ?? theme.background,
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  opacity: downloadingCard ? 0.6 : 1,
+                }}
+              >
+                <Ionicons name="image-outline" size={20} color={theme.text} />
+                <Text style={{ color: theme.text, fontSize: 13, fontWeight: "700" }}>
+                  {downloadingCard ? "Generando..." : "Descargar tarjeta"}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity onPress={onClose} style={{ alignItems: "center", paddingVertical: 4 }}>
               <Text style={{ color: theme.textMuted, fontWeight: "600", fontSize: 14 }}>

@@ -1,14 +1,21 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
+import { onObjectFinalized } from "firebase-functions/v2/storage";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs/promises";
+import sharp from "sharp";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 admin.initializeApp();
 
 const db = admin.firestore();
 const geminiKey = defineSecret("GEMINI_API_KEY");
+const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -446,3 +453,387 @@ export const analyzeCarPhotos = onCall(
     }
   }
 );
+
+// ─── Meta Conversions API — sendMetaConversionEvent ──────────────────────────
+// Server-side mirror of the Meta Pixel events fired on the web funnel
+// (matchcars.app). Deduplicated with the client-side pixel via eventId.
+// Mitigates signal loss from ad blockers / browser privacy settings so the
+// Meta Ads campaign optimizes on more complete conversion data.
+
+const META_PIXEL_ID = "1217053183887888";
+
+interface CapiEventRequest {
+  eventName: string;
+  eventId: string;
+  isStandard?: boolean;
+  params?: Record<string, string | number>;
+  sourceUrl?: string;
+  fbp?: string;
+  fbc?: string;
+}
+
+function sha256(value: string): string {
+  return crypto.createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
+}
+
+export const sendMetaConversionEvent = onCall(
+  { secrets: [metaCapiToken], cors: true },
+  async (request) => {
+    const { eventName, eventId, params, sourceUrl, fbp, fbc } =
+      request.data as CapiEventRequest;
+
+    if (!eventName || !eventId) {
+      throw new HttpsError("invalid-argument", "eventName y eventId son requeridos.");
+    }
+
+    const userData: Record<string, unknown> = {};
+    const ip = request.rawRequest?.headers?.["x-forwarded-for"] || request.rawRequest?.ip;
+    if (ip) userData.client_ip_address = String(ip).split(",")[0].trim();
+    const userAgent = request.rawRequest?.headers?.["user-agent"];
+    if (userAgent) userData.client_user_agent = String(userAgent);
+    if (fbp) userData.fbp = fbp;
+    if (fbc) userData.fbc = fbc;
+    if (request.auth?.uid) userData.external_id = sha256(request.auth.uid);
+    if (request.auth?.token?.email) userData.em = sha256(String(request.auth.token.email));
+
+    const payload = {
+      data: [
+        {
+          event_name: eventName,
+          event_time: Math.floor(Date.now() / 1000),
+          event_id: eventId,
+          event_source_url: sourceUrl,
+          action_source: "website",
+          user_data: userData,
+          custom_data: params || {},
+        },
+      ],
+    };
+
+    try {
+      const res = await fetch(
+        `https://graph.facebook.com/v21.0/${META_PIXEL_ID}/events?access_token=${metaCapiToken.value()}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        console.error("[Meta CAPI] Error response", json);
+        return { success: false, error: json };
+      }
+      return { success: true, result: json };
+    } catch (e) {
+      console.error("[Meta CAPI] Request failed", e);
+      return { success: false, error: String(e) };
+    }
+  }
+);
+
+// ─── autoEnhancePhoto ─────────────────────────────────────────────────────
+// Se dispara con cada foto subida a uploads/{userId}/{file} (portada y
+// galería de add-car.tsx) y aplica una estandarización automática de color:
+// auto-orientación, auto-contraste/balance de blancos y nitidez leve.
+// Si el vendedor tiene un plan pago con logoUrl + watermarkEnabled, además
+// estampa su logo en la esquina inferior derecha.
+// Sobrescribe el mismo archivo preservando el token de descarga existente,
+// para que la URL que el cliente ya haya obtenido con getDownloadURL()
+// siga funcionando una vez que la foto quede mejorada.
+
+function canUseWatermarkPlan(plan: string): boolean {
+  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+}
+
+async function fetchBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch {
+    return null;
+  }
+}
+
+async function applyLogoWatermark(baseBuffer: Buffer, userId: string): Promise<Buffer> {
+  try {
+    const userSnap = await db.doc(`users/${userId}`).get();
+    const userData = userSnap.data();
+    if (!userData) return baseBuffer;
+
+    const plan = String(userData.plan || "free");
+    const watermarkEnabled = userData.watermarkEnabled === true;
+    const logoUrl = userData.logoUrl as string | undefined;
+
+    if (!watermarkEnabled || !logoUrl || !canUseWatermarkPlan(plan)) return baseBuffer;
+
+    const logoBuffer = await fetchBuffer(logoUrl);
+    if (!logoBuffer) return baseBuffer;
+
+    const baseMeta = await sharp(baseBuffer).metadata();
+    const baseWidth = baseMeta.width || 1200;
+    const baseHeight = baseMeta.height || 900;
+    const margin = Math.round(baseWidth * 0.03);
+
+    // Logo base, un poco más chico que antes (13% del ancho de la foto)
+    const resizedLogo = await sharp(logoBuffer)
+      .resize({ width: Math.round(baseWidth * 0.13), withoutEnlargement: true })
+      .ensureAlpha()
+      .png()
+      .toBuffer();
+    const logoMeta = await sharp(resizedLogo).metadata();
+    const logoW = logoMeta.width || 0;
+    const logoH = logoMeta.height || 0;
+
+    // Esfumado: degradé radial que desvanece el logo hacia sus bordes
+    const featherSvg = `
+      <svg width="${logoW}" height="${logoH}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="fade" cx="50%" cy="50%" r="65%">
+            <stop offset="55%" stop-color="white" stop-opacity="1"/>
+            <stop offset="100%" stop-color="white" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#fade)"/>
+      </svg>`;
+    const featherMask = await sharp(Buffer.from(featherSvg)).png().toBuffer();
+    const featheredLogo = await sharp(resizedLogo)
+      .composite([{ input: featherMask, blend: "dest-in" }])
+      .png()
+      .toBuffer();
+
+    // Biselado: silueta clara (arriba-izq) + silueta oscura (abajo-der), ambas
+    // desenfocadas y semitransparentes, dan sensación de relieve al logo.
+    const shadowLayer = await sharp({
+      create: { width: logoW, height: logoH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+    })
+      .composite([{ input: featheredLogo, blend: "dest-in" }])
+      .blur(2)
+      .linear([1, 1, 1, 0.55], [0, 0, 0, 0])
+      .png()
+      .toBuffer();
+
+    const highlightLayer = await sharp({
+      create: { width: logoW, height: logoH, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+    })
+      .composite([{ input: featheredLogo, blend: "dest-in" }])
+      .blur(1.5)
+      .linear([1, 1, 1, 0.4], [0, 0, 0, 0])
+      .png()
+      .toBuffer();
+
+    const pad = 6;
+    const watermarkW = logoW + pad * 2;
+    const watermarkH = logoH + pad * 2;
+    const composedWatermark = await sharp({
+      create: { width: watermarkW, height: watermarkH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    })
+      .composite([
+        { input: shadowLayer, left: pad + 2, top: pad + 2 },
+        { input: highlightLayer, left: pad - 2, top: pad - 2 },
+        { input: featheredLogo, left: pad, top: pad },
+      ])
+      .png()
+      .toBuffer();
+
+    return await sharp(baseBuffer)
+      .composite([
+        {
+          input: composedWatermark,
+          top: Math.max(0, baseHeight - watermarkH - margin),
+          left: Math.max(0, baseWidth - watermarkW - margin),
+        },
+      ])
+      .toBuffer();
+  } catch (e) {
+    console.error("[autoEnhancePhoto] watermark failed for", userId, e);
+    return baseBuffer;
+  }
+}
+
+export const autoEnhancePhoto = onObjectFinalized(
+  { region: "us-central1", memory: "512MiB", timeoutSeconds: 60 },
+  async (event) => {
+    const object = event.data;
+    const filePath = object.name;
+    const contentType = object.contentType;
+
+    if (!filePath || !filePath.startsWith("uploads/")) return;
+    if (!contentType?.startsWith("image/")) return;
+    if (object.metadata?.enhanced === "true") return; // evita reprocesar nuestra propia salida
+
+    const userId = filePath.split("/")[1];
+    const bucket = admin.storage().bucket(object.bucket);
+    const file = bucket.file(filePath);
+
+    const tmpIn = path.join(os.tmpdir(), `in_${Date.now()}_${path.basename(filePath)}`);
+    const tmpOut = path.join(os.tmpdir(), `out_${Date.now()}_${path.basename(filePath)}`);
+
+    try {
+      await file.download({ destination: tmpIn });
+
+      let processedBuffer = await sharp(tmpIn)
+        .rotate() // normaliza orientación según EXIF
+        .normalize() // auto-contraste / balance de blancos
+        .modulate({ saturation: 1.08 }) // realce sutil de color
+        .sharpen()
+        .toBuffer();
+
+      if (userId) {
+        processedBuffer = await applyLogoWatermark(processedBuffer, userId);
+      }
+
+      await sharp(processedBuffer).jpeg({ quality: 85 }).toFile(tmpOut);
+
+      // Releemos la metadata justo antes de sobreescribir (no la del evento,
+      // que puede estar desactualizada) para capturar el token de descarga
+      // que el cliente ya pudo haber generado con getDownloadURL().
+      const [freshMeta] = await file.getMetadata().catch(() => [null]);
+      const downloadToken = (freshMeta?.metadata as Record<string, string> | undefined)
+        ?.firebaseStorageDownloadTokens;
+
+      await bucket.upload(tmpOut, {
+        destination: filePath,
+        metadata: {
+          contentType: "image/jpeg",
+          metadata: {
+            ...(downloadToken ? { firebaseStorageDownloadTokens: downloadToken } : {}),
+            enhanced: "true",
+          },
+        },
+      });
+    } catch (e) {
+      console.error("[autoEnhancePhoto] Failed to process", filePath, e);
+    } finally {
+      await Promise.all([
+        fs.unlink(tmpIn).catch(() => {}),
+        fs.unlink(tmpOut).catch(() => {}),
+      ]);
+    }
+  }
+);
+
+// ─── OG preview for /user-profile/** and /agencia/** ───────────────────────
+// Firebase Hosting rewrites ALL traffic to these paths through this function
+// (see firebase.json). Bots (WhatsApp/Facebook/Twitter/etc, which don't run
+// JS) get a small static HTML with the right <meta og:*> tags. Real browsers
+// get the same index.html the SPA is normally served, at the original URL,
+// so expo-router hydrates and takes over exactly like today.
+
+const BOT_UA_REGEX =
+  /facebookexternalhit|Facebot|WhatsApp|Twitterbot|Slackbot|TelegramBot|LinkedInBot|Discordbot|Googlebot|bingbot|SkypeUriPreview|vkShare|Pinterest|redditbot|W3C_Validator/i;
+
+const INDEX_HTML_CACHE_MS = 5 * 60 * 1000;
+let cachedIndexHtml: { html: string; fetchedAt: number } | null = null;
+
+async function getIndexHtmlPassthrough(): Promise<string> {
+  const now = Date.now();
+  if (cachedIndexHtml && now - cachedIndexHtml.fetchedAt < INDEX_HTML_CACHE_MS) {
+    return cachedIndexHtml.html;
+  }
+  const response = await fetch("https://matchcars.app/index.html");
+  const html = await response.text();
+  cachedIndexHtml = { html, fetchedAt: now };
+  return html;
+}
+
+function escapeHtml(input: string): string {
+  return String(input)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildOgHtml(params: { title: string; description: string; image: string; url: string }): string {
+  const { title, description, image, url } = params;
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>${escapeHtml(title)}</title>
+<meta name="description" content="${escapeHtml(description)}" />
+<link rel="canonical" href="${escapeHtml(url)}" />
+<meta property="og:type" content="profile" />
+<meta property="og:title" content="${escapeHtml(title)}" />
+<meta property="og:description" content="${escapeHtml(description)}" />
+<meta property="og:url" content="${escapeHtml(url)}" />
+<meta property="og:image" content="${escapeHtml(image)}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${escapeHtml(title)}" />
+<meta name="twitter:description" content="${escapeHtml(description)}" />
+<meta name="twitter:image" content="${escapeHtml(image)}" />
+</head>
+<body></body>
+</html>`;
+}
+
+const OG_FALLBACK = {
+  title: "Matchcars | Compra y venta de autos usados",
+  description:
+    "Matchcars es la forma más segura y simple de comprar y vender tu auto usado en Argentina.",
+  image: "https://matchcars.app/logo.png",
+};
+
+export const ogPreview = onRequest({ region: "us-central1", cors: false }, async (req, res) => {
+  const userAgent = String(req.headers["user-agent"] || "");
+  const isBot = BOT_UA_REGEX.test(userAgent);
+
+  if (!isBot) {
+    try {
+      const html = await getIndexHtmlPassthrough();
+      res.set("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(html);
+    } catch (e) {
+      console.error("[ogPreview] passthrough fetch failed", e);
+      res.redirect(302, "https://matchcars.app/");
+    }
+    return;
+  }
+
+  const segments = req.path.split("/").filter(Boolean);
+  const identifier = segments[segments.length - 1] || "";
+  const fallbackHtml = () =>
+    buildOgHtml({ ...OG_FALLBACK, url: `https://matchcars.app${req.path}` });
+
+  try {
+    // Mirrors hooks/useAgencyProfile.ts (uid doc-get, then slug query fallback) —
+    // keep both in sync if this resolution logic ever changes.
+    let userDoc = await db.collection("users").doc(identifier).get();
+    if (!userDoc.exists) {
+      const slugSnap = await db.collection("users").where("slug", "==", identifier).limit(1).get();
+      if (!slugSnap.empty) userDoc = slugSnap.docs[0];
+    }
+
+    if (!userDoc.exists) {
+      res.set("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(fallbackHtml());
+      return;
+    }
+
+    const pd = userDoc.data() as any;
+    const isDealer = !!pd?.plan && String(pd.plan).includes("pro_dealer");
+    const name =
+      pd?.agencyName ||
+      (pd?.firstName || pd?.lastName
+        ? `${pd?.firstName ?? ""} ${pd?.lastName ?? ""}`.trim()
+        : pd?.displayName || pd?.email || "Usuario");
+    const title = isDealer ? `${name} | Agencia en Matchcars` : `${name} | Perfil en Matchcars`;
+    const description = isDealer
+      ? `Conocé la agencia ${name} en Matchcars. Mirá su stock de vehículos, reputación y contacto.`
+      : `Mirá el perfil de ${name} en Matchcars, conocé su reputación y autos publicados.`;
+    const image = pd?.bannerUrl || pd?.logoUrl || pd?.photoURL || OG_FALLBACK.image;
+    const url = pd?.slug
+      ? `https://matchcars.app/agencia/${pd.slug}`
+      : `https://matchcars.app/user-profile/${userDoc.id}`;
+
+    res.set("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(buildOgHtml({ title, description, image, url }));
+  } catch (e) {
+    console.error("[ogPreview] failed to resolve profile", e);
+    res.set("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(fallbackHtml());
+  }
+});

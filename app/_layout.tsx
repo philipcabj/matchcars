@@ -204,9 +204,14 @@ function RootStackContent() {
    // If user is logged in on Web but is NOT a 'pro_dealer', we block access.
    // We check if plan starts with 'pro_dealer' to cover both monthly and annual plans
    
-   if (Platform.OS === 'web' && user && profile) {
+   const isPublicShowroomRoute =
+     pathname?.startsWith('/embed/') ||
+     pathname?.startsWith('/agencia/') ||
+     pathname?.startsWith('/user-profile/');
+
+   if (Platform.OS === 'web' && user && profile && !isPublicShowroomRoute) {
      const isDealer = profile.plan && (profile.plan === 'pro_dealer' || profile.plan.startsWith('pro_dealer'));
-     
+
      if (!isDealer) {
         return (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background, padding: 20 }}>

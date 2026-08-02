@@ -2,16 +2,19 @@ import { CustomAlert } from "@/components/CustomAlert";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useDebounce } from "@/hooks/useDebounce";
+import { Analytics } from "@/lib/analytics";
 import { db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
+import { canUseWatermark } from "@/lib/planChecks";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import { doc, updateDoc } from "firebase/firestore";
+import { collection, doc, getDocs, limit, query, updateDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -53,6 +56,7 @@ export default function EditProfileScreen() {
   const router = useRouter();
 
   const isDealer = profile?.plan && (profile.plan.includes("pro_dealer") || profile.plan.includes("dealer_pro_plus"));
+  const canWatermark = canUseWatermark(profile?.plan || "free");
 
   const [firstName, setFirstName] = useState(profile?.firstName || "");
   const [lastName, setLastName] = useState(profile?.lastName || "");
@@ -60,6 +64,14 @@ export default function EditProfileScreen() {
   // Dealer Fields
   const [description, setDescription] = useState((profile as any)?.description || "");
   const [agencyName, setAgencyName] = useState(profile?.agencyName || "");
+
+  // Vidriera Digital: friendly link (slug) + embeddable widget snippet
+  const [slug, setSlug] = useState(profile?.slug || "");
+  const [slugTouched, setSlugTouched] = useState(!!profile?.slug);
+  const [slugCheck, setSlugCheck] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [embedCopied, setEmbedCopied] = useState(false);
+  const debouncedSlug = useDebounce(slug, 500);
+
   const [businessAddress, setBusinessAddress] = useState(profile?.businessAddress || "");
   const [businessCoordinates, setBusinessCoordinates] = useState<{latitude: number, longitude: number} | null>(profile?.businessCoordinates || null);
   const [businessHours, setBusinessHours] = useState(profile?.businessHours || "");
@@ -70,6 +82,11 @@ export default function EditProfileScreen() {
   const [bannerUrl, setBannerUrl] = useState(profile?.bannerUrl || "");
   const [bannerUploading, setBannerUploading] = useState(false);
   const [locating, setLocating] = useState(false);
+
+  // Logo / marca de agua (planes pagos)
+  const [logoUrl, setLogoUrl] = useState(profile?.logoUrl || "");
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [watermarkEnabled, setWatermarkEnabled] = useState(profile?.watermarkEnabled || false);
 
   // Extended dealer fields
   const [phone, setPhone] = useState(profile?.phone || "");
@@ -121,6 +138,69 @@ export default function EditProfileScreen() {
       },
       options
     });
+  };
+
+  const SLUG_REGEX = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+  const slugify = (input: string) =>
+    input
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 40);
+
+  // Suggest a slug from the agency name until the dealer types their own.
+  useEffect(() => {
+    if (!isDealer || slugTouched || !agencyName) return;
+    setSlug(slugify(agencyName));
+  }, [agencyName, isDealer, slugTouched]);
+
+  // Check slug format + uniqueness (client-side only — see plan notes on the accepted race-condition tradeoff).
+  useEffect(() => {
+    if (!isDealer) return;
+    if (!debouncedSlug) {
+      setSlugCheck("idle");
+      return;
+    }
+    if (debouncedSlug.length < 3 || !SLUG_REGEX.test(debouncedSlug)) {
+      setSlugCheck("invalid");
+      return;
+    }
+    if (debouncedSlug === profile?.slug) {
+      setSlugCheck("available");
+      return;
+    }
+    let cancelled = false;
+    setSlugCheck("checking");
+    (async () => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, "users"), where("slug", "==", debouncedSlug), limit(1))
+        );
+        if (cancelled) return;
+        const takenByOther = !snap.empty && snap.docs[0].id !== user?.uid;
+        setSlugCheck(takenByOther ? "taken" : "available");
+      } catch {
+        if (!cancelled) setSlugCheck("idle");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSlug, isDealer, profile?.slug, user?.uid]);
+
+  const embedSnippet = `<iframe src="https://matchcars.app/embed/${slug || user?.uid || ""}" width="100%" height="480" style="border:0;border-radius:12px;" loading="lazy"></iframe>`;
+
+  const handleCopyEmbed = async () => {
+    if (Platform.OS !== "web") return;
+    try {
+      await (navigator as any).clipboard.writeText(embedSnippet);
+      setEmbedCopied(true);
+      if (user?.uid) Analytics.logShare("embed_copy", user.uid);
+      setTimeout(() => setEmbedCopied(false), 2200);
+    } catch {}
   };
 
   const formatAddress = (addr: Location.LocationGeocodedAddress) => {
@@ -198,6 +278,16 @@ export default function EditProfileScreen() {
 
   const handleSave = async () => {
     if (!user) return;
+
+    if (isDealer && slug && (slugCheck === "taken" || slugCheck === "invalid" || slugCheck === "checking")) {
+      showAlert(
+        "Link no disponible",
+        "Elegí un link válido y disponible antes de guardar, o dejá el campo vacío.",
+        "warning"
+      );
+      return;
+    }
+
     setLoading(true);
     try {
       const updateData: any = {
@@ -208,6 +298,7 @@ export default function EditProfileScreen() {
 
       if (isDealer) {
         updateData.agencyName = agencyName;
+        updateData.slug = slug || null;
         updateData.businessAddress = businessAddress;
         updateData.businessCoordinates = businessCoordinates;
         updateData.businessHours = businessHours;
@@ -219,6 +310,11 @@ export default function EditProfileScreen() {
         updateData.foundedYear = foundedYear ? Number(foundedYear) : null;
         updateData.brandSpecialties = brandSpecialties;
         updateData.showroomGallery = showroomGallery;
+      }
+
+      if (canWatermark) {
+        updateData.logoUrl = logoUrl;
+        updateData.watermarkEnabled = watermarkEnabled;
       }
 
       await updateDoc(doc(db, "users", user.uid), updateData);
@@ -405,6 +501,52 @@ export default function EditProfileScreen() {
     }
   };
 
+  const pickLogo = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets[0].uri) {
+        setLogoUploading(true);
+        const uri = result.assets[0].uri;
+
+        // PNG para preservar transparencia si el logo la tiene
+        const manipulated = await ImageManipulator.manipulateAsync(
+            uri,
+            [{ resize: { width: 500 } }],
+            { format: ImageManipulator.SaveFormat.PNG }
+        );
+
+        const blob: Blob = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function () {
+            resolve(xhr.response);
+          };
+          xhr.onerror = function (e) {
+            reject(new TypeError("Network request failed"));
+          };
+          xhr.responseType = "blob";
+          xhr.open("GET", manipulated.uri, true);
+          xhr.send(null);
+        });
+
+        const storageRef = ref(storage, `logos/${user?.uid}_${Date.now()}.png`);
+        await uploadBytes(storageRef, blob);
+        const url = await getDownloadURL(storageRef);
+        setLogoUrl(url);
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("Error", "No se pudo subir el logo.", "error");
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
   const addGalleryImage = async () => {
     if (showroomGallery.length >= 6) {
       showAlert("Límite alcanzado", "Podés subir hasta 6 fotos del local.", "info");
@@ -551,6 +693,79 @@ export default function EditProfileScreen() {
             </View>
         </View>
 
+        {canWatermark && (
+            <View style={{ marginBottom: 20 }}>
+                <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 4 }}>Logo / Marca de agua</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 16 }}>
+                    Subí tu logo para estamparlo automáticamente en las fotos de tus autos.
+                </Text>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                    <TouchableOpacity
+                        onPress={pickLogo}
+                        style={{
+                            width: 90,
+                            height: 90,
+                            backgroundColor: theme.inputBackground,
+                            borderRadius: 12,
+                            overflow: 'hidden',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderWidth: 1,
+                            borderColor: theme.likeBoxBackground,
+                            borderStyle: 'dashed'
+                        }}
+                    >
+                        {logoUrl ? (
+                            <Image source={{ uri: logoUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+                        ) : (
+                            <View style={{ alignItems: 'center' }}>
+                                <Ionicons name="image-outline" size={24} color={theme.textMuted} />
+                                <Text style={{ color: theme.textMuted, marginTop: 4, fontSize: 10, textAlign: 'center' }}>Subir logo</Text>
+                            </View>
+                        )}
+                        {logoUploading && (
+                            <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
+                                <ActivityIndicator color="#FFF" size="small" />
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => setWatermarkEnabled((prev) => !prev)}
+                        disabled={!logoUrl}
+                        style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingHorizontal: 14,
+                            paddingVertical: 12,
+                            borderRadius: 10,
+                            borderWidth: 1,
+                            borderColor: watermarkEnabled ? theme.accent : theme.likeBoxBackground,
+                            backgroundColor: watermarkEnabled ? theme.accent + "20" : theme.inputBackground,
+                            opacity: logoUrl ? 1 : 0.5,
+                        }}
+                    >
+                        <Text style={{ color: theme.text, fontSize: 13, fontWeight: "600", flex: 1, marginRight: 8 }}>
+                            Aplicar marca de agua en mis fotos
+                        </Text>
+                        <Ionicons
+                            name={watermarkEnabled ? "checkmark-circle" : "ellipse-outline"}
+                            size={22}
+                            color={watermarkEnabled ? theme.accent : theme.textMuted}
+                        />
+                    </TouchableOpacity>
+                </View>
+                {!logoUrl && (
+                    <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                        Subí un logo primero para poder activar la marca de agua.
+                    </Text>
+                )}
+            </View>
+        )}
+
         {isDealer && (
             <View style={{ marginBottom: 20 }}>
                 <Text style={{ color: theme.accent, fontSize: 16, fontWeight: "600", marginBottom: 16 }}>Información de Agencia</Text>
@@ -565,7 +780,45 @@ export default function EditProfileScreen() {
                         style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
                     />
                 </View>
-                
+
+                <View style={{ marginBottom: 12 }}>
+                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Tu link personalizado (Vidriera Digital)</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.inputBackground, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                        <Text style={{ paddingLeft: 12, color: theme.textMuted, fontSize: 13 }}>matchcars.app/agencia/</Text>
+                        <TextInput
+                            value={slug}
+                            onChangeText={(v) => {
+                                setSlugTouched(true);
+                                setSlug(slugify(v));
+                            }}
+                            placeholder="mi-agencia"
+                            placeholderTextColor={theme.textMuted}
+                            autoCapitalize="none"
+                            style={{ flex: 1, color: theme.inputText, padding: 12 }}
+                        />
+                    </View>
+                    {!!slug && (
+                        <Text
+                            style={{
+                                marginTop: 6,
+                                fontSize: 12,
+                                fontWeight: '600',
+                                color:
+                                    slugCheck === "available"
+                                        ? "#10B981"
+                                        : slugCheck === "taken" || slugCheck === "invalid"
+                                        ? (theme.error || "#EF4444")
+                                        : theme.textMuted,
+                            }}
+                        >
+                            {slugCheck === "checking" && "Verificando disponibilidad..."}
+                            {slugCheck === "available" && "✓ Disponible"}
+                            {slugCheck === "taken" && "Ese link ya está en uso por otra agencia"}
+                            {slugCheck === "invalid" && "Usá minúsculas, números y guiones (mínimo 3 caracteres)"}
+                        </Text>
+                    )}
+                </View>
+
                 <View style={{ marginBottom: 12, zIndex: 10 }}>
                     <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Dirección del Local</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.inputBackground, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
@@ -856,6 +1109,56 @@ export default function EditProfileScreen() {
                         )}
                     </ScrollView>
                 </View>
+
+                {/* Embeddable widget snippet — web-only, matches the web-only dealer panel */}
+                {Platform.OS === "web" && (
+                    <View style={{ marginBottom: 4 }}>
+                        <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 4 }}>
+                            Widget para tu propia web
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 10 }}>
+                            Pegá este código en tu sitio para mostrar tu stock en vivo de Matchcars.
+                        </Text>
+                        <View
+                            style={{
+                                backgroundColor: theme.inputBackground,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: theme.likeBoxBackground,
+                                padding: 12,
+                            }}
+                        >
+                            <Text
+                                style={{
+                                    color: theme.textMuted,
+                                    fontSize: 12,
+                                    fontFamily: "monospace",
+                                }}
+                                selectable
+                            >
+                                {embedSnippet}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            onPress={handleCopyEmbed}
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 8,
+                                marginTop: 10,
+                                backgroundColor: embedCopied ? "#10B981" : theme.accent,
+                                paddingVertical: 12,
+                                borderRadius: 8,
+                            }}
+                        >
+                            <Ionicons name={embedCopied ? "checkmark" : "copy-outline"} size={16} color="#fff" />
+                            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>
+                                {embedCopied ? "¡Copiado!" : "Copiar código para tu web"}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
             </View>
         )}
 
