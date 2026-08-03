@@ -1,10 +1,18 @@
 import React, { forwardRef } from "react";
 import { Image, Text, View } from "react-native";
 
-const CARD_WIDTH = 360;
-const CARD_HEIGHT = 640;
+let QRCode: any = null;
+try {
+  QRCode = require("react-native-qrcode-svg").default;
+} catch {}
 
-interface ShareCardVehicle {
+// Natural (design-time) size — actual on-screen/captured size is driven by the
+// `width` prop and scaled proportionally, so the card always fits the sheet
+// on any screen instead of overflowing narrow phones.
+export const CARD_WIDTH = 360;
+export const CARD_HEIGHT = 640;
+
+export interface ShareCardVehicle {
   id: string;
   brand?: string;
   model?: string;
@@ -13,7 +21,7 @@ interface ShareCardVehicle {
   coverImage?: string;
 }
 
-interface ShareCardProps {
+export interface ShareCardData {
   agencyName: string;
   logoUrl?: string | null;
   city?: string;
@@ -21,7 +29,11 @@ interface ShareCardProps {
   rating?: number | null;
   reviewCount?: number;
   vehicles: ShareCardVehicle[];
-  qrDataUrl?: string | null;
+}
+
+interface ShareCardProps extends ShareCardData {
+  qrValue: string;
+  width?: number;
 }
 
 function formatPrice(price?: number, currency?: string) {
@@ -30,33 +42,37 @@ function formatPrice(price?: number, currency?: string) {
   return `${symbol} ${Math.round(price).toLocaleString("es-AR")}`;
 }
 
-// Captured with react-native-view-shot (captureRef) — only RN-core <Image>/<Text>/<View>
-// here, matching the one existing captureRef precedent in this repo (app/(screens)/add-car.tsx).
+// Captured with react-native-view-shot (captureRef) — RN-core <Image>/<Text>/<View> plus
+// a live <QRCode> (SVG), captured as part of the same screenshot instead of being
+// pre-rendered separately — that separate toDataURL step proved unreliable in practice.
 export const ShareCard = forwardRef<View, ShareCardProps>(function ShareCard(
-  { agencyName, logoUrl, city, province, rating, reviewCount, vehicles, qrDataUrl },
+  { agencyName, logoUrl, city, province, rating, reviewCount, vehicles, qrValue, width = CARD_WIDTH },
   ref
 ) {
   const location = [city, province].filter(Boolean).join(", ");
+  const scale = width / CARD_WIDTH;
+  const height = Math.round(CARD_HEIGHT * scale);
+  const s = (n: number) => Math.round(n * scale);
 
   return (
     <View
       ref={ref}
       collapsable={false}
       style={{
-        width: CARD_WIDTH,
-        height: CARD_HEIGHT,
+        width,
+        height,
         backgroundColor: "#0F172A",
-        padding: 28,
+        padding: s(28),
         justifyContent: "space-between",
       }}
     >
       {/* Header: logo + agency name */}
-      <View style={{ alignItems: "center", marginTop: 12 }}>
+      <View style={{ alignItems: "center", marginTop: s(12) }}>
         <View
           style={{
-            width: 76,
-            height: 76,
-            borderRadius: 38,
+            width: s(76),
+            height: s(76),
+            borderRadius: s(38),
             backgroundColor: "#1E293B",
             alignItems: "center",
             justifyContent: "center",
@@ -68,25 +84,25 @@ export const ShareCard = forwardRef<View, ShareCardProps>(function ShareCard(
           {logoUrl ? (
             <Image source={{ uri: logoUrl }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
           ) : (
-            <Text style={{ color: "#FFFFFF", fontSize: 28, fontWeight: "900" }}>
+            <Text style={{ color: "#FFFFFF", fontSize: s(28), fontWeight: "900" }}>
               {agencyName.slice(0, 2).toUpperCase()}
             </Text>
           )}
         </View>
 
         <Text
-          style={{ color: "#FFFFFF", fontSize: 22, fontWeight: "900", marginTop: 12, textAlign: "center" }}
+          style={{ color: "#FFFFFF", fontSize: s(22), fontWeight: "900", marginTop: s(12), textAlign: "center" }}
           numberOfLines={2}
         >
           {agencyName}
         </Text>
 
         {!!location && (
-          <Text style={{ color: "#94A3B8", fontSize: 13, marginTop: 4 }}>{location}</Text>
+          <Text style={{ color: "#94A3B8", fontSize: s(13), marginTop: s(4) }}>{location}</Text>
         )}
 
         {typeof rating === "number" && rating > 0 && (
-          <Text style={{ color: "#F59E0B", fontSize: 14, fontWeight: "700", marginTop: 6 }}>
+          <Text style={{ color: "#F59E0B", fontSize: s(14), fontWeight: "700", marginTop: s(6) }}>
             {"★".repeat(Math.round(rating))} {rating.toFixed(1)}
             {reviewCount ? ` (${reviewCount} opiniones)` : ""}
           </Text>
@@ -94,7 +110,7 @@ export const ShareCard = forwardRef<View, ShareCardProps>(function ShareCard(
       </View>
 
       {/* Vehicles */}
-      <View style={{ gap: 10 }}>
+      <View style={{ gap: s(10) }}>
         {vehicles.slice(0, 3).map((v) => (
           <View
             key={v.id}
@@ -102,21 +118,21 @@ export const ShareCard = forwardRef<View, ShareCardProps>(function ShareCard(
               flexDirection: "row",
               alignItems: "center",
               backgroundColor: "#1E293B",
-              borderRadius: 12,
+              borderRadius: s(12),
               overflow: "hidden",
-              height: 64,
+              height: s(64),
             }}
           >
             {v.coverImage ? (
-              <Image source={{ uri: v.coverImage }} style={{ width: 84, height: 64 }} resizeMode="cover" />
+              <Image source={{ uri: v.coverImage }} style={{ width: s(84), height: s(64) }} resizeMode="cover" />
             ) : (
-              <View style={{ width: 84, height: 64, backgroundColor: "#334155" }} />
+              <View style={{ width: s(84), height: s(64), backgroundColor: "#334155" }} />
             )}
-            <View style={{ flex: 1, paddingHorizontal: 12 }}>
-              <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "700" }} numberOfLines={1}>
+            <View style={{ flex: 1, paddingHorizontal: s(12) }}>
+              <Text style={{ color: "#FFFFFF", fontSize: s(13), fontWeight: "700" }} numberOfLines={1}>
                 {[v.brand, v.model].filter(Boolean).join(" ")}
               </Text>
-              <Text style={{ color: "#F59E0B", fontSize: 13, fontWeight: "800" }}>
+              <Text style={{ color: "#F59E0B", fontSize: s(13), fontWeight: "800" }}>
                 {formatPrice(v.price, v.currency)}
               </Text>
             </View>
@@ -126,22 +142,24 @@ export const ShareCard = forwardRef<View, ShareCardProps>(function ShareCard(
 
       {/* Footer: QR + wordmark */}
       <View style={{ alignItems: "center" }}>
-        {qrDataUrl && (
+        {QRCode && (
           <View
             style={{
-              width: 96,
-              height: 96,
-              borderRadius: 12,
+              width: s(96),
+              height: s(96),
+              borderRadius: s(12),
               backgroundColor: "#FFFFFF",
-              padding: 8,
-              marginBottom: 8,
+              padding: s(8),
+              marginBottom: s(8),
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            <Image source={{ uri: qrDataUrl }} style={{ width: "100%", height: "100%" }} />
+            <QRCode value={qrValue} size={s(80)} color="#0F172A" backgroundColor="#FFFFFF" />
           </View>
         )}
-        <Text style={{ color: "#94A3B8", fontSize: 11 }}>Escaneá para ver todo el stock</Text>
-        <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "800", marginTop: 4 }}>
+        <Text style={{ color: "#94A3B8", fontSize: s(11) }}>Escaneá para ver todo el stock</Text>
+        <Text style={{ color: "#FFFFFF", fontSize: s(14), fontWeight: "800", marginTop: s(4) }}>
           matchcars.app
         </Text>
       </View>

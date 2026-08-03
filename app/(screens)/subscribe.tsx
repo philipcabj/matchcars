@@ -46,6 +46,8 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "📊 Métricas básicas (Vistas y Likes)",
       "🏷️ Badge PRO",
       "📹 Video Walkaround",
+      "✨ Mejorar foto (encuadre IA)",
+      "🖼️ Marca de agua con tu logo",
     ],
     color: "#4A90E2",
     hasTrial: true,
@@ -66,7 +68,9 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "📄 Ficha PDF con QR",
       "📹 Video Walkaround",
       "🏷️ Badge PRO Plus",
-      "✨ Herramientas de edición IA (Mejorar foto / Tapar patente)",
+      "✨ Mejorar foto (encuadre IA)",
+      "✨ Tapar patente automáticamente (IA)",
+      "🖼️ Marca de agua con tu logo",
     ],
     color: "#50E3C2",
     recommended: true,
@@ -88,7 +92,9 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "🤝 Gestión de cierre de ventas",
       "✅ Badge Agencia Verificada",
       "📊 Reportes avanzados",
-      "✨ Herramientas de edición IA",
+      "✨ Mejorar foto (encuadre IA)",
+      "✨ Tapar patente automáticamente (IA)",
+      "🖼️ Marca de agua con tu logo",
     ],
     color: "#9013FE",
     hasTrial: true,
@@ -108,7 +114,9 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "🏠 Presencia destacada en Home",
       "📢 Notificaciones push segmentadas",
       "📞 CRM de Leads integrado",
-      "✨ Herramientas de edición IA",
+      "✨ Mejorar foto (encuadre IA)",
+      "✨ Tapar patente automáticamente (IA)",
+      "🖼️ Marca de agua con tu logo",
     ],
     color: "#FFD700",
     comingSoon: true, // Volvemos a ponerlo como Coming Soon (Consultar)
@@ -122,7 +130,9 @@ const COMPARISON_ROWS = [
   { label: "Métricas",          free: "—",        pro: "Básicas",  proPlus: "Avanzadas", dealer: "Avanzadas", dealerPro: "Avanzadas" },
   { label: "Boost fin de sem.", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
   { label: "Video walkaround",  free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Herr. IA",          free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Mejorar foto (IA)", free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Tapar patente (IA)", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Marca de agua (logo)", free: "—",      pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
   { label: "CRM de Leads",      free: "—",        pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
   { label: "Carga masiva CSV",  free: "—",        pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
 ];
@@ -277,7 +287,7 @@ export default function SubscribeScreen() {
       // Create a document in the 'mail' collection which is already configured with Trigger Email extension
       // and likely has correct permissions for authenticated users.
       const mailDoc = {
-        to: ["francodavid.guarino@gmail.com"],
+        to: ["matchcarsinfo@gmail.com"],
         from: "Matchcars <noreply@matchcars.app>",
         message: {
           subject: `Nueva consulta de Plan: ${consultingPlan}`,

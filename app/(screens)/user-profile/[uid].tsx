@@ -1,4 +1,3 @@
-import { ShareCard } from "@/components/ShareCard";
 import { ShareSheet } from "@/components/ShareSheet";
 import { WebContainer } from "@/components/WebContainer";
 import { CarCard } from "@/components/cards/carcard";
@@ -8,7 +7,6 @@ import { useAgencyProfile } from "@/hooks/useAgencyProfile";
 import { trackEvent } from "@/lib/analytics";
 import { db } from "@/lib/firebase";
 import { fetchDealerReportData } from "@/lib/reporting";
-import { generateAndShareCard } from "@/lib/shareCard";
 import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -37,11 +35,6 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-let QRCode: any = null;
-try {
-  QRCode = require("react-native-qrcode-svg").default;
-} catch {}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -178,9 +171,6 @@ export default function UserProfileScreen() {
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [inventoryY, setInventoryY] = useState(0);
   const scrollViewRef = React.useRef<ScrollView>(null);
-  const shareCardRef = React.useRef<View>(null);
-  const qrSvgRef = React.useRef<any>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   const [dealerReport, setDealerReport] = useState<any>(null);
   const [ratingStats, setRatingStats] = useState<{ avg: number; count: number } | null>(null);
@@ -281,14 +271,6 @@ export default function UserProfileScreen() {
             : undefined,
         }
       : null;
-
-  // ── Pre-render the QR (for the downloadable share card) to a PNG data-URI ──
-  useEffect(() => {
-    if (!shareUrl || !qrSvgRef.current?.toDataURL) return;
-    qrSvgRef.current.toDataURL((base64: string) => {
-      setQrDataUrl(`data:image/png;base64,${base64}`);
-    });
-  }, [shareUrl]);
 
   // ── Keep vehicles' cached userName in sync with the agency name ──
   useEffect(() => {
@@ -487,7 +469,17 @@ export default function UserProfileScreen() {
     Linking.openURL(`tel:+${clean}`).catch(() => {});
   };
 
-  const handleDownloadCard = () => generateAndShareCard({ cardRef: shareCardRef, uid: uidString });
+  const shareCardData = isDealerProfile
+    ? {
+        agencyName: profileName || "Matchcars",
+        logoUrl: profileData?.logoUrl || profilePhotoUrl,
+        city: profileData?.city,
+        province: profileData?.province,
+        rating: displayRating,
+        reviewCount: displayReviewCount,
+        vehicles: cardVehicles,
+      }
+    : undefined;
 
   // ── Sub-components ────────────────────────────────────────────────────────
 
@@ -1863,29 +1855,9 @@ export default function UserProfileScreen() {
             : `Mirá el perfil de ${profileName} en Matchcars`
         }
         theme={theme}
-        onDownloadCard={isDealerProfile ? handleDownloadCard : undefined}
+        shareCardData={shareCardData}
         analyticsId={uidString}
       />
-
-      {/* Off-screen: pre-rendered QR (feeds the share card) + the capturable share card itself */}
-      {QRCode && (
-        <View style={{ position: "absolute", left: -9999, top: 0, opacity: 0 }} pointerEvents="none">
-          <QRCode value={shareUrl} size={240} getRef={(r: any) => (qrSvgRef.current = r)} />
-        </View>
-      )}
-      <View style={{ position: "absolute", left: -9999, top: 0 }} pointerEvents="none">
-        <ShareCard
-          ref={shareCardRef}
-          agencyName={profileName || "Matchcars"}
-          logoUrl={profileData?.logoUrl || profilePhotoUrl}
-          city={profileData?.city}
-          province={profileData?.province}
-          rating={displayRating}
-          reviewCount={displayReviewCount}
-          vehicles={cardVehicles}
-          qrDataUrl={qrDataUrl}
-        />
-      </View>
     </>
   );
 }

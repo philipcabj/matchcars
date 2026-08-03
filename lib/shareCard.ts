@@ -1,21 +1,39 @@
 import { shareFile } from "@/lib/reporting";
+import { logger } from "@/lib/logger";
 import type { RefObject } from "react";
-import { Platform, View } from "react-native";
+import { Image, Platform, View } from "react-native";
 import { captureRef } from "react-native-view-shot";
 
 interface GenerateAndShareCardParams {
   cardRef: RefObject<View | null>;
   uid: string;
+  imageUrls?: (string | null | undefined)[];
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Captures the off-screen ShareCard view and hands it off to the platform's
- * share/download flow. Native uses the same captureRef pattern already used
- * in app/(screens)/add-car.tsx; web relies on react-native-view-shot's
- * built-in html2canvas shim (works out of the box, no extra dependency).
+ * Captures the ShareCard view (must already be mounted and visible/laid-out —
+ * captureRef on an off-screen/never-painted node produces blank or broken
+ * output, especially on native where remote <Image> sources need time to
+ * actually load) and hands it off to the platform's share/download flow.
  */
-export async function generateAndShareCard({ cardRef, uid }: GenerateAndShareCardParams) {
-  if (!cardRef.current) return;
+export async function generateAndShareCard({ cardRef, uid, imageUrls = [] }: GenerateAndShareCardParams) {
+  if (!cardRef.current) throw new Error("Share card no está montada todavía.");
+
+  // Preload remote images (logo, vehicle covers) so captureRef doesn't snapshot
+  // them mid-load — this is the main cause of "broken" images in the exported card.
+  await Promise.allSettled(
+    imageUrls
+      .filter((u): u is string => !!u)
+      .map((u) => Image.prefetch(u).catch(() => {}))
+  );
+
+  // Give the view a beat to finish laying out/painting before capturing —
+  // same precaution app/(screens)/add-car.tsx already uses around captureRef.
+  await wait(80);
 
   if (Platform.OS === "web") {
     const dataUri = await captureRef(cardRef as any, { format: "png", quality: 1, result: "data-uri" });
@@ -28,8 +46,9 @@ export async function generateAndShareCard({ cardRef, uid }: GenerateAndShareCar
         await (navigator as any).share({ files: [file] });
         return;
       }
-    } catch {
+    } catch (e) {
       // Native web share sheet was cancelled or errored — respect that, don't force a download.
+      logger.warn("[shareCard] navigator.share failed/cancelled", e);
       return;
     }
 
