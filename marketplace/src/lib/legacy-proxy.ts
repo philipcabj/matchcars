@@ -22,6 +22,11 @@ export async function proxyToLegacySite(request: NextRequest, path: string[], pr
       "accept-language": request.headers.get("accept-language") ?? "",
     },
     redirect: "manual",
+    // Next.js parchea fetch() y lo cachea agresivamente por default (Data
+    // Cache del App Router) — sin esto, la primera respuesta (¡de cualquier
+    // User-Agent!) queda pegada para todos los pedidos siguientes a la misma
+    // URL. Esta ruta debe reflejar el request real cada vez.
+    cache: "no-store",
   });
   const body = await upstream.arrayBuffer();
   return new Response(body, {
