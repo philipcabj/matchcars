@@ -31,6 +31,12 @@ export async function proxyToLegacySite(request: NextRequest, path: string[], pr
   const body = await upstream.arrayBuffer();
   return new Response(body, {
     status: upstream.status,
-    headers: { "content-type": upstream.headers.get("content-type") ?? "text/html; charset=utf-8" },
+    headers: {
+      "content-type": upstream.headers.get("content-type") ?? "text/html; charset=utf-8",
+      // TEMP debug — quitar una vez diagnosticado por qué ogPreview no ve el
+      // User-Agent real en App Hosting.
+      "x-debug-sent-ua": request.headers.get("user-agent") ?? "(none)",
+      "x-debug-target": target,
+    },
   });
 }
