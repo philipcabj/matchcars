@@ -47,11 +47,11 @@ export default function LeadDetailPage() {
       try {
         const token = await getIdToken();
         const headers = { Authorization: `Bearer ${token}` };
-        const leadRes = await fetch(`/api/agency/leads/${id}`, { headers });
+        const leadRes = await fetch(`/portal/api/agency/leads/${id}`, { headers });
         const leadData = await parseJsonResponse<LeadDetail>(leadRes);
         setLead(leadData);
         if (leadData.conversationId) {
-          const msgRes = await fetch(`/api/agency/leads/${id}/messages`, { headers });
+          const msgRes = await fetch(`/portal/api/agency/leads/${id}/messages`, { headers });
           const msgData = await parseJsonResponse<{ messages: LeadMessage[] }>(msgRes);
           setMessages(msgData.messages);
         }
@@ -70,7 +70,7 @@ export default function LeadDetailPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -94,7 +94,7 @@ export default function LeadDetailPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}/offer`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}/offer`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action, ...extra }),
@@ -114,7 +114,7 @@ export default function LeadDetailPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action: "mark_won", dealPrice, dealCurrency }),
@@ -134,7 +134,7 @@ export default function LeadDetailPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action: "mark_vehicle_sold" }),
@@ -155,7 +155,7 @@ export default function LeadDetailPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}/messages`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text }),

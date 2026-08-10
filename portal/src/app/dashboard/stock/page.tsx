@@ -50,7 +50,7 @@ export default function StockPage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const res = await fetch("/api/agency/vehicles", { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch("/portal/api/agency/vehicles", { headers: { Authorization: `Bearer ${token}` } });
         const data = await parseJsonResponse<{ vehicles: VehicleListItem[] }>(res);
         setVehicles(data.vehicles);
       } catch (e) {

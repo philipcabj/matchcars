@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname),
   },
+  // El portal vive en matchcars.app/portal (proxeado desde marketplace/,
+  // que es dueño exclusivo del dominio en App Hosting) — basePath hace que
+  // Next.js arme todas sus rutas y assets con ese prefijo automáticamente,
+  // sin necesitar dominio/subdominio propio.
+  basePath: "/portal",
 };
 
 export default nextConfig;

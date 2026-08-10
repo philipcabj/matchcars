@@ -10,9 +10,9 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta name="description" content="Matchcars es la forma más segura y simple de comprar y vender tu auto usado en Argentina. Publicá gratis, recibí contactos reales y gestioná todo desde la app." />
         <meta name="apple-itunes-app" content="app-id=6739093393" />
         <meta name="theme-color" content="#0E1117" />
-        <link rel="canonical" href="https://matchcars.app/" />
+        <link rel="canonical" href="https://matchcars.app/app/" />
         <meta property="og:type" content="website" />
-        <meta property="og:url" content="https://matchcars.app/" />
+        <meta property="og:url" content="https://matchcars.app/app/" />
         <meta property="og:title" content="Matchcars | Compra y venta de autos usados" />
         <meta property="og:description" content="Encontrá autos usados al mejor precio y vendé el tuyo con mayor seguridad. Matchcars conecta compradores y vendedores con herramientas PRO para agencias y particulares." />
         <meta property="og:image" content="https://matchcars.app/logo.png" />

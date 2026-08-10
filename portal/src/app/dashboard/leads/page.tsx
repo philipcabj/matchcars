@@ -39,7 +39,7 @@ export default function LeadsPage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const res = await fetch("/api/agency/leads", { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch("/portal/api/agency/leads", { headers: { Authorization: `Bearer ${token}` } });
         const data = await parseJsonResponse<{ leads: LeadListItem[]; stats: LeadStats }>(res);
         setLeads(data.leads);
         setStats(data.stats);
@@ -54,7 +54,7 @@ export default function LeadsPage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/leads/${id}`, {
+      const res = await fetch(`/portal/api/agency/leads/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action }),

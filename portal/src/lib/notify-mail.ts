@@ -35,7 +35,9 @@ function escapeHtml(str: string): string {
 
 const APP_NAME = "MatchCars";
 const ACCENT_COLOR = "#00A3FF";
-const APP_URL = "https://matchcars.app";
+// La app transaccional (chat, ofertas, etc.) vive bajo /app — matchcars.app
+// pasó a ser el marketplace de solo lectura.
+const APP_URL = "https://matchcars.app/app";
 const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
 const APPLE_URL = "https://apps.apple.com/app/id6757968664";
 

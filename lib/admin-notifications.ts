@@ -3,7 +3,11 @@ import { db } from "./firebase";
 
 const APP_NAME = "MatchCars";
 const ACCENT_COLOR = "#00A3FF";
-const APP_URL = "https://matchcars.app";
+// Ojo: "(admin)" es sintaxis de grupo de Expo Router y probablemente no
+// debería aparecer tal cual en la URL final — no lo toco acá porque excede
+// el alcance de este fix (agregar el prefijo /app), pero puede que este
+// link ya estuviera roto de antes.
+const APP_URL = "https://matchcars.app/app";
 
 function buildAdminTemplate(title: string, rows: { label: string; value: string }[], ctaLink: string): string {
   const rowsHtml = rows

@@ -27,7 +27,7 @@ export default function TeamPage() {
     setBusy(true);
     try {
       const token = await getIdToken();
-      const res = await fetch("/api/agency/team", {
+      const res = await fetch("/portal/api/agency/team", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ email, role }),
@@ -47,7 +47,7 @@ export default function TeamPage() {
     setActionError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/team/invite/${inviteId}`, {
+      const res = await fetch(`/portal/api/agency/team/invite/${inviteId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -62,7 +62,7 @@ export default function TeamPage() {
     setActionError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/team/${uid}`, {
+      const res = await fetch(`/portal/api/agency/team/${uid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ role: newRole }),
@@ -78,7 +78,7 @@ export default function TeamPage() {
     setActionError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/api/agency/team/${uid}`, {
+      const res = await fetch(`/portal/api/agency/team/${uid}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -26,7 +26,7 @@ export default function ReportsPage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const res = await fetch("/api/agency/reports", { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch("/portal/api/agency/reports", { headers: { Authorization: `Bearer ${token}` } });
         setData(await parseJsonResponse<AgencyReports>(res));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Error desconocido");

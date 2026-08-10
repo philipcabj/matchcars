@@ -82,7 +82,7 @@ export default function VehicleDetailPage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const res = await fetch(`/api/agency/vehicles/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`/portal/api/agency/vehicles/${id}`, { headers: { Authorization: `Bearer ${token}` } });
         setVehicle(await parseJsonResponse<VehicleDetail>(res));
       } catch (e) {
         setError(e instanceof Error ? e.message : "Error desconocido");

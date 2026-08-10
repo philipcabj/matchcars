@@ -19,7 +19,7 @@ export function useAgencyMe() {
       setLoading(true);
       try {
         const token = await getIdToken();
-        const res = await fetch("/api/agency/me", { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch("/portal/api/agency/me", { headers: { Authorization: `Bearer ${token}` } });
         const json = await parseJsonResponse<AgencyMe>(res);
         if (!cancelled) setData(json);
       } catch (e) {
