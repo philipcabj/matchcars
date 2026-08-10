@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Avatar } from "@/components/Avatar";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 
+const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
+
 const NAV_ITEMS = [
   { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true },
   { label: "Perfil", href: "/dashboard/profile", icon: "🏷️", enabled: true },
@@ -35,6 +37,17 @@ export function Sidebar() {
         </div>
         <span className="text-sm font-bold">Portal Agencias</span>
       </div>
+
+      <a
+        href={MARKETPLACE_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mb-4 flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:border-accent hover:text-accent"
+      >
+        <span>🌐</span>
+        <span>Ver sitio web</span>
+        <span className="ml-auto">↗</span>
+      </a>
 
       <nav className="flex flex-1 flex-col gap-1">
         {NAV_ITEMS.map((item) => {

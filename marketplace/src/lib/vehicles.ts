@@ -268,6 +268,9 @@ export interface SellerProfile {
   avatarUrl: string | null;
   plan: string;
   isDealer: boolean;
+  whatsapp: string;
+  email: string;
+  slug: string | null;
 }
 
 export async function getSellerProfile(userId: string): Promise<SellerProfile | null> {
@@ -281,6 +284,9 @@ export async function getSellerProfile(userId: string): Promise<SellerProfile | 
     avatarUrl: data.avatarUrl || data.logoUrl || null,
     plan,
     isDealer: /pro_dealer/.test(plan),
+    whatsapp: data.whatsapp || "",
+    email: data.email || "",
+    slug: data.slug || null,
   };
 }
 

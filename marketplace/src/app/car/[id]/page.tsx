@@ -1,15 +1,16 @@
 import { PhotoGallery } from "@/components/Lightbox";
 import { StarRating } from "@/components/StarRating";
 import { VehicleCard } from "@/components/VehicleCard";
+import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-// La app actual (Expo web) sigue siendo la única que puede mensajear/ofertar/
-// favoritear — acá solo se muestra la ficha, y las acciones que requieren
-// cuenta redirigen para allá (ver Context del plan de esta fase).
+// La app actual (Expo web) sigue siendo la única que permite favoritear/
+// chatear en privado — acá se muestra la ficha y, cuando el vendedor cargó
+// WhatsApp o tiene email, un contacto directo sin pasar por la app.
 const APP_BASE_URL = "https://matchcars.app";
 
 async function loadPageData(id: string) {
@@ -88,7 +89,18 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   };
 
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean);
-  const appUrl = `${APP_BASE_URL}/car/${vehicle.id}`;
+  // La app transaccional (Expo web) vive bajo /app — /car/{id} sin prefijo
+  // ahora es la ficha propia de este marketplace, no la SPA.
+  const appUrl = `${APP_BASE_URL}/app/car/${vehicle.id}`;
+  const waDigits = seller?.whatsapp ? seller.whatsapp.replace(/\D/g, "") : "";
+  const waText = encodeURIComponent(`Hola! Vi tu ${vehicle.brand} ${vehicle.model} en MatchCars y quería consultarte.`);
+  const waLink = waDigits ? `https://wa.me/${waDigits}?text=${waText}` : null;
+  const mailLink = !waLink && seller?.email ? `mailto:${seller.email}` : null;
+  const sellerLink = seller
+    ? seller.isDealer
+      ? `${APP_BASE_URL}/agencia/${seller.slug || vehicle.userId}`
+      : `${APP_BASE_URL}/user-profile/${vehicle.userId}`
+    : null;
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -250,18 +262,49 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
             {vehicle.acceptsTradeIn && <p className="text-xs text-muted-foreground">Acepta permuta</p>}
 
             <div className="mt-4 flex flex-col gap-2">
-              <a href={appUrl} className="rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground">
-                Mensajear al vendedor
-              </a>
-              <a href={appUrl} className="rounded-lg border border-border px-4 py-2.5 text-center text-sm font-semibold text-foreground">
-                Hacer una oferta
+              {waLink && (
+                <a
+                  href={waLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg bg-[#25D366] px-4 py-2.5 text-center text-sm font-semibold text-white"
+                >
+                  Escribir por WhatsApp
+                </a>
+              )}
+              {mailLink && (
+                <a href={mailLink} className="rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground">
+                  Enviar email
+                </a>
+              )}
+              <a
+                href={appUrl}
+                className={
+                  waLink || mailLink
+                    ? "rounded-lg border border-border px-4 py-2.5 text-center text-sm font-semibold text-foreground"
+                    : "rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground"
+                }
+              >
+                Seguir por la app
               </a>
             </div>
-            <p className="mt-2 text-center text-[11px] text-muted-foreground">Se abre en la app de Matchcars para continuar.</p>
+            <p className="mt-2 text-center text-[11px] text-muted-foreground">
+              {waLink || mailLink ? "También podés seguir la conversación desde la app." : "Se abre en la app de Matchcars para continuar."}
+            </p>
+            <p className="mt-3 rounded-lg bg-background px-3 py-2 text-center text-[11px] text-muted-foreground">
+              Para mensajes privados dentro de la app, descargá MatchCars:{" "}
+              <a href={APPLE_URL} className="font-semibold text-accent">
+                App Store
+              </a>{" "}
+              ·{" "}
+              <a href={PLAY_URL} className="font-semibold text-accent">
+                Google Play
+              </a>
+            </p>
           </div>
 
-          {seller && (
-            <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
+          {seller && sellerLink && (
+            <a href={sellerLink} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 transition hover:border-accent">
               {seller.avatarUrl ? (
                 <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full bg-background">
                   <Image src={seller.avatarUrl} alt={seller.displayName} fill sizes="48px" className="object-cover" />
@@ -275,7 +318,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
                 <p className="truncate text-sm font-semibold">{seller.displayName}</p>
                 <p className="text-xs text-muted-foreground">{seller.isDealer ? "Agencia verificada" : "Vendedor particular"}</p>
               </div>
-            </div>
+            </a>
           )}
         </div>
       </div>

@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const FALLBACK_YEARS = Array.from({ length: 40 }, (_, i) => CURRENT_YEAR - i);
-const APP_BASE_URL = "https://matchcars.app";
+// La app transaccional (Expo web, publicar auto) vive bajo /app.
+const APP_BASE_URL = "https://matchcars.app/app";
 
 async function apiGet<T>(action: string, params: Record<string, string>): Promise<T> {
   const qs = new URLSearchParams({ action, ...params });

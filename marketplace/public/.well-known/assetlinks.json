@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.matchcars.app",
+      "sha256_cert_fingerprints": ["97:74:B1:12:B6:C8:A6:A5:9A:7F:23:18:B2:7A:8F:61:49:F1:DF:21:F5:36:82:C3:56:43:90:2B:C7:2A:7D:0B"]
+    }
+  }
+]

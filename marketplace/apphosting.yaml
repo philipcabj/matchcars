@@ -1,0 +1,22 @@
+# Config de Firebase App Hosting para marketplace/. Ver el plan de deploy
+# (matchcars.app → este backend) para el resto del contexto.
+#
+# NEXT_PUBLIC_SITE_URL se actualiza a mano a la URL real de preview
+# (*.hosted.app) después del primer deploy, y a matchcars.app recién cuando
+# se migre el dominio — todavía no se toca DNS.
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: matchcars-a7847
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_SITE_URL
+    value: https://matchcars.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_PORTAL_URL
+    value: http://localhost:3000
+    availability:
+      - BUILD
+      - RUNTIME

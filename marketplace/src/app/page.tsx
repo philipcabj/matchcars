@@ -2,14 +2,12 @@ import { AgencyCard } from "@/components/AgencyCard";
 import { FilterBar } from "@/components/FilterBar";
 import { VehicleCard } from "@/components/VehicleCard";
 import { getFeaturedAgencies } from "@/lib/agencies";
+import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 import { getUsdToArsRate } from "@/lib/pricing-admin";
 import { getFeaturedVehicles, getFilterOptions, getPopularBrands, listVehicles, VehicleFilters } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-
-const APPLE_URL = "https://apps.apple.com/ar/app/matchcars/id6757968664";
-const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
 
 export const metadata: Metadata = {
   title: "Autos usados en venta",

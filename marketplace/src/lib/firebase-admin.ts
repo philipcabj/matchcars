@@ -18,9 +18,10 @@ function createAdminApp() {
 
   const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
   if (!serviceAccountPath) {
-    throw new Error(
-      "Falta FIREBASE_SERVICE_ACCOUNT_PATH (o FIRESTORE_EMULATOR_HOST para desarrollo local) en .env.local"
-    );
+    // Sin archivo de credenciales local (no existe en un entorno de nube
+    // como App Hosting) — usa Application Default Credentials, que funciona
+    // automáticamente en App Hosting/Cloud Run/Cloud Functions.
+    return initializeApp({ projectId });
   }
   const resolvedPath = path.resolve(/* turbopackIgnore: true */ process.cwd(), serviceAccountPath);
   const serviceAccount = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ resolvedPath, "utf-8"));

@@ -294,6 +294,8 @@ export default function EditProfileScreen() {
         firstName,
         lastName,
         description,
+        whatsapp,
+        phone,
       };
 
       if (isDealer) {
@@ -304,9 +306,7 @@ export default function EditProfileScreen() {
         updateData.businessHours = businessHours;
         updateData.website = website;
         updateData.instagram = instagram;
-        updateData.whatsapp = whatsapp;
         updateData.bannerUrl = bannerUrl;
-        updateData.phone = phone;
         updateData.foundedYear = foundedYear ? Number(foundedYear) : null;
         updateData.brandSpecialties = brandSpecialties;
         updateData.showroomGallery = showroomGallery;
@@ -693,6 +693,37 @@ export default function EditProfileScreen() {
             </View>
         </View>
 
+        <View style={{ marginBottom: 20 }}>
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 16 }}>Contacto</Text>
+
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, marginBottom: 6 }}>WhatsApp</Text>
+                <TextInput
+                    value={whatsapp}
+                    onChangeText={setWhatsapp}
+                    placeholder="+54911..."
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="phone-pad"
+                    style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+                <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 4 }}>
+                    Así los compradores te pueden escribir directo, incluso desde la web sin cuenta.
+                </Text>
+            </View>
+
+            <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Teléfono directo</Text>
+                <TextInput
+                    value={phone}
+                    onChangeText={setPhone}
+                    placeholder="+54911..."
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="phone-pad"
+                    style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+            </View>
+        </View>
+
         {canWatermark && (
             <View style={{ marginBottom: 20 }}>
                 <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600", marginBottom: 4 }}>Logo / Marca de agua</Text>
@@ -981,30 +1012,6 @@ export default function EditProfileScreen() {
                             style={{ flex: 1, color: theme.inputText, padding: 12 }}
                         />
                     </View>
-                </View>
-
-                <View style={{ marginBottom: 12 }}>
-                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>WhatsApp Business</Text>
-                    <TextInput
-                        value={whatsapp}
-                        onChangeText={setWhatsapp}
-                        placeholder="+54911..."
-                        placeholderTextColor={theme.textMuted}
-                        keyboardType="phone-pad"
-                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
-                    />
-                </View>
-
-                <View style={{ marginBottom: 12 }}>
-                    <Text style={{ color: theme.textMuted, marginBottom: 6 }}>Teléfono directo</Text>
-                    <TextInput
-                        value={phone}
-                        onChangeText={setPhone}
-                        placeholder="+54911..."
-                        placeholderTextColor={theme.textMuted}
-                        keyboardType="phone-pad"
-                        style={{ backgroundColor: theme.inputBackground, color: theme.inputText, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}
-                    />
                 </View>
 
                 <View style={{ marginBottom: 12 }}>
