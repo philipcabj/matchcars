@@ -6,12 +6,13 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
 import { sendNotificationEmail } from "@/lib/mail";
 import { sendPushNotification } from "@/lib/notifications";
+import { getPlanFeatures } from "@/lib/planChecks";
 import { SubscriptionPlan, UserRole } from "@/types/user";
 import { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Linking, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ROLE_LABELS: Record<UserRole, string> = { user: "Usuario", moderator: "Moderador", admin: "Admin" };
@@ -227,9 +228,15 @@ export default function AdminDashboardScreen() {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersSearch, setUsersSearch] = useState("");
+  const [usersRoleFilter, setUsersRoleFilter] = useState<UserRole | "all">("all");
+  const [usersPlanFilter, setUsersPlanFilter] = useState<SubscriptionPlan | "all">("all");
+  const [usersListHeight, setUsersListHeight] = useState(0);
+  const [reportsListHeight, setReportsListHeight] = useState(0);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [editRole, setEditRole] = useState<UserRole>("user");
   const [editPlan, setEditPlan] = useState<SubscriptionPlan>("free");
+  const [editPlanExpiresAt, setEditPlanExpiresAt] = useState(""); // "AAAA-MM-DD" o "" (sin vencimiento)
+  const [initialEditPlanExpiresAt, setInitialEditPlanExpiresAt] = useState(""); // para no pisar nextBillingDate de suscripciones pagas reales si el admin no tocó el campo
   const [savingUserEdit, setSavingUserEdit] = useState(false);
 
   // Pricing Config (USD → ARS)
@@ -718,14 +725,44 @@ export default function AdminDashboardScreen() {
     setEditingUser(user);
     setEditRole(user.role ?? "user");
     setEditPlan(user.plan ?? "free");
+    // Solo mostramos una fecha de vencimiento si ya está marcada para expirar
+    // (cancelAtPeriodEnd). Una suscripción paga activa (no cancelada) también
+    // tiene nextBillingDate, pero no la mostramos acá para no confundirla con
+    // un vencimiento manual, y sobre todo para no pisarla al guardar si el
+    // admin solo vino a cambiar el rol.
+    const expiry = user.cancelAtPeriodEnd && user.nextBillingDate
+      ? (user.nextBillingDate.toDate ? user.nextBillingDate.toDate() : new Date(user.nextBillingDate))
+      : null;
+    const expiryStr = expiry && !isNaN(expiry.getTime()) ? expiry.toISOString().slice(0, 10) : "";
+    setEditPlanExpiresAt(expiryStr);
+    setInitialEditPlanExpiresAt(expiryStr);
   };
 
   const handleSaveUserEdit = async () => {
     if (!editingUser || !isAdmin) return;
+
+    const trimmedExpiry = editPlanExpiresAt.trim();
+    let expiryDate: Date | null = null;
+    if (trimmedExpiry) {
+      expiryDate = new Date(`${trimmedExpiry}T00:00:00`);
+      if (isNaN(expiryDate.getTime())) {
+        showAlert("Fecha inválida", "Usá el formato AAAA-MM-DD para la fecha de vencimiento.", "error");
+        return;
+      }
+    }
+
     setSavingUserEdit(true);
     try {
-      await updateDoc(doc(db, "users", editingUser.id), { role: editRole, plan: editPlan });
-      setAllUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, role: editRole, plan: editPlan } : u));
+      const updatePayload: any = { role: editRole, plan: editPlan };
+      // Solo tocamos estos campos si el admin efectivamente cambió el campo de
+      // vencimiento (lo cargó o lo borró); si lo dejó tal cual estaba, no
+      // arriesgamos pisar el nextBillingDate real de una suscripción paga.
+      if (trimmedExpiry !== initialEditPlanExpiresAt) {
+        updatePayload.cancelAtPeriodEnd = !!expiryDate;
+        updatePayload.nextBillingDate = expiryDate ? Timestamp.fromDate(expiryDate) : null;
+      }
+      await updateDoc(doc(db, "users", editingUser.id), updatePayload);
+      setAllUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, ...updatePayload } : u));
       showAlert("Guardado", "Rol y plan actualizados correctamente.", "success");
       setEditingUser(null);
     } catch (e) {
@@ -736,10 +773,20 @@ export default function AdminDashboardScreen() {
     }
   };
 
+  const filteredUsers = React.useMemo(() => {
+    const q = usersSearch.trim().toLowerCase();
+    return allUsers.filter((u) => {
+      if (usersRoleFilter !== "all" && (u.role ?? "user") !== usersRoleFilter) return false;
+      if (usersPlanFilter !== "all" && (u.plan ?? "free") !== usersPlanFilter) return false;
+      if (!q) return true;
+      return (u.firstName?.toLowerCase() ?? "").includes(q) || (u.lastName?.toLowerCase() ?? "").includes(q) || (u.email?.toLowerCase() ?? "").includes(q);
+    });
+  }, [allUsers, usersSearch, usersRoleFilter, usersPlanFilter]);
+
   // --- Render ---
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.background }}>
       <View style={{ backgroundColor: theme.headerBackground, paddingTop: insets.top }}>
         <Header title="Administración" showBack />
       </View>
@@ -873,6 +920,7 @@ export default function AdminDashboardScreen() {
       {/* Content */}
       {activeTab === "moderation" ? (
         <FlatList
+          style={{ flex: 1, minHeight: 0 }}
           data={vehicles}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
@@ -1004,11 +1052,17 @@ export default function AdminDashboardScreen() {
           }
         />
       ) : activeTab === "reports" ? (
-        <View style={{ flex: 1 }}>
+        <View
+          style={{ flex: 1, minHeight: 0 }}
+          onLayout={(e) => setReportsListHeight(e.nativeEvent.layout.height)}
+        >
           {loadingGrouped ? (
              <ActivityIndicator color={theme.primary} style={{ marginTop: 40 }} />
           ) : (
             <FlatList
+              style={reportsListHeight ? { height: reportsListHeight } : { flex: 1, minHeight: 0 }}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
               data={reportedUsers}
               keyExtractor={(item) => item.user.id}
               contentContainerStyle={{ paddingVertical: 16 }}
@@ -1047,7 +1101,7 @@ export default function AdminDashboardScreen() {
         </View>
       ) : (
         // Users Tab
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minHeight: 0 }}>
           <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
             <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.inputBackground, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
               <Ionicons name="search" size={18} color={theme.textMuted} style={{ marginRight: 8 }} />
@@ -1065,23 +1119,70 @@ export default function AdminDashboardScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 6 }}>
-              {loadingUsers ? "Cargando..." : `${allUsers.filter(u => {
-                if (!usersSearch.trim()) return true;
-                const q = usersSearch.toLowerCase();
-                return (u.firstName?.toLowerCase() ?? "").includes(q) || (u.lastName?.toLowerCase() ?? "").includes(q) || (u.email?.toLowerCase() ?? "").includes(q);
-              }).length} usuario(s)`}
+
+            {/* Filtro por rol */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
+              {(["all", "user", "moderator", "admin"] as const).map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  onPress={() => setUsersRoleFilter(r)}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 999,
+                    backgroundColor: usersRoleFilter === r ? (r === "all" ? theme.primary : ROLE_COLORS[r]) : theme.inputBackground,
+                    borderWidth: 1,
+                    borderColor: usersRoleFilter === r ? (r === "all" ? theme.primary : ROLE_COLORS[r]) : theme.likeBoxBackground,
+                  }}
+                >
+                  <Text style={{ color: usersRoleFilter === r ? "#FFF" : theme.text, fontSize: 12, fontWeight: "600" }}>
+                    {r === "all" ? "Todos los roles" : ROLE_LABELS[r]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {/* Filtro por plan */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 6 }}>
+              {(["all", ...(Object.keys(PLAN_LABELS) as SubscriptionPlan[])] as const).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => setUsersPlanFilter(p)}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 999,
+                    backgroundColor: usersPlanFilter === p ? (p === "all" ? theme.primary : PLAN_COLORS[p]) : theme.inputBackground,
+                    borderWidth: 1,
+                    borderColor: usersPlanFilter === p ? (p === "all" ? theme.primary : PLAN_COLORS[p]) : theme.likeBoxBackground,
+                  }}
+                >
+                  <Text style={{ color: usersPlanFilter === p ? "#FFF" : theme.text, fontSize: 12, fontWeight: "600" }}>
+                    {p === "all" ? "Todos los planes" : PLAN_LABELS[p]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
+              {loadingUsers ? "Cargando..." : `${filteredUsers.length} usuario(s)`}
             </Text>
           </View>
+          <View
+            style={{ flex: 1, minHeight: 0 }}
+            onLayout={(e) => setUsersListHeight(e.nativeEvent.layout.height)}
+          >
           {loadingUsers ? (
             <ActivityIndicator color={theme.primary} style={{ marginTop: 40 }} />
           ) : (
             <FlatList
-              data={allUsers.filter(u => {
-                if (!usersSearch.trim()) return true;
-                const q = usersSearch.toLowerCase();
-                return (u.firstName?.toLowerCase() ?? "").includes(q) || (u.lastName?.toLowerCase() ?? "").includes(q) || (u.email?.toLowerCase() ?? "").includes(q);
-              })}
+              // Altura fija medida en lugar de confiar en que flex:1 se propague:
+              // en algunos casos (Expo Go) la lista quedaba sin espacio scrolleable
+              // real y el contenido excedente se cortaba en vez de poder scrollearse.
+              style={usersListHeight ? { height: usersListHeight } : { flex: 1, minHeight: 0 }}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              data={filteredUsers}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{ padding: 16, paddingTop: 4 }}
               renderItem={({ item }) => {
@@ -1096,6 +1197,28 @@ export default function AdminDashboardScreen() {
                     activeOpacity={0.75}
                   >
                     <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
+                      {item.photoURL ? (
+                        <Image
+                          source={{ uri: item.photoURL }}
+                          style={{ width: 40, height: 40, borderRadius: 20, marginRight: 10, backgroundColor: theme.inputBackground }}
+                        />
+                      ) : (
+                        <View
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 20,
+                            marginRight: 10,
+                            backgroundColor: item.avatarColor || "#6B7280",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Text style={{ color: "#FFF", fontSize: 14, fontWeight: "700" }}>
+                            {item.initials || `${(item.firstName?.[0] ?? "")}${(item.lastName?.[0] ?? "")}`.toUpperCase() || "?"}
+                          </Text>
+                        </View>
+                      )}
                       <View style={{ flex: 1, marginRight: 8 }}>
                         <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 15 }}>
                           {item.firstName ?? ""} {item.lastName ?? ""}
@@ -1126,11 +1249,12 @@ export default function AdminDashboardScreen() {
               }}
               ListEmptyComponent={
                 <Text style={{ color: theme.textMuted, textAlign: "center", marginTop: 40 }}>
-                  {usersSearch.trim() ? "Sin resultados para esa búsqueda." : "No hay usuarios registrados."}
+                  {usersSearch.trim() || usersRoleFilter !== "all" || usersPlanFilter !== "all" ? "Sin resultados para esa búsqueda/filtro." : "No hay usuarios registrados."}
                 </Text>
               }
             />
           )}
+          </View>
         </View>
       )}
 
@@ -1203,6 +1327,48 @@ export default function AdminDashboardScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+
+              {/* Recordatorio de qué incluye el plan seleccionado. Mensual/anual no
+                  cambia esto: ambas variantes dan exactamente las mismas funciones. */}
+              <View style={{ backgroundColor: theme.inputBackground, borderRadius: 10, padding: 12, marginTop: 10 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: "700", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Qué incluye {PLAN_LABELS[editPlan]}
+                </Text>
+                {getPlanFeatures(editPlan).map((f, i) => (
+                  <Text key={i} style={{ color: theme.text, fontSize: 12, marginTop: 2 }}>{f}</Text>
+                ))}
+                {editPlan.includes("_monthly") || editPlan.includes("_annual") ? (
+                  <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 6, fontStyle: "italic" }}>
+                    Mensual o anual no cambia las funciones habilitadas — es solo una etiqueta. Si querés que este plan venza solo, usá el campo de abajo.
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* Vencimiento opcional: si se completa, el plan baja a Free automáticamente
+                  después de esa fecha (misma lógica que usan las suscripciones pagas). */}
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700", marginTop: 20, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                Vencimiento (opcional)
+              </Text>
+              <TextInput
+                value={editPlanExpiresAt}
+                onChangeText={setEditPlanExpiresAt}
+                placeholder="AAAA-MM-DD — vacío = no vence"
+                placeholderTextColor={theme.textMuted}
+                autoCapitalize="none"
+                style={{
+                  backgroundColor: theme.inputBackground,
+                  color: theme.text,
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  fontSize: 14,
+                }}
+              />
+              <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 6 }}>
+                {editPlanExpiresAt.trim()
+                  ? `El plan vuelve a "Gratis" automáticamente después del ${editPlanExpiresAt}.`
+                  : "Sin fecha, el plan que asignes queda fijo hasta que lo cambies vos a mano."}
+              </Text>
 
               {/* Unblock (if blocked) */}
               {editingUser?.isBlocked && (

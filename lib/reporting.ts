@@ -35,10 +35,11 @@ export const fetchDealerReportData = async (userId: string): Promise<DealerRepor
 
     snap.forEach((doc) => {
       const data = doc.data();
-      // Published count (exclude deleted/blocked/rejected if desired, but user asked for "Autos publicados")
-      // We'll count everything except deleted for "published history" or just active?
-      // "Autos publicados" usually implies currently active + sold history.
-      if (data.status !== 'deleted') {
+      // "En venta": only listings that are actually live (approved + published),
+      // matching the "active" filter used in mycars.tsx. Excludes pending/rejected/
+      // blocked/sold/deleted so a rejected listing can't inflate this count.
+      const status = data.status || 'available';
+      if (data.published === true && status === 'available') {
         publishedCars++;
       }
 

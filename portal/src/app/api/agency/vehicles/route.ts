@@ -1,0 +1,145 @@
+// portal/src/app/api/agency/vehicles/route.ts
+// GET  -> lista los vehículos del usuario autenticado (cualquier estado).
+// POST -> alta de un vehículo nuevo. Reemplaza la escritura directa a Firestore
+//         que hacía WebDealerAddCarForm.tsx: ahora la valida el backend.
+//
+// Nota: el límite de autos por plan también lo sigue aplicando la Cloud Function
+// enforceVehicleLimit (functions/src/index.ts, sin tocar) como red de seguridad
+// final — acá lo chequeamos antes para poder devolver un error claro y
+// sincrónico en vez de que el auto se cree y quede marcado "rejected_limit".
+import { requireUid } from "@/lib/api-auth";
+import { withApiErrors } from "@/lib/api-handler";
+import { resolveMembership } from "@/lib/agency-server";
+import { ensureCatalogEntry } from "@/lib/catalog-server";
+import { adminDb } from "@/lib/firebase-admin";
+import { AGENCY_ROLE_PERMISSIONS, getMaxCars } from "@/lib/plans";
+import { EXCLUDED_STATUSES, VehicleFormValues } from "@/lib/vehicle";
+import { FieldValue } from "firebase-admin/firestore";
+
+export const GET = withApiErrors(async (request) => {
+  const uid = await requireUid(request);
+  const { agencyId } = await resolveMembership(uid);
+  const snap = await adminDb.collection("vehicles").where("userId", "==", agencyId).get();
+  const vehicles = snap.docs
+    .map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        brand: data.brand ?? null,
+        model: data.model ?? null,
+        year: data.year ?? null,
+        price: data.price ?? null,
+        currency: data.currency ?? null,
+        status: data.status ?? "available",
+        coverImage: data.images?.cover ?? data.coverImage ?? null,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
+      };
+    })
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+
+  return Response.json({ vehicles });
+});
+
+export const POST = withApiErrors(async (request) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+    return Response.json({ error: "Tu rol no tiene permiso para publicar autos." }, { status: 403 });
+  }
+
+  const userSnap = await adminDb.doc(`users/${agencyId}`).get();
+  if (!userSnap.exists) return Response.json({ error: "Agencia no encontrada" }, { status: 404 });
+  const userData = userSnap.data() ?? {};
+  const plan: string = userData.plan || "free";
+
+  const body = (await request.json()) as Partial<VehicleFormValues>;
+
+  if (!body.brand?.trim() || !body.model?.trim() || !body.year || !body.price) {
+    return Response.json({ error: "Marca, modelo, año y precio son obligatorios." }, { status: 400 });
+  }
+  if (!body.coverImage) {
+    return Response.json({ error: "Falta la foto de portada." }, { status: 400 });
+  }
+
+  const maxCars = getMaxCars(plan);
+  if (Number.isFinite(maxCars)) {
+    const existingSnap = await adminDb.collection("vehicles").where("userId", "==", agencyId).get();
+    const activeCount = existingSnap.docs.filter((d) => {
+      const status = d.data().status || "available";
+      return !EXCLUDED_STATUSES.includes(status);
+    }).length;
+    if (activeCount >= maxCars) {
+      return Response.json(
+        {
+          error: `Tu plan actual permite hasta ${maxCars} auto${maxCars === 1 ? "" : "s"} activo${maxCars === 1 ? "" : "s"}. Tenés ${activeCount}. Actualizá tu plan para publicar más.`,
+        },
+        { status: 400 }
+      );
+    }
+  }
+
+  const yearNum = Number(body.year);
+  const priceNum = Number(body.price);
+  const kmNum = body.km ? Number(body.km) : 0;
+  const currency = body.currency === "USD" ? "USD" : "ARS";
+  const toggles = body.toggles ?? {};
+  const isDealer = /pro_dealer|dealer_pro_plus/.test(plan);
+  const userName = isDealer && userData.agencyName ? userData.agencyName : userData.displayName || userData.email || "Agencia";
+
+  const vehicleData = {
+    userId: agencyId,
+    userName,
+    userPlan: plan,
+    sellerTrustLevel: userData.trustLevel || "new",
+    brand: body.brand.trim(),
+    model: body.model.trim(),
+    version: body.version || null,
+    year: yearNum,
+    price: priceNum,
+    currency,
+    km: kmNum,
+    fuelType: body.fuelType || null,
+    gearbox: body.gearbox || null,
+    description: body.description || null,
+
+    singleOwner: !!toggles.singleOwner,
+    serviceRecords: !!toggles.serviceRecords,
+    vtvValid: !!toggles.vtvValid,
+    papersUpToDate: !!toggles.papersUpToDate,
+    warranty: !!toggles.warranty,
+
+    location: {
+      province: body.province || userData.province || null,
+      city: body.city || userData.city || null,
+    },
+    images: {
+      cover: body.coverImage,
+      gallery: body.gallery ?? [],
+    },
+    video: body.video || null,
+    acceptsFinancing: !!toggles.acceptsFinancing,
+    negotiablePrice: !!toggles.negotiablePrice,
+    immediateDelivery: !!toggles.immediateDelivery,
+    originalPrice: priceNum,
+    priceHistory: [{ price: priceNum, currency, changedAt: new Date() }],
+    updatedAt: FieldValue.serverTimestamp(),
+    published: false,
+    status: "pending_review",
+    likedBy: [],
+    isFeatured: isDealer,
+    featuredAt: isDealer ? FieldValue.serverTimestamp() : null,
+    views: 0,
+    likesCount: 0,
+    flags: { forSale: true, tradeIn: !!toggles.acceptsTradeIn },
+    // TODO: portar lib/riskScoring.ts (evaluación de riesgo) al backend del
+    // portal — por ahora se publica sin flags, igual que quedaría cualquier
+    // publicación si esa evaluación fallara silenciosamente en la app.
+    riskFlags: [],
+    riskScore: 0,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+
+  const docRef = await adminDb.collection("vehicles").add(vehicleData);
+  await ensureCatalogEntry(vehicleData.brand, vehicleData.model, vehicleData.version);
+  return Response.json({ id: docRef.id }, { status: 201 });
+});

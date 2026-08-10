@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/*
+ * Tokens portados de config/theme.ts (la app mobile/web actual) para que el
+ * portal se sienta familia con Matchcars y no "otro sitio".
+ *
+ * A pedido explícito: tema claro siempre, sin importar el modo del SO/browser
+ * (antes seguía prefers-color-scheme y podía saltar a la paleta oscura de la
+ * app). `color-scheme: light` además fuerza que los controles nativos
+ * (selects, checkboxes, scrollbar) rendericen claros — si no, el navegador
+ * los pinta oscuros por su cuenta aunque el resto de la página sea clara, que
+ * es lo que probablemente se veía "no tan claro". Un toggle manual real
+ * (como el ThemeContext de la app) queda pendiente si hace falta más adelante.
+ */
+:root {
+  color-scheme: light;
+  --background: #fafafa;
+  --foreground: #111827;
+  --card: #ffffff;
+  --card-foreground: #111827;
+  --muted: #9ca3af;
+  --muted-foreground: #6b7280;
+  --border: #e5e7eb;
+  --accent: #f97316; /* naranja Matchcars */
+  --accent-foreground: #ffffff;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --success: #22c55e;
+  --error: #b91c1c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-success: var(--success);
+  --color-error: var(--error);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}

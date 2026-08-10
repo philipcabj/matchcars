@@ -1,0 +1,209 @@
+// portal/src/app/api/agency/leads/[id]/route.ts
+// GET   -> detalle de un lead (para /dashboard/leads/[id]), incluye la oferta
+//          activa embebida (lead.offer) y el estado actual del vehículo.
+// PATCH -> acciones sobre el lead: "advance"/"lost" (avanza etapa o lo marca
+// perdido, espeja handleCycleStatus/markLeadAsLost de app/(screens)/leads.tsx),
+// "mark_won" (cierre manual sin oferta formal) y "mark_vehicle_sold" (espeja
+// handleMarkAsSold de chat/[uid].tsx: marca el auto vendido + crea el registro
+// en sales/). Las acciones sobre una oferta formal en curso (aceptar/rechazar/
+// contraofertar/retirar) viven en la subruta offer/route.ts.
+//
+// "lost" siempre pide motivo (reasonLost, campo que ya existe en types/commerce.ts
+// pero el portal no usaba). "advance" en un lead manual también pide nota
+// obligatoria (se agrega como línea a manualContact.notes) — sin chat, esa nota
+// es el único registro de qué pasó. En los orgánicos no se pide nada: la
+// conversación real ya es el registro.
+import { requireUid } from "@/lib/api-auth";
+import { withApiErrors } from "@/lib/api-handler";
+import { resolveMembership } from "@/lib/agency-server";
+import { adminDb } from "@/lib/firebase-admin";
+import { LEAD_STATUS_LABELS, LeadStatus } from "@/lib/leads";
+import { sendNotificationEmail } from "@/lib/notify-mail";
+import { sendPushNotification } from "@/lib/notify-push";
+import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { FieldValue } from "firebase-admin/firestore";
+
+const TERMINAL_OFFER_STATUSES = ["rejected", "withdrawn", "expired"];
+
+function toIso(ts: unknown): string | null {
+  if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
+  return null;
+}
+
+export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]">) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+    return Response.json({ error: "Tu rol no tiene permiso para ver los leads." }, { status: 403 });
+  }
+
+  const { id } = await ctx.params;
+  const snap = await adminDb.doc(`leads/${id}`).get();
+  if (!snap.exists) return Response.json({ error: "No encontrado" }, { status: 404 });
+  const data = snap.data()!;
+  if (data.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
+
+  let vehicleStatus: string | null = null;
+  if (data.vehicleId) {
+    const vehicleSnap = await adminDb.doc(`vehicles/${data.vehicleId}`).get();
+    vehicleStatus = vehicleSnap.exists ? vehicleSnap.data()?.status ?? "available" : null;
+  }
+
+  return Response.json({
+    id: snap.id,
+    status: data.status || "new",
+    conversationId: data.conversationId || "",
+    vehicleId: data.vehicleId || null,
+    buyerId: data.buyerId || null,
+    vehicleStatus,
+    vehicleSnapshot: data.vehicleSnapshot ?? null,
+    buyerSnapshot: data.buyerSnapshot ?? null,
+    manualContact: data.manualContact ?? null,
+    lastMessage: data.lastMessage ?? null,
+    lastMessageAt: toIso(data.lastMessageAt),
+    dealPrice: data.dealPrice ?? null,
+    dealCurrency: data.dealCurrency ?? null,
+    reasonLost: data.reasonLost ?? null,
+    offer: data.offer ?? null,
+    createdAt: toIso(data.createdAt),
+  });
+});
+
+export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]">) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+    return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
+  }
+
+  const { id } = await ctx.params;
+  const ref = adminDb.doc(`leads/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) return Response.json({ error: "No encontrado" }, { status: 404 });
+  const lead = snap.data()!;
+  if (lead.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
+
+  const body = await request.json();
+  const action = body.action as "advance" | "lost" | "mark_won" | "mark_vehicle_sold";
+  const current = lead.status || "new";
+
+  if (action === "lost") {
+    if (current === "won" || current === "lost") {
+      return Response.json({ error: "Este lead ya está cerrado." }, { status: 400 });
+    }
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    if (!reason) return Response.json({ error: "Contame el motivo de la pérdida." }, { status: 400 });
+    const updates: Record<string, unknown> = { status: "lost", reasonLost: reason };
+    if (!lead.lostAt) updates.lostAt = FieldValue.serverTimestamp();
+    await ref.update(updates);
+    return Response.json({ ok: true });
+  }
+
+  if (action === "advance") {
+    if (current === "won" || current === "lost" || current === "negotiation") {
+      return Response.json(
+        { error: "Este lead ya está en negociación o cerrado — cerralo como vendido o perdido desde ahí." },
+        { status: 400 }
+      );
+    }
+    const nextStatus: LeadStatus = current === "new" ? "contacted" : "negotiation";
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    if (lead.manualContact && !note) {
+      return Response.json({ error: "Contame qué pasó antes de avanzar este lead." }, { status: 400 });
+    }
+
+    const updates: Record<string, unknown> = { status: nextStatus };
+    if (nextStatus === "contacted" && !lead.contactedAt) updates.contactedAt = FieldValue.serverTimestamp();
+    if (nextStatus === "negotiation" && !lead.negotiationAt) updates.negotiationAt = FieldValue.serverTimestamp();
+
+    if (note && lead.manualContact) {
+      const line = `[${new Date().toLocaleDateString("es-AR")}] → ${LEAD_STATUS_LABELS[nextStatus]}: ${note}`;
+      updates["manualContact.notes"] = lead.manualContact.notes ? `${lead.manualContact.notes}\n${line}` : line;
+    }
+
+    await ref.update(updates);
+    return Response.json({ ok: true });
+  }
+
+  if (action === "mark_won") {
+    if (current !== "contacted" && current !== "negotiation") {
+      return Response.json({ error: "Este lead no está en un estado que se pueda cerrar como vendido." }, { status: 400 });
+    }
+    if (lead.offer && !TERMINAL_OFFER_STATUSES.includes(lead.offer.status)) {
+      return Response.json({ error: "Este lead tiene una oferta activa — resolvela desde ahí." }, { status: 400 });
+    }
+    const dealPrice = Number(body.dealPrice);
+    const dealCurrency = body.dealCurrency === "USD" ? "USD" : "ARS";
+    if (!dealPrice || dealPrice <= 0) {
+      return Response.json({ error: "Ingresá un precio de cierre válido." }, { status: 400 });
+    }
+    await ref.update({ status: "won", wonAt: FieldValue.serverTimestamp(), dealPrice, dealCurrency });
+    return Response.json({ ok: true });
+  }
+
+  if (action === "mark_vehicle_sold") {
+    if (current !== "won") {
+      return Response.json({ error: "Este lead todavía no está marcado como vendido." }, { status: 400 });
+    }
+    if (!lead.vehicleId) {
+      return Response.json({ error: "Este lead no tiene un auto del stock asociado." }, { status: 400 });
+    }
+    const vehicleRef = adminDb.doc(`vehicles/${lead.vehicleId}`);
+    const saleRef = adminDb.doc(`sales/${lead.vehicleId}`);
+    const offerRef = lead.offer?.id ? adminDb.doc(`offers/${lead.offer.id}`) : null;
+    // Con comprador real, el auto queda "reserved" (no "sold" todavía) hasta
+    // que confirme la recepción desde el chat de la app — mismo criterio que
+    // handleMarkAsSold en chat/[uid].tsx. Sin comprador (lead manual) no hay
+    // quién confirme, así que se cierra directo como antes.
+    const pendingConfirmation = !!lead.buyerId;
+    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+    await adminDb.runTransaction(async (t) => {
+      const vehicleSnap = await t.get(vehicleRef);
+      if (!vehicleSnap.exists) throw new Error("El auto ya no existe.");
+      if (vehicleSnap.data()?.status === "sold") throw new Error("Este auto ya está marcado como vendido.");
+      t.update(vehicleRef, {
+        status: pendingConfirmation ? "reserved" : "sold",
+        published: false,
+        soldAt: FieldValue.serverTimestamp(),
+        ...(offerRef ? { soldViaOfferId: lead.offer.id } : {}),
+      });
+      if (offerRef) t.update(offerRef, { vehicleSold: true });
+      t.set(
+        saleRef,
+        {
+          vehicleId: lead.vehicleId,
+          sellerId: agencyId,
+          buyerId: lead.buyerId || "",
+          finalPrice: lead.dealPrice || 0,
+          currency: lead.dealCurrency || "ARS",
+          soldAt: FieldValue.serverTimestamp(),
+          source: "matchcars",
+          vehicleSnapshot: lead.vehicleSnapshot ?? {},
+          confirmedByBuyer: pendingConfirmation ? null : true,
+          ...(pendingConfirmation ? { buyerConfirmDeadline: deadline } : { confirmedAt: FieldValue.serverTimestamp() }),
+        },
+        { merge: true }
+      );
+    });
+
+    if (lead.buyerId) {
+      const carModel = `${lead.vehicleSnapshot?.brand ?? ""} ${lead.vehicleSnapshot?.model ?? ""}`.trim();
+      sendNotificationEmail("vehicle_sold", {
+        recipientUid: lead.buyerId,
+        senderName: "MatchCars",
+        subject: `Confirmá la recepción de tu ${carModel}`,
+        carModel,
+      }).catch(() => {});
+      const buyerSnap = await adminDb.doc(`users/${lead.buyerId}`).get();
+      const pushToken = buyerSnap.data()?.pushToken;
+      if (pushToken) {
+        sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {}).catch(() => {});
+      }
+    }
+
+    return Response.json({ ok: true });
+  }
+
+  return Response.json({ error: "Acción inválida." }, { status: 400 });
+});

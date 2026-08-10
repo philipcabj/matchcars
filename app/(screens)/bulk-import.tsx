@@ -1,36 +1,41 @@
 import { WebContainer } from '@/components/WebContainer';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { db, storage } from '@/lib/firebase';
+import { app, db, storage } from '@/lib/firebase';
 import { logger } from '@/lib/logger';
 import { isDealerPlan } from '@/lib/planChecks';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { ref, uploadBytes } from 'firebase/storage';
 import Papa from 'papaparse';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 
-interface ImportedVehicle {
-  id?: string; // ID for matching (SKU, VIN)
+interface PreviewRow {
+  id?: string;
   brand: string;
   model: string;
-  version: string;
-  year: string;
-  price: string;
-  currency: string;
-  km: string;
-  description?: string;
-  fuel?: string;
-  transmission?: string;
-  bodyType?: string;
-  color?: string;
-  engine?: string;
-  doors?: string;
-  matchedImages: any[]; // DocumentPickerAsset[]
+  valid: boolean;
 }
+
+interface BulkImportJob {
+  status: 'processing' | 'done' | 'error';
+  totalCount: number;
+  processedCount: number;
+  successCount: number;
+  failCount: number;
+  errors: { row: number; vehicle: string; message: string }[];
+  errorMessage?: string;
+}
+
+const TEMPLATE_HEADERS = ['id', 'brand', 'model', 'version', 'year', 'price', 'currency', 'km', 'description', 'fuel', 'transmission'];
+const TEMPLATE_ROWS = [
+  ['AUTO1', 'Toyota', 'Corolla', 'XEI CVT', '2022', '18500', 'USD', '32000', 'Único dueño, service oficial al día', 'Nafta', 'Automática'],
+  ['AUTO2', 'Volkswagen', 'Gol Trend', 'Trendline', '2019', '9800000', 'ARS', '58000', 'Impecable, VTV vigente', 'Nafta', 'Manual'],
+];
 
 export default function BulkImportScreen() {
   const { user, profile } = useAuth();
@@ -39,32 +44,60 @@ export default function BulkImportScreen() {
 
   // Security check: Only Dealer plans and admins
   const hasAccess = isDealerPlan(profile?.plan) || profile?.role === 'admin';
-  
-  if (!hasAccess) {
-       return (
-           <WebContainer>
-              <View style={{ padding: 40, alignItems: 'center' }}>
-                  <Ionicons name="lock-closed" size={64} color={theme.textMuted} />
-                  <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Función exclusiva para Agencias</Text>
-                  <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 10 }}>La carga masiva por CSV está disponible únicamente para planes Dealer y Dealer Plus.</Text>
-                  <TouchableOpacity 
-                    onPress={() => router.push('/(screens)/subscribe')}
-                    style={{ backgroundColor: theme.primary, padding: 15, borderRadius: 10, marginTop: 20 }}
-                  >
-                      <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver Planes Dealer</Text>
-                  </TouchableOpacity>
-              </View>
-          </WebContainer>
-      );
-  }
-  
-  const [csvFile, setCsvFile] = useState<any>(null);
-  const [parsedData, setParsedData] = useState<ImportedVehicle[]>([]);
-  const [imageFiles, setImageFiles] = useState<any[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState('');
 
+  if (!hasAccess) {
+    return (
+      <WebContainer>
+        <View style={{ padding: 40, alignItems: 'center' }}>
+          <Ionicons name="lock-closed" size={64} color={theme.textMuted} />
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Función exclusiva para Agencias</Text>
+          <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 10 }}>La carga masiva por CSV está disponible únicamente para planes Dealer y Dealer Plus.</Text>
+          <TouchableOpacity
+            onPress={() => router.push('/(screens)/subscribe')}
+            style={{ backgroundColor: theme.primary, padding: 15, borderRadius: 10, marginTop: 20 }}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver Planes Dealer</Text>
+          </TouchableOpacity>
+        </View>
+      </WebContainer>
+    );
+  }
+
+  const [csvFile, setCsvFile] = useState<any>(null);
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [processingCsv, setProcessingCsv] = useState(false);
+
+  const [zipFile, setZipFile] = useState<any>(null);
+
+  const [phase, setPhase] = useState<'form' | 'uploading' | 'processing'>('form');
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [job, setJob] = useState<BulkImportJob | null>(null);
+  const [startError, setStartError] = useState('');
+
+  useEffect(() => {
+    if (!jobId) return;
+    const unsub = onSnapshot(doc(db, 'bulkImportJobs', jobId), (snap) => {
+      if (snap.exists()) setJob(snap.data() as BulkImportJob);
+    });
+    return () => unsub();
+  }, [jobId]);
+
+  const downloadTemplate = () => {
+    if (Platform.OS !== 'web') {
+      Alert.alert('Aviso', 'Descargá la planilla desde la versión web.');
+      return;
+    }
+    const csv = Papa.unparse({ fields: TEMPLATE_HEADERS, data: TEMPLATE_ROWS });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'plantilla-vehiculos-matchcars.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // 1. Pick CSV
   const pickCsv = async () => {
@@ -77,7 +110,7 @@ export default function BulkImportScreen() {
       if (result.assets && result.assets.length > 0) {
         const file = result.assets[0];
         setCsvFile(file);
-        parseCsv(file);
+        parseCsvPreview(file);
       }
     } catch (err) {
       console.error(err);
@@ -85,104 +118,76 @@ export default function BulkImportScreen() {
     }
   };
 
-  const processResults = (results: any) => {
-      
-      if (results.errors && results.errors.length > 0) {
-        logger.warn("CSV Errors:", results.errors);
-      }
+  const processPreview = (results: any) => {
+    if (results.errors && results.errors.length > 0) {
+      logger.warn('CSV Errors:', results.errors);
+    }
 
-      const vehicles: ImportedVehicle[] = results.data.map((row: any) => {
-         return {
-            id: row.id || row.sku || row.vin,
-            brand: row.brand || row.marca || '',
-            model: row.model || row.modelo || '',
-            version: row.version || row.versión || row.variant || '',
-            year: row.year || row.año || row.anio || '',
-            price: row.price || row.precio || '',
-            currency: (row.currency || row.moneda || 'USD').toString().toUpperCase().includes('PESO') || (row.currency || row.moneda || 'USD').toString().toUpperCase().includes('ARS') ? 'ARS' : 'USD',
-            km: row.km || row.kilometraje || '',
-            description: row.description || row.descripcion || '',
-            fuel: row.fuel || row.combustible,
-            transmission: row.transmission || row.transmision,
-            matchedImages: [],
-         };
-      }).filter((v: any) => {
-        const isValid = v.brand && v.model;
-        if (!isValid) logger.log("Invalid vehicle row:", v);
-        return isValid;
-      }); 
+    const rows: PreviewRow[] = results.data.map((row: any) => {
+      const brand = row.brand || row.marca || '';
+      const model = row.model || row.modelo || '';
+      return {
+        id: row.id || row.sku || row.vin,
+        brand,
+        model,
+        valid: !!(brand && model),
+      };
+    });
 
-      if (vehicles.length === 0) {
-         Alert.alert(
-           'Error de Lectura', 
-           `No se encontraron vehículos válidos en el CSV. \n\nFilas encontradas: ${results.data.length}\n\nAsegúrate de tener las columnas: brand (o marca), model (o modelo).`
-         );
-      } else {
-         Alert.alert('CSV Cargado', `Se detectaron ${vehicles.length} vehículos correctamente.`);
-      }
+    setPreviewRows(rows);
 
-      // If images are already loaded, match them now
-      if (imageFiles && imageFiles.length > 0) {
-          const updated = vehicles.map((v: any) => {
-            if (!v.id) return v;
-            const matches = imageFiles.filter(img => {
-                const name = img.name || img.file?.name || '';
-                return name.toLowerCase().startsWith(v.id!.toLowerCase());
-            });
-            return { ...v, matchedImages: matches };
-          });
-          setParsedData(updated);
-      } else {
-          setParsedData(vehicles);
-      }
+    const validCount = rows.filter((r) => r.valid).length;
+    if (validCount === 0) {
+      Alert.alert(
+        'Error de lectura',
+        `No se encontraron vehículos válidos en el CSV.\n\nFilas encontradas: ${rows.length}\n\nAsegurate de tener las columnas: brand (o marca), model (o modelo). Descargá la planilla de ejemplo si no estás seguro del formato.`
+      );
+    }
   };
 
-  // 2. Parse CSV
-  const parseCsv = async (fileAsset: any) => {
+  // 2. Parse CSV (solo para vista previa; el import real lo procesa la Cloud Function)
+  const parseCsvPreview = async (fileAsset: any) => {
     setProcessingCsv(true);
     try {
-      // Case A: Web with Native File Object (Best for large files)
       if (Platform.OS === 'web' && fileAsset.file) {
-          Papa.parse(fileAsset.file, {
-              header: true,
-              skipEmptyLines: true,
-              transformHeader: (h) => h.trim().toLowerCase(),
-              complete: (results) => {
-                  processResults(results);
-                  setProcessingCsv(false);
-              },
-              error: (err) => {
-                  console.error(err);
-                  Alert.alert('Error CSV', err.message);
-                  setProcessingCsv(false);
-              }
-          });
-          return;
+        Papa.parse(fileAsset.file, {
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: (h) => h.trim().toLowerCase(),
+          complete: (results) => {
+            processPreview(results);
+            setProcessingCsv(false);
+          },
+          error: (err) => {
+            console.error(err);
+            Alert.alert('Error CSV', err.message);
+            setProcessingCsv(false);
+          },
+        });
+        return;
       }
 
-      // Case B: URI Fetch (Fallback)
-      let content = '';
-      if (Platform.OS === 'web') {
-        const response = await fetch(fileAsset.uri);
-        content = await response.text();
-      } else {
+      if (Platform.OS !== 'web') {
         Alert.alert('Aviso', 'El importador masivo está optimizado para Web.');
         setProcessingCsv(false);
         return;
       }
-      
+
+      const response = await fetch(fileAsset.uri);
+      const content = await response.text();
+
       Papa.parse(content, {
         header: true,
         skipEmptyLines: true,
         transformHeader: (h) => h.trim().toLowerCase(),
         complete: (results) => {
-            processResults(results);
-            setProcessingCsv(false);
+          processPreview(results);
+          setProcessingCsv(false);
         },
         error: (error: any) => {
           Alert.alert('Error CSV', error.message);
           setProcessingCsv(false);
-        }
+        },
       });
     } catch (e) {
       console.error(e);
@@ -191,126 +196,62 @@ export default function BulkImportScreen() {
     }
   };
 
-  // 3. Pick Images
-  const pickImages = async () => {
+  // 3. Pick ZIP de fotos
+  const pickZip = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'image/*',
-        multiple: true, // Only works well on Web
-        copyToCacheDirectory: false,
+        type: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
+        copyToCacheDirectory: true,
       });
-
-      if (result.assets) {
-        setImageFiles(result.assets);
-        matchImagesToVehicles(parsedData, result.assets);
+      if (result.assets && result.assets.length > 0) {
+        setZipFile(result.assets[0]);
       }
     } catch (err) {
       console.error(err);
+      Alert.alert('Error', 'No se pudo cargar el archivo .zip');
     }
   };
 
-  // 4. Match Logic
-  const matchImagesToVehicles = (vehicles: ImportedVehicle[], images: any[]) => {
-    const updated = vehicles.map(v => {
-      if (!v.id) return v;
-      // Match if filename starts with ID (e.g. "FORD001_01.jpg")
-      const matches = images.filter(img => {
-          const name = img.name || img.file?.name || '';
-          return name.toLowerCase().startsWith(v.id!.toLowerCase());
+  // 4. Subir CSV + ZIP y disparar la Cloud Function startBulkImport
+  const handleStartImport = async () => {
+    if (!user || !csvFile || !zipFile) return;
+    setPhase('uploading');
+    setStartError('');
+    try {
+      const newJobId = doc(collection(db, 'bulkImportJobs')).id;
+
+      const csvBlob = csvFile.file || (await (await fetch(csvFile.uri)).blob());
+      await uploadBytes(ref(storage, `bulkImports/${user.uid}/${newJobId}/data.csv`), csvBlob);
+
+      const zipBlob = zipFile.file || (await (await fetch(zipFile.uri)).blob());
+      await uploadBytes(ref(storage, `bulkImports/${user.uid}/${newJobId}/photos.zip`), zipBlob);
+
+      setJobId(newJobId);
+      setPhase('processing');
+
+      const startBulkImportFn = httpsCallable(getFunctions(app), 'startBulkImport');
+      startBulkImportFn({ jobId: newJobId }).catch((e: any) => {
+        console.error('startBulkImport failed:', e);
+        setStartError(e.message || 'La importación falló.');
       });
-      return { ...v, matchedImages: matches };
-    });
-    setParsedData(updated);
+    } catch (e: any) {
+      console.error(e);
+      Alert.alert('Error', e.message || 'No se pudieron subir los archivos.');
+      setPhase('form');
+    }
   };
 
-  // 5. Upload Process
-  const handleImport = async () => {
-    if (!user) return;
-    setUploading(true);
-    setProgress('Iniciando importación...');
-
-    let successCount = 0;
-    let failCount = 0;
-    let lastError = "";
-
-    for (const [index, vehicle] of parsedData.entries()) {
-      try {
-        setProgress(`Importando ${index + 1}/${parsedData.length}: ${vehicle.brand} ${vehicle.model}`);
-        
-        // Upload images first
-        const imageUrls: string[] = [];
-        const vehicleDocId = `${Date.now()}_${index}`; // Temp ID for storage path, or auto-gen
-
-        for (const imgAsset of vehicle.matchedImages) {
-            const blob = await fetch(imgAsset.uri).then(r => r.blob());
-            const filename = imgAsset.name || 'image.jpg';
-            const storageRef = ref(storage, `vehicles/${user.uid}/${vehicleDocId}/${filename}`);
-            await uploadBytes(storageRef, blob);
-            const url = await getDownloadURL(storageRef);
-            imageUrls.push(url);
-        }
-
-        // Prepare data for Firestore avoiding undefined fields
-        const { matchedImages, id, ...vehicleData } = vehicle;
-
-        // Determine correct location from Profile (Agency Address)
-        let locationStr = 'Ubicación a consultar';
-        if (profile?.address) {
-            locationStr = profile.address;
-        } else if (profile?.businessAddress) {
-            locationStr = profile.businessAddress;
-        }
-
-        // Determine correct User Name (Agency Name Priority)
-        const userName = profile?.agencyName || profile?.firstName || user.displayName || 'Agencia';
-
-        // Add to Firestore
-        await addDoc(collection(db, 'vehicles'), {
-            ...vehicleData,
-            userId: user.uid,
-            userName: userName,
-            userImage: profile?.photoURL || user.photoURL || '',
-            userEmail: user.email,
-            location: locationStr, 
-            city: profile?.city || locationStr, 
-            province: profile?.province || locationStr, 
-            userPlan: profile?.plan || 'free', 
-            // Standardize image fields based on Vehicle type
-            coverImage: imageUrls[0] || '',
-            additionalImages: imageUrls.slice(1),
-            images: imageUrls, // Keep for backward compatibility
-            category: 'auto', // Default
-            createdAt: serverTimestamp(),
-            status: 'pending_review',
-            published: false,
-            sold: false,
-            likes: [],
-            internal_id: id, // Keep it for reference
-            // Ensure numeric types where possible
-            year: Number(vehicle.year) || vehicle.year,
-            price: Number(vehicle.price) || vehicle.price,
-            km: Number(vehicle.km) || vehicle.km,
-        });
-
-        successCount++;
-      } catch (e: any) {
-        console.error("Error importing vehicle:", e);
-        lastError = e.message || String(e);
-        failCount++;
-      }
-    }
-
-    setUploading(false);
-    setProgress('');
-    
-    if (failCount > 0) {
-        Alert.alert('Importación Finalizada con Errores', `Exitosos: ${successCount}\nFallidos: ${failCount}\n\nÚltimo error detectado: ${lastError}`);
-    } else {
-        Alert.alert('Importación Finalizada', `Todos los vehículos se importaron correctamente.\nTotal: ${successCount}`);
-    }
-    
-    router.replace('/profile');
+  const resetForm = () => {
+    setPhase('form');
+    setJobId(null);
+    setJob(null);
+    setStartError('');
+    setCsvFile(null);
+    setPreviewRows([]);
+    setZipFile(null);
   };
+
+  const validRowCount = previewRows.filter((r) => r.valid).length;
 
   return (
     <WebContainer>
@@ -319,102 +260,175 @@ export default function BulkImportScreen() {
           Importador Masivo
         </Text>
 
-        <Text style={{ color: theme.textMuted, marginBottom: 20 }}>
-            Sube tu inventario desde un archivo CSV. Asegúrate de que las fotos tengan el mismo nombre que el ID del vehículo en el archivo (ej: ID="AUTO1", Foto="AUTO1_01.jpg").
-        </Text>
+        {phase === 'form' && (
+          <>
+            <Text style={{ color: theme.textMuted, marginBottom: 20 }}>
+              Descargá la planilla de ejemplo, completala con tu stock y subí las fotos en un único archivo .zip
+              (cada foto nombrada con el ID del vehículo, ej: ID=&quot;AUTO1&quot;, foto=&quot;AUTO1_01.jpg&quot;, o agrupadas en una
+              carpeta con el nombre del ID dentro del .zip).
+            </Text>
 
-        {/* Step 1: CSV */}
-        <View style={{ marginBottom: 20 }}>
-            <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>1. Cargar Archivo CSV</Text>
-            <TouchableOpacity 
+            <TouchableOpacity
+              onPress={downloadTemplate}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: theme.card, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 24, alignSelf: 'flex-start' }}
+            >
+              <Ionicons name="download-outline" size={20} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontWeight: '600' }}>Descargar planilla de ejemplo</Text>
+            </TouchableOpacity>
+
+            {/* Step 1: CSV */}
+            <View style={{ marginBottom: 20 }}>
+              <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>1. Cargar planilla completa (CSV)</Text>
+              <TouchableOpacity
                 onPress={pickCsv}
                 disabled={processingCsv}
                 style={{ backgroundColor: theme.card, padding: 20, borderRadius: 12, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: theme.border }}
-            >
+              >
                 {processingCsv ? (
-                    <>
-                        <ActivityIndicator color={theme.primary} size="large" />
-                        <Text style={{ color: theme.text, marginTop: 8 }}>Procesando CSV...</Text>
-                    </>
+                  <>
+                    <ActivityIndicator color={theme.primary} size="large" />
+                    <Text style={{ color: theme.text, marginTop: 8 }}>Procesando CSV...</Text>
+                  </>
                 ) : (
-                    <>
-                        <Ionicons name="document-text-outline" size={32} color={theme.primary} />
-                        <Text style={{ color: theme.text, marginTop: 8 }}>
-                            {csvFile ? csvFile.name : 'Seleccionar archivo .csv'}
-                        </Text>
-                    </>
-                )}
-            </TouchableOpacity>
-        </View>
-
-        {/* Step 2: Photos */}
-        {parsedData.length > 0 && (
-            <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>2. Cargar Carpeta de Fotos</Text>
-                <TouchableOpacity 
-                    onPress={pickImages}
-                    style={{ backgroundColor: theme.card, padding: 20, borderRadius: 12, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: theme.border }}
-                >
-                    <Ionicons name="images-outline" size={32} color={theme.accent} />
+                  <>
+                    <Ionicons name="document-text-outline" size={32} color={theme.primary} />
                     <Text style={{ color: theme.text, marginTop: 8 }}>
-                        {imageFiles.length > 0 ? `${imageFiles.length} fotos seleccionadas` : 'Seleccionar fotos (Ctrl+A en carpeta)'}
+                      {csvFile ? csvFile.name : 'Seleccionar archivo .csv'}
                     </Text>
-                </TouchableOpacity>
-            </View>
-        )}
-
-        {/* Preview */}
-        {parsedData.length > 0 && (
-            <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>
-                    Vista Previa ({parsedData.length} vehículos)
-                </Text>
-                <View style={{ gap: 10 }}>
-                    {parsedData.map((v, i) => (
-                        <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: theme.card, borderRadius: 8 }}>
-                            <View>
-                                <Text style={{ color: theme.text, fontWeight: 'bold' }}>{v.brand} {v.model}</Text>
-                                <Text style={{ color: theme.textMuted }}>ID: {v.id || 'N/A'} • {v.year} • {v.price}</Text>
-                            </View>
-                            <View style={{ alignItems: 'flex-end' }}>
-                                <Text style={{ color: v.matchedImages?.length ? 'green' : 'red', fontWeight: 'bold' }}>
-                                    {v.matchedImages?.length || 0} fotos
-                                </Text>
-                            </View>
-                        </View>
-                    ))}
-                </View>
-            </View>
-        )}
-
-        {/* Action */}
-        {parsedData.length > 0 && (
-            <TouchableOpacity 
-                onPress={handleImport}
-                disabled={uploading}
-                style={{ 
-                    backgroundColor: uploading ? theme.textMuted : theme.primary, 
-                    padding: 16, 
-                    borderRadius: 12, 
-                    alignItems: 'center', 
-                    marginTop: 20,
-                    opacity: uploading ? 0.7 : 1
-                }}
-            >
-                {uploading ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
-                        Importar {parsedData.length} Vehículos
-                    </Text>
+                  </>
                 )}
-            </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
+
+            {/* Step 2: ZIP de fotos */}
+            {previewRows.length > 0 && (
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>2. Cargar fotos (.zip)</Text>
+                <TouchableOpacity
+                  onPress={pickZip}
+                  style={{ backgroundColor: theme.card, padding: 20, borderRadius: 12, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: theme.border }}
+                >
+                  <Ionicons name="folder-open-outline" size={32} color={theme.accent} />
+                  <Text style={{ color: theme.text, marginTop: 8 }}>
+                    {zipFile ? zipFile.name : 'Seleccionar archivo .zip con las fotos'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Preview */}
+            {previewRows.length > 0 && (
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 10 }}>
+                  Vista previa ({validRowCount}/{previewRows.length} vehículos válidos)
+                </Text>
+                <View style={{ gap: 8 }}>
+                  {previewRows.slice(0, 20).map((v, i) => (
+                    <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 12, backgroundColor: theme.card, borderRadius: 8 }}>
+                      <Text style={{ color: theme.text, fontWeight: 'bold' }}>
+                        {v.valid ? `${v.brand} ${v.model}` : `Fila ${i + 1} inválida (falta marca o modelo)`}
+                      </Text>
+                      <Text style={{ color: theme.textMuted }}>ID: {v.id || 'N/A'}</Text>
+                    </View>
+                  ))}
+                  {previewRows.length > 20 && (
+                    <Text style={{ color: theme.textMuted, textAlign: 'center' }}>
+                      y {previewRows.length - 20} más...
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* Action */}
+            {previewRows.length > 0 && zipFile && (
+              <TouchableOpacity
+                onPress={handleStartImport}
+                disabled={validRowCount === 0}
+                style={{
+                  backgroundColor: validRowCount === 0 ? theme.textMuted : theme.primary,
+                  padding: 16,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  marginTop: 10,
+                  opacity: validRowCount === 0 ? 0.7 : 1,
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold' }}>
+                  Importar {validRowCount} vehículo{validRowCount === 1 ? '' : 's'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
 
-        {uploading && (
-            <Text style={{ textAlign: 'center', marginTop: 10, color: theme.text }}>{progress}</Text>
+        {phase === 'uploading' && (
+          <View style={{ alignItems: 'center', padding: 40 }}>
+            <ActivityIndicator color={theme.primary} size="large" />
+            <Text style={{ color: theme.text, marginTop: 16 }}>Subiendo planilla y fotos...</Text>
+          </View>
         )}
 
+        {phase === 'processing' && (
+          <View style={{ padding: 10 }}>
+            {startError ? (
+              <View style={{ alignItems: 'center', padding: 20 }}>
+                <Ionicons name="alert-circle" size={48} color="#EF4444" />
+                <Text style={{ color: theme.text, fontWeight: 'bold', fontSize: 16, marginTop: 12, textAlign: 'center' }}>
+                  No se pudo completar la importación
+                </Text>
+                <Text style={{ color: theme.textMuted, marginTop: 6, textAlign: 'center' }}>{startError}</Text>
+                <TouchableOpacity onPress={resetForm} style={{ backgroundColor: theme.primary, padding: 14, borderRadius: 10, marginTop: 20 }}>
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>Volver a intentar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : !job ? (
+              <View style={{ alignItems: 'center', padding: 40 }}>
+                <ActivityIndicator color={theme.primary} size="large" />
+                <Text style={{ color: theme.text, marginTop: 16 }}>Preparando importación...</Text>
+              </View>
+            ) : (
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginBottom: 12 }}>
+                  {job.status === 'done' ? 'Importación finalizada' : 'Importando tu stock...'}
+                </Text>
+
+                <View style={{ height: 10, borderRadius: 999, backgroundColor: theme.card, overflow: 'hidden', marginBottom: 10 }}>
+                  <View
+                    style={{
+                      height: '100%',
+                      width: `${job.totalCount ? Math.round((job.processedCount / job.totalCount) * 100) : 0}%`,
+                      backgroundColor: theme.primary,
+                    }}
+                  />
+                </View>
+                <Text style={{ color: theme.textMuted, marginBottom: 16 }}>
+                  {job.processedCount}/{job.totalCount} procesados · {job.successCount} exitosos · {job.failCount} con errores
+                </Text>
+
+                {job.errors && job.errors.length > 0 && (
+                  <View style={{ marginBottom: 16, gap: 6 }}>
+                    <Text style={{ color: theme.text, fontWeight: '600' }}>Errores:</Text>
+                    {job.errors.map((err, i) => (
+                      <Text key={i} style={{ color: '#EF4444', fontSize: 13 }}>
+                        Fila {err.row} ({err.vehicle}): {err.message}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+
+                {job.status === 'done' && (
+                  <TouchableOpacity
+                    onPress={() => router.push('/(tabs)/mycars')}
+                    style={{ backgroundColor: theme.primary, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10 }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: 'bold' }}>Ir a Mis Autos</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </WebContainer>
   );

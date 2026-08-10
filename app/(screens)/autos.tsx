@@ -160,7 +160,7 @@ export default function AutosDirectoryScreen() {
                         {item.coverImage && (
                           <Image
                             source={{ uri: item.coverImage }}
-                            style={{ width: "100%", height: 150 }}
+                            style={{ width: "100%", aspectRatio: 4 / 3 }}
                             contentFit="cover"
                           />
                         )}

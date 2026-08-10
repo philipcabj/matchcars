@@ -27,11 +27,30 @@ export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
 }
 
 /**
- * Check if plan allows AI tools (blur plate, enhance photo)
+ * Check if plan allows "Mejorar foto" (recorte/encuadre IA manual en el editor).
+ * Disponible en cualquier plan pago.
+ */
+export function canEnhancePhoto(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+}
+
+/**
+ * Check if plan allows AI tools (tapar patente automáticamente).
+ * Exclusivo de PRO Plus en adelante.
  */
 export function canUseAITools(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
   return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+}
+
+/**
+ * Check if plan allows the logo watermark on vehicle photos.
+ * Disponible en cualquier plan pago (desde PRO).
+ */
+export function canUseWatermark(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
 }
 
 /**

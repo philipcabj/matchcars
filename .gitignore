@@ -41,6 +41,11 @@ credentials_old.json
 # typescript
 *.tsbuildinfo
 
+# Firebase Emulator Suite (local dev del portal)
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
 app-example
 
 # generated native folders

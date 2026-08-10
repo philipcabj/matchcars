@@ -9,6 +9,8 @@ import * as os from "os";
 import * as path from "path";
 import * as fs from "fs/promises";
 import sharp from "sharp";
+import AdmZip from "adm-zip";
+import Papa from "papaparse";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 admin.initializeApp();
@@ -114,6 +116,85 @@ export const expireFeaturedListings = onSchedule("every 6 hours", async () => {
       batch.update(docSnap.ref, { isFeatured: false });
     }
     await batch.commit();
+  }
+});
+
+// ─── resolvePendingSaleConfirmations ─────────────────────────────────────────
+// Corre diario: un auto marcado "vendido" con comprador real queda en
+// "reserved" hasta que el comprador confirma que lo recibió (ver
+// handleMarkAsSold en app/(screens)/chat/[uid].tsx y mark_vehicle_sold en
+// portal/src/app/api/agency/leads/[id]/route.ts). Si pasan 3 días sin
+// confirmar ni rechazar, se revierte solo — mismo efecto que "No lo recibí"
+// del lado del comprador — y se avisa a ambas partes.
+
+async function sendSimpleMail(recipientUid: string, subject: string, bodyHtml: string) {
+  try {
+    const userSnap = await db.doc(`users/${recipientUid}`).get();
+    const email = userSnap.data()?.email;
+    if (!email) return;
+    await db.collection("mail").add({
+      to: [email],
+      toUids: [recipientUid],
+      from: "MatchCars <noreply@matchcars.app>",
+      message: { subject, html: `<div style="font-family:sans-serif;padding:24px;color:#111"><p>${bodyHtml}</p></div>` },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("[resolvePendingSaleConfirmations] mail error", e);
+  }
+}
+
+async function sendSimplePush(recipientUid: string, title: string, body: string) {
+  try {
+    const userSnap = await db.doc(`users/${recipientUid}`).get();
+    const token = userSnap.data()?.pushToken;
+    if (!token) return;
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ to: token, sound: "default", title, body }),
+    });
+  } catch (e) {
+    console.error("[resolvePendingSaleConfirmations] push error", e);
+  }
+}
+
+export const resolvePendingSaleConfirmations = onSchedule("every 24 hours", async () => {
+  const now = Date.now();
+  // Un solo where (sin combinar con buyerConfirmDeadline) para no necesitar
+  // un índice compuesto nuevo — el volumen de ventas pendientes de
+  // confirmar es chico, filtrar el plazo en memoria alcanza.
+  const pendingSnap = await db.collection("sales").where("confirmedByBuyer", "==", null).get();
+
+  for (const saleSnap of pendingSnap.docs) {
+    const sale = saleSnap.data();
+    const deadline: admin.firestore.Timestamp | undefined = sale.buyerConfirmDeadline;
+    if (!deadline || deadline.toMillis() > now) continue;
+    const vehicleId: string | undefined = sale.vehicleId;
+    const sellerId: string | undefined = sale.sellerId;
+    const buyerId: string | undefined = sale.buyerId;
+    if (!vehicleId || !sellerId || !buyerId) continue;
+
+    try {
+      await saleSnap.ref.update({ confirmedByBuyer: false });
+      await db.doc(`vehicles/${vehicleId}`).update({ status: "available", published: true });
+      const leadId = `${sellerId}_${buyerId}_${vehicleId}`;
+      await db.doc(`leads/${leadId}`).update({
+        status: "negotiation",
+        revertedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revertReason: "timeout",
+      }).catch(() => {});
+
+      const carModel = `${sale.vehicleSnapshot?.brand ?? ""} ${sale.vehicleSnapshot?.model ?? ""}`.trim() || "el auto";
+      await Promise.all([
+        sendSimpleMail(buyerId, `Se venció el plazo para confirmar ${carModel}`, `No confirmaste la recepción de <strong>${carModel}</strong> a tiempo — si todavía te interesa, escribile de nuevo al vendedor.`),
+        sendSimplePush(buyerId, "Se venció el plazo", `No confirmaste la recepción de ${carModel} a tiempo.`),
+        sendSimpleMail(sellerId, `${carModel} volvió a estar disponible`, `El comprador no confirmó la recepción de <strong>${carModel}</strong> a tiempo — la publicación volvió a estar disponible.`),
+        sendSimplePush(sellerId, "Venta no confirmada", `El comprador no confirmó ${carModel} a tiempo — volvió a estar disponible.`),
+      ]);
+    } catch (e) {
+      console.error("[resolvePendingSaleConfirmations] error processing sale", saleSnap.id, e);
+    }
   }
 });
 
@@ -710,6 +791,244 @@ export const autoEnhancePhoto = onObjectFinalized(
       await Promise.all([
         fs.unlink(tmpIn).catch(() => {}),
         fs.unlink(tmpOut).catch(() => {}),
+      ]);
+    }
+  }
+);
+
+// ─── startBulkImport ─────────────────────────────────────────────────────
+// Procesa la carga masiva de agencias: el cliente sube data.csv + photos.zip a
+// bulkImports/{uid}/{jobId}/ en Storage y llama a esta función con el jobId.
+// Se ejecuta server-side (a diferencia del importador anterior, que hacía todo
+// en el navegador y se perdía si el usuario cerraba la pestaña) y reporta
+// progreso incremental en bulkImportJobs/{jobId}, que el cliente escucha con
+// onSnapshot.
+
+function isDealerPlanServer(plan: string): boolean {
+  return ["pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+}
+
+interface BulkImportRow {
+  id: string;
+  brand: string;
+  model: string;
+  version: string;
+  year: string;
+  price: string;
+  currency: "ARS" | "USD";
+  km: string;
+  description: string;
+  fuel: string;
+  transmission: string;
+}
+
+function mapCsvRow(row: Record<string, string>): BulkImportRow {
+  const currencyRaw = (row.currency || row.moneda || "USD").toString().toUpperCase();
+  const currency: "ARS" | "USD" = currencyRaw.includes("PESO") || currencyRaw.includes("ARS") ? "ARS" : "USD";
+  return {
+    id: row.id || row.sku || row.vin || "",
+    brand: row.brand || row.marca || "",
+    model: row.model || row.modelo || "",
+    version: row.version || row["versión"] || row.variant || "",
+    year: row.year || row["año"] || row.anio || "",
+    price: row.price || row.precio || "",
+    currency,
+    km: row.km || row.kilometraje || "",
+    description: row.description || row.descripcion || "",
+    fuel: row.fuel || row.combustible || "",
+    transmission: row.transmission || row.transmision || "",
+  };
+}
+
+function guessImageContentType(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  return "image/jpeg";
+}
+
+interface BulkImportError {
+  row: number;
+  vehicle: string;
+  message: string;
+}
+
+export const startBulkImport = onCall(
+  { memory: "1GiB", timeoutSeconds: 540, cors: true },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Necesitás iniciar sesión.");
+    }
+    const uid = request.auth.uid;
+    const { jobId } = request.data as { jobId?: string };
+    if (!jobId || typeof jobId !== "string") {
+      throw new HttpsError("invalid-argument", "Falta el jobId.");
+    }
+
+    const userSnap = await db.doc(`users/${uid}`).get();
+    const userData = userSnap.data() || {};
+    const plan: string = userData.plan || "free";
+    if (!isDealerPlanServer(plan) && userData.role !== "admin") {
+      throw new HttpsError(
+        "permission-denied",
+        "La carga masiva está disponible solo para planes Dealer."
+      );
+    }
+
+    const bucket = admin.storage().bucket();
+    const jobRef = db.doc(`bulkImportJobs/${jobId}`);
+    const tmpCsv = path.join(os.tmpdir(), `bulk_${jobId}_data.csv`);
+    const tmpZip = path.join(os.tmpdir(), `bulk_${jobId}_photos.zip`);
+
+    try {
+      await bucket.file(`bulkImports/${uid}/${jobId}/data.csv`).download({ destination: tmpCsv });
+      await bucket.file(`bulkImports/${uid}/${jobId}/photos.zip`).download({ destination: tmpZip });
+
+      const csvContent = await fs.readFile(tmpCsv, "utf8");
+      const parsed = Papa.parse<Record<string, string>>(csvContent, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h: string) => h.trim().toLowerCase(),
+      });
+
+      const rows = parsed.data
+        .map(mapCsvRow)
+        .filter((r) => r.brand && r.model);
+
+      if (rows.length === 0) {
+        throw new HttpsError(
+          "invalid-argument",
+          "No se encontraron vehículos válidos en el CSV (se requieren las columnas brand/marca y model/modelo)."
+        );
+      }
+
+      const zip = new AdmZip(tmpZip);
+      const imageEntries = zip
+        .getEntries()
+        .filter((e) => !e.isDirectory && /\.(jpe?g|png|webp)$/i.test(e.entryName));
+
+      const matchImages = (id: string) => {
+        if (!id) return [];
+        const idLower = id.toLowerCase();
+        return imageEntries.filter((e) => {
+          const parts = e.entryName.split("/").filter(Boolean);
+          const filename = parts[parts.length - 1] || "";
+          const folder = parts.length > 1 ? parts[0] : "";
+          return filename.toLowerCase().startsWith(idLower) || folder.toLowerCase() === idLower;
+        });
+      };
+
+      await jobRef.set({
+        userId: uid,
+        status: "processing",
+        totalCount: rows.length,
+        processedCount: 0,
+        successCount: 0,
+        failCount: 0,
+        errors: [],
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      const userName = userData.agencyName || userData.firstName || "Agencia";
+      const locationStr = userData.address || userData.businessAddress || "Ubicación a consultar";
+      const errors: BulkImportError[] = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const vehicleLabel = `${row.brand} ${row.model}`.trim();
+        try {
+          const matched = matchImages(row.id);
+          const imageUrls: string[] = [];
+          for (const entry of matched) {
+            const buffer = entry.getData();
+            const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}${path.extname(entry.entryName) || ".jpg"}`;
+            const filePath = `uploads/${uid}/${filename}`;
+            const token = crypto.randomUUID();
+            await bucket.file(filePath).save(buffer, {
+              metadata: {
+                contentType: guessImageContentType(entry.entryName),
+                metadata: { firebaseStorageDownloadTokens: token },
+              },
+            });
+            imageUrls.push(
+              `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`
+            );
+          }
+
+          await db.collection("vehicles").add({
+            userId: uid,
+            userName,
+            userPlan: plan,
+            brand: row.brand,
+            model: row.model,
+            version: row.version || null,
+            year: Number(row.year) || row.year,
+            price: Number(row.price) || row.price,
+            currency: row.currency,
+            km: Number(row.km) || 0,
+            fuelType: row.fuel || null,
+            gearbox: row.transmission || null,
+            description: row.description || null,
+            location: {
+              province: userData.province || null,
+              city: userData.city || locationStr,
+            },
+            images: {
+              cover: imageUrls[0] || "",
+              gallery: imageUrls.slice(1),
+            },
+            published: false,
+            status: "pending_review",
+            isFeatured: isDealerPlanServer(plan),
+            featuredAt: isDealerPlanServer(plan) ? admin.firestore.FieldValue.serverTimestamp() : null,
+            views: 0,
+            likesCount: 0,
+            likedBy: [],
+            internalId: row.id || null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          successCount++;
+        } catch (e) {
+          failCount++;
+          errors.push({
+            row: i + 1,
+            vehicle: vehicleLabel || `Fila ${i + 1}`,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+
+        await jobRef.update({
+          processedCount: i + 1,
+          successCount,
+          failCount,
+          errors,
+        });
+      }
+
+      await jobRef.update({
+        status: "done",
+        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      return { jobId, successCount, failCount };
+    } catch (e) {
+      await jobRef.set(
+        {
+          status: "error",
+          errorMessage: e instanceof Error ? e.message : String(e),
+          finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      if (e instanceof HttpsError) throw e;
+      throw new HttpsError("internal", "No se pudo procesar la carga masiva.");
+    } finally {
+      await Promise.all([
+        fs.unlink(tmpCsv).catch(() => {}),
+        fs.unlink(tmpZip).catch(() => {}),
       ]);
     }
   }

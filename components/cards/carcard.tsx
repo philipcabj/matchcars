@@ -15,7 +15,7 @@ import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { Platform, Pressable, Image as RNImage, Text, TouchableOpacity, View } from "react-native";
+import { Platform, Pressable, Image as RNImage, ScrollView, Text, TouchableOpacity, View } from "react-native";
 
 type Props = { vehicle: Vehicle; liked?: boolean; likeDisabled?: boolean; onToggleLike?: () => void; hideLike?: boolean; hideCompare?: boolean; showEdit?: boolean; onEdit?: () => void; compact?: boolean; horizontal?: boolean; onMessage?: () => void; showMetrics?: boolean; showPriceAnalysis?: boolean; matchScore?: number };
 
@@ -27,7 +27,9 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
   const selected = isSelected(vehicle.id);
   
   const [sellerName, setSellerName] = useState<string | null>(null);
-  
+  const [cardWidth, setCardWidth] = useState(0);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+
   useEffect(() => {
     const shouldFetch =
       !!vehicle?.userId &&
@@ -89,10 +91,35 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
 
   const priceQuality = showPriceAnalysis ? getPriceQuality() : null;
 
-  const rawImageUrl = vehicle.coverImage || (vehicle as any)?.images?.cover || (vehicle as any)?.images?.gallery?.[0] || (Array.isArray((vehicle as any)?.images) ? (vehicle as any).images[0] : null);
-  const imageUrl = getOptimizedImageUrl(rawImageUrl);
+  // Gathers cover + gallery photos, tolerating both the normalized Vehicle shape
+  // (coverImage/additionalImages) and raw Firestore docs (images.cover/images.gallery)
+  // that some screens still pass through directly.
+  const anyVehicle: any = vehicle;
+  const galleryImages: string[] = (() => {
+    const cover = vehicle.coverImage || anyVehicle.images?.cover || (Array.isArray(anyVehicle.images) ? anyVehicle.images[0] : undefined);
+    const extra: string[] = Array.isArray(vehicle.additionalImages)
+      ? vehicle.additionalImages
+      : Array.isArray(anyVehicle.images?.gallery)
+      ? anyVehicle.images.gallery
+      : [];
+    const combined = [cover, ...extra].filter(Boolean) as string[];
+    return Array.from(new Set(combined)).slice(0, 6);
+  })();
 
   const timeAgo = formatTimeAgo(vehicle.createdAt);
+  // 4:3 es el aspect ratio real de la gran mayoría de las fotos subidas (cámaras
+  // de celular estándar). Antes el contenedor tenía una altura fija en píxeles
+  // bastante más baja que ancha (~2.5:1), lo que con resizeMode="cover" recortaba
+  // más de la mitad de cada foto verticalmente y daba sensación de "zoom".
+  const IMAGE_ASPECT_RATIO = 4 / 3;
+  const showWebArrows = Platform.OS === 'web' && galleryImages.length > 1;
+  const webImageIndex = Math.min(activeImageIndex, Math.max(0, galleryImages.length - 1));
+
+  const renderImagePlaceholder = (height: number) => (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.inputBackground }}>
+      <Ionicons name="car-sport-outline" size={Math.min(40, height * 0.35)} color={theme.textMuted} />
+    </View>
+  );
 
   // Helper to render financing badge (anticipo only) below price
   const renderFinancingBadges = () => {
@@ -185,8 +212,10 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
       );
   };
 
+  const goToDetail = () => router.push(`/car/${vehicle.id}`);
+
   return (
-    <Pressable
+    <View
       style={{
         marginBottom: compact ? 10 : 16,
         borderRadius: 14,
@@ -194,29 +223,30 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
         backgroundColor: theme.card,
         opacity: vehicle.status === 'sold' ? 0.8 : 1, // Slight transparency for sold items
       }}
-      onPress={() => router.push(`/car/${vehicle.id}`)}
     >
       {horizontal ? (
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {Platform.OS === 'web' ? (
-            <View style={{ width: compact ? 120 : 150, height: compact ? 90 : 110, backgroundColor: '#f0f0f0', overflow: 'hidden' }}>
+        <Pressable onPress={goToDetail} style={{ flexDirection: "row", alignItems: "center" }}>
+          <View style={{ width: compact ? 120 : 150, height: compact ? 90 : 110, backgroundColor: theme.inputBackground, overflow: 'hidden' }}>
+            {galleryImages.length === 0 ? (
+              renderImagePlaceholder(compact ? 90 : 110)
+            ) : Platform.OS === 'web' ? (
               <RNImage
-                source={{ uri: imageUrl }}
+                source={{ uri: getOptimizedImageUrl(galleryImages[0]) }}
                 style={{ width: '100%', height: '100%' }}
                 resizeMode="cover"
-                onError={(e) => logger.log("Web Image Error (Horizontal):", imageUrl, e.nativeEvent)}
+                onError={(e) => logger.log("Web Image Error (Horizontal):", galleryImages[0], e.nativeEvent)}
               />
-            </View>
-          ) : (
-            <ExpoImage
-              source={{ uri: imageUrl }}
-              style={{ width: compact ? 120 : 150, height: compact ? 90 : 110 }}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={200}
-              onError={(e) => logger.log("Error loading image:", imageUrl, e.error)}
-            />
-          )}
+            ) : (
+              <ExpoImage
+                source={{ uri: getOptimizedImageUrl(galleryImages[0]) }}
+                style={{ width: '100%', height: '100%' }}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={200}
+                onError={(e) => logger.log("Error loading image:", galleryImages[0], e.error)}
+              />
+            )}
+          </View>
           <View style={{ flex: 1, padding: compact ? 10 : 12 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1 }}>
@@ -299,89 +329,183 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               </View>
             )}
           </View>
-        </View>
+        </Pressable>
       ) : (
         <>
-          {Platform.OS === 'web' ? (
-            <View style={{ width: "100%", height: compact ? 130 : 200, backgroundColor: '#f0f0f0', overflow: 'hidden' }}>
-              <RNImage
-                source={{ uri: imageUrl }}
-                style={{ width: "100%", height: "100%" }}
-                resizeMode="cover"
-                onError={(e) => logger.log("Web Image Error (Vertical):", imageUrl, e.nativeEvent)}
-              />
-            </View>
-          ) : (
-            <ExpoImage
-              source={{ uri: imageUrl }}
-              style={{ width: "100%", height: compact ? 130 : 200 }}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={200}
-              onError={(e) => logger.log("Error loading image:", imageUrl, e.error)}
-            />
-          )}
-          {vehicle.status === 'sold' && (
-             <View style={{ 
-               position: 'absolute', 
-               left: 0, 
-               top: 0, 
-               right: 0,
-               height: compact ? 130 : 200, 
-               backgroundColor: 'rgba(0,0,0,0.5)', 
-               alignItems: 'center', 
-               justifyContent: 'center',
-               zIndex: 10
-             }}>
-                <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 24, transform: [{ rotate: '-15deg' }], borderWidth: 4, borderColor: '#FFF', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}>VENDIDO</Text>
-             </View>
-          )}
-          {(vehicle.status === 'pending' || vehicle.status === 'pending_review') && (
-             <View style={{ 
-               position: 'absolute', 
-               left: 0, 
-               top: 0, 
-               right: 0,
-               height: compact ? 130 : 200, 
-               backgroundColor: 'rgba(0,0,0,0.4)', 
-               alignItems: 'center', 
-               justifyContent: 'center',
-               zIndex: 10
-             }}>
-                <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>EN REVISIÓN</Text>
-             </View>
-          )}
-          {vehicle.status === 'rejected' && (
-             <View style={{ 
-               position: 'absolute', 
-               left: 0, 
-               top: 0, 
-               right: 0,
-               height: compact ? 130 : 200, 
-               backgroundColor: 'rgba(0,0,0,0.5)', 
-               alignItems: 'center', 
-               justifyContent: 'center',
-               zIndex: 10
-             }}>
-                <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>RECHAZADO</Text>
-             </View>
-          )}
-          {vehicle.status === 'blocked' && (
-             <View style={{ 
-               position: 'absolute', 
-               left: 0, 
-               top: 0, 
-               right: 0,
-               height: compact ? 130 : 200, 
-               backgroundColor: 'rgba(0,0,0,0.5)', 
-               alignItems: 'center', 
-               justifyContent: 'center',
-               zIndex: 10
-             }}>
-                <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>BLOQUEADO</Text>
-             </View>
-          )}
-          <View style={{ padding: compact ? 10 : 12 }}>
+          <View
+            onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}
+            style={{ width: "100%", aspectRatio: IMAGE_ASPECT_RATIO, backgroundColor: theme.inputBackground, overflow: 'hidden' }}
+          >
+            {galleryImages.length === 0 ? (
+              <Pressable onPress={goToDetail} style={{ width: '100%', height: '100%' }}>
+                {renderImagePlaceholder(cardWidth > 0 ? cardWidth / IMAGE_ASPECT_RATIO : (compact ? 150 : 240))}
+              </Pressable>
+            ) : Platform.OS !== 'web' && galleryImages.length > 1 && cardWidth > 0 ? (
+              <>
+                <ScrollView
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(e) => {
+                    const idx = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+                    setActiveImageIndex(Math.max(0, Math.min(galleryImages.length - 1, idx)));
+                  }}
+                >
+                  {galleryImages.map((uri, idx) => (
+                    <Pressable key={`${vehicle.id}-${idx}`} onPress={goToDetail} style={{ width: cardWidth, height: cardWidth / IMAGE_ASPECT_RATIO }}>
+                      <ExpoImage
+                        source={{ uri: getOptimizedImageUrl(uri) }}
+                        style={{ width: "100%", height: "100%" }}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={200}
+                        onError={(e) => logger.log("Error loading image:", uri, e.error)}
+                      />
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <View pointerEvents="none" style={{ position: 'absolute', bottom: 8, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 }}>
+                  {galleryImages.map((_, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        width: idx === activeImageIndex ? 14 : 6,
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: idx === activeImageIndex ? '#FFFFFF' : 'rgba(255,255,255,0.5)',
+                      }}
+                    />
+                  ))}
+                </View>
+              </>
+            ) : (
+              <>
+                <Pressable onPress={goToDetail} style={{ width: "100%", height: "100%" }}>
+                  {Platform.OS === 'web' ? (
+                    <RNImage
+                      source={{ uri: getOptimizedImageUrl(galleryImages[webImageIndex]) }}
+                      style={{ width: "100%", height: "100%" }}
+                      resizeMode="cover"
+                      onError={(e) => logger.log("Web Image Error (Vertical):", galleryImages[webImageIndex], e.nativeEvent)}
+                    />
+                  ) : (
+                    <ExpoImage
+                      source={{ uri: getOptimizedImageUrl(galleryImages[0]) }}
+                      style={{ width: "100%", height: "100%" }}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      transition={200}
+                      onError={(e) => logger.log("Error loading image:", galleryImages[0], e.error)}
+                    />
+                  )}
+                  {galleryImages.length > 1 && !showWebArrows && (
+                    <View style={{ position: 'absolute', bottom: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 }}>
+                      <Ionicons name="images-outline" size={11} color="#FFF" />
+                      <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '700' }}>{galleryImages.length}</Text>
+                    </View>
+                  )}
+                </Pressable>
+                {showWebArrows && (
+                  <>
+                    {webImageIndex > 0 && (
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        accessibilityLabel="Foto anterior"
+                        onPress={(e) => { e.stopPropagation(); setActiveImageIndex((i) => Math.max(0, i - 1)); }}
+                        style={{ position: 'absolute', left: 6, top: '50%', marginTop: -14, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="chevron-back" size={18} color="#FFF" />
+                      </TouchableOpacity>
+                    )}
+                    {webImageIndex < galleryImages.length - 1 && (
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        accessibilityLabel="Foto siguiente"
+                        onPress={(e) => { e.stopPropagation(); setActiveImageIndex((i) => Math.min(galleryImages.length - 1, i + 1)); }}
+                        style={{ position: 'absolute', right: 6, top: '50%', marginTop: -14, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="chevron-forward" size={18} color="#FFF" />
+                      </TouchableOpacity>
+                    )}
+                    <View pointerEvents="none" style={{ position: 'absolute', bottom: 8, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 }}>
+                      {galleryImages.map((_, idx) => (
+                        <View
+                          key={idx}
+                          style={{
+                            width: idx === webImageIndex ? 14 : 6,
+                            height: 6,
+                            borderRadius: 3,
+                            backgroundColor: idx === webImageIndex ? '#FFFFFF' : 'rgba(255,255,255,0.5)',
+                          }}
+                        />
+                      ))}
+                    </View>
+                  </>
+                )}
+              </>
+            )}
+            {vehicle.status === 'sold' && (
+               <View pointerEvents="none" style={{
+                 position: 'absolute',
+                 left: 0,
+                 top: 0,
+                 right: 0,
+                 bottom: 0,
+                 backgroundColor: 'rgba(0,0,0,0.5)',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 zIndex: 10
+               }}>
+                  <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 24, transform: [{ rotate: '-15deg' }], borderWidth: 4, borderColor: '#FFF', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}>VENDIDO</Text>
+               </View>
+            )}
+            {(vehicle.status === 'pending' || vehicle.status === 'pending_review') && (
+               <View pointerEvents="none" style={{
+                 position: 'absolute',
+                 left: 0,
+                 top: 0,
+                 right: 0,
+                 bottom: 0,
+                 backgroundColor: 'rgba(0,0,0,0.4)',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 zIndex: 10
+               }}>
+                  <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#F59E0B', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>EN REVISIÓN</Text>
+               </View>
+            )}
+            {vehicle.status === 'rejected' && (
+               <View pointerEvents="none" style={{
+                 position: 'absolute',
+                 left: 0,
+                 top: 0,
+                 right: 0,
+                 bottom: 0,
+                 backgroundColor: 'rgba(0,0,0,0.5)',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 zIndex: 10
+               }}>
+                  <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>RECHAZADO</Text>
+               </View>
+            )}
+            {vehicle.status === 'blocked' && (
+               <View pointerEvents="none" style={{
+                 position: 'absolute',
+                 left: 0,
+                 top: 0,
+                 right: 0,
+                 bottom: 0,
+                 backgroundColor: 'rgba(0,0,0,0.5)',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 zIndex: 10
+               }}>
+                  <Text style={{ color: '#EF4444', fontWeight: '800', fontSize: 20, borderWidth: 3, borderColor: '#EF4444', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.6)' }}>BLOQUEADO</Text>
+               </View>
+            )}
+          </View>
+          <Pressable onPress={goToDetail} style={{ padding: compact ? 10 : 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
               <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1, flexWrap: 'wrap' }}>
                 {(vehicle.brand ?? "")} {(vehicle.model ?? "")} {(vehicle.version ?? "")}
@@ -423,11 +547,11 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               )}
             </View>
             {!compact && renderFinancingBadges()}
-          </View>
+          </Pressable>
         </>
       )}
       {/* Badges Container */}
-      <View style={{ position: "absolute", top: 12, left: 12, flexDirection: "row", gap: 6 }}>
+      <View pointerEvents="none" style={{ position: "absolute", top: 12, left: 12, flexDirection: "row", gap: 6 }}>
         {vehicle.isFeatured && (
           <View style={{ backgroundColor: theme.accent, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 }}>
             <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "800", textTransform: "uppercase" }}>Destacado</Text>
@@ -515,9 +639,9 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
           )}
         </View>
       )}
-      
-      
-    </Pressable>
+
+
+    </View>
   );
 }
 
@@ -533,9 +657,9 @@ export function CarCardSkeleton() {
         marginBottom: 16,
         borderWidth: 1,
         borderColor: theme.badgeBorder,
-        height: 280,
+        height: 340,
     }}>
-        <View style={{ height: 180, backgroundColor: skeletonColor }} />
+        <View style={{ height: 240, backgroundColor: skeletonColor }} />
         <View style={{ padding: 12, gap: 8 }}>
             <View style={{ height: 20, width: '70%', backgroundColor: skeletonColor, borderRadius: 4 }} />
             <View style={{ height: 16, width: '40%', backgroundColor: skeletonColor, borderRadius: 4 }} />

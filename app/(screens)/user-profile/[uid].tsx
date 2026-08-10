@@ -1031,7 +1031,7 @@ export default function UserProfileScreen() {
       { value: dealerReport.publishedCars, label: "En venta", icon: "car-sport-outline", color: theme.accent },
       { value: dealerReport.soldCars, label: "Vendidos", icon: "checkmark-circle-outline", color: "#10B981" },
       { value: dealerReport.totalInterests, label: "Intereses", icon: "heart-outline", color: "#F59E0B" },
-      { value: `${dealerReport.avgDaysToSell}d`, label: "Días promedio", icon: "timer-outline", color: "#8B5CF6" },
+      { value: dealerReport.soldCars > 0 ? `${dealerReport.avgDaysToSell}d` : "—", label: "Días para vender", icon: "timer-outline", color: "#8B5CF6" },
     ];
     return (
       <View style={{ marginTop: 16, paddingHorizontal: isDealerProfile ? 20 : 0 }}>

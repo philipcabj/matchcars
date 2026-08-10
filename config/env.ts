@@ -16,6 +16,7 @@ export const ENV = {
   facebook: {
     appId: process.env.EXPO_PUBLIC_FACEBOOK_APP_ID || '1163293382582083',
     clientToken: process.env.EXPO_PUBLIC_FACEBOOK_CLIENT_TOKEN || 'a38fb000cb6360b89fbe5568ffb3c3e6',
+    pixelId: process.env.EXPO_PUBLIC_META_PIXEL_ID || '1217053183887888',
   },
 
   // Firebase

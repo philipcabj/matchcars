@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
 const APP_NAME = "MatchCars";
@@ -82,7 +82,9 @@ function buildAdminTemplate(title: string, rows: { label: string; value: string 
 }
 
 async function getAdminNotificationConfig(): Promise<{ adminEmails: string[]; webhookUrl: string }> {
-  // 1. Load notification config (adminEmails + webhook) from Firestore
+  // Recipients come exclusively from config/notifications.adminEmails — NOT from every user
+  // with role === "admin" (that role controls dashboard access, not who should get moderation
+  // mail, and previously leaked notifications to any admin account regardless of email validity).
   let adminEmails: string[] = [];
   let webhookUrl = "";
 
@@ -95,19 +97,6 @@ async function getAdminNotificationConfig(): Promise<{ adminEmails: string[]; we
     }
   } catch {
     // config doc not found — continue
-  }
-
-  // Add emails from users with role === "admin"
-  try {
-    const adminSnaps = await getDocs(
-      query(collection(db, "users"), where("role", "==", "admin"))
-    );
-    for (const adminDoc of adminSnaps.docs) {
-      const email: string = adminDoc.data().email || "";
-      if (email && !adminEmails.includes(email)) adminEmails.push(email);
-    }
-  } catch {
-    // users query failed — continue
   }
 
   return { adminEmails, webhookUrl };

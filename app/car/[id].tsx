@@ -63,7 +63,10 @@ export default function CarDetailsScreen() {
   const styles = createStyles(theme);
   const windowWidth = Dimensions.get("window").width;
   const heroWidth = (Platform.OS === "web" ? Math.min(windowWidth, 800) : windowWidth) - 24;
-  const heroHeight = heroWidth * (Platform.OS === "web" ? 0.5 : 0.65);
+  // 4:3 es el aspect ratio real de la gran mayoría de las fotos subidas; los
+  // multiplicadores anteriores (0.5 / 0.65) daban un recuadro mucho más ancho
+  // que alto y recortaban gran parte de cada foto con resizeMode="cover".
+  const heroHeight = heroWidth * 0.75;
 
   const [vehicle, setVehicle] = useState<VehicleDoc | null>(null);
   const [loading, setLoading] = useState(true);
@@ -148,6 +151,7 @@ export default function CarDetailsScreen() {
   // Full Screen Image Viewer State
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const viewerScrollRef = useRef<ScrollView>(null);
 
   // Price Recommendation State
   const [hideRecommendation, setHideRecommendation] = useState(false);
@@ -155,6 +159,7 @@ export default function CarDetailsScreen() {
   // Hero Items State (Images + Video)
    const [heroItems, setHeroItems] = useState<{ type: 'image' | 'video', uri: string }[]>([]);
    const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+   const heroScrollRef = useRef<ScrollView>(null);
   const [, setKeyboardVisible] = useState(false);
 
    useEffect(() => {
@@ -481,10 +486,12 @@ export default function CarDetailsScreen() {
             try {
               trackEvent("car_view", {
                 vehicleId: data.id,
+                content_ids: data.id,
                 brand: data.brand ?? "",
                 model: data.model ?? "",
                 year: data.year ?? "",
                 price: data.price ?? 0,
+                value: data.price ?? 0,
                 currency: data.currency ?? "",
                 status: data.status ?? "",
               });
@@ -778,7 +785,8 @@ export default function CarDetailsScreen() {
     setSubmittingOffer(true);
     try {
       const [uid1, uid2] = [user.uid, vehicle.userId].sort();
-      const convId = `${uid1}_${uid2}`;
+      // Un hilo por auto, mismo criterio que leadId (ver chat/[uid].tsx convId).
+      const convId = `${uid1}_${uid2}_${vehicle.id}`;
       const leadId = `${vehicle.userId}_${user.uid}_${vehicle.id}`;
 
       // Ensure conversation exists
@@ -847,7 +855,7 @@ export default function CarDetailsScreen() {
       getDoc(doc(db, "users", vehicle.userId)).then((sellerSnap) => {
         const pushToken = sellerSnap.data()?.pushToken;
         if (pushToken) {
-          sendPushNotification(pushToken, "¡Recibiste una oferta!", `${buyerName} ofertó ${amountText} por tu ${carModel}`, { url: `matchcars://chat/${user.uid}` });
+          sendPushNotification(pushToken, "¡Recibiste una oferta!", `${buyerName} ofertó ${amountText} por tu ${carModel}`, { url: `matchcars://chat/${user.uid}?vehicleId=${vehicle.id}` });
         }
       }).catch(() => {});
 
@@ -3238,9 +3246,10 @@ export default function CarDetailsScreen() {
           )}
           <View style={styles.heroContainer}>
               {heroItems.length > 0 ? (
-                  <ScrollView 
-                    horizontal 
-                    pagingEnabled 
+                  <ScrollView
+                    ref={heroScrollRef}
+                    horizontal
+                    pagingEnabled
                     showsHorizontalScrollIndicator={false}
                     onMomentumScrollEnd={(e) => {
                         const newIndex = Math.round(e.nativeEvent.contentOffset.x / heroWidth);
@@ -3294,6 +3303,53 @@ export default function CarDetailsScreen() {
                       <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "700" }}>
                           +{heroItems.length} MEDIA
                       </Text>
+                  </View>
+              )}
+              {Platform.OS === 'web' && heroItems.length > 1 && (
+                  <>
+                      {activeHeroIndex > 0 && (
+                          <TouchableOpacity
+                              activeOpacity={0.8}
+                              accessibilityLabel="Foto anterior"
+                              onPress={() => {
+                                  const newIndex = Math.max(0, activeHeroIndex - 1);
+                                  heroScrollRef.current?.scrollTo({ x: newIndex * heroWidth, y: 0, animated: true });
+                                  setActiveHeroIndex(newIndex);
+                              }}
+                              style={{ position: "absolute", left: 10, top: "50%", marginTop: -18, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" }}
+                          >
+                              <Ionicons name="chevron-back" size={22} color="#FFF" />
+                          </TouchableOpacity>
+                      )}
+                      {activeHeroIndex < heroItems.length - 1 && (
+                          <TouchableOpacity
+                              activeOpacity={0.8}
+                              accessibilityLabel="Foto siguiente"
+                              onPress={() => {
+                                  const newIndex = Math.min(heroItems.length - 1, activeHeroIndex + 1);
+                                  heroScrollRef.current?.scrollTo({ x: newIndex * heroWidth, y: 0, animated: true });
+                                  setActiveHeroIndex(newIndex);
+                              }}
+                              style={{ position: "absolute", right: 10, top: "50%", marginTop: -18, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" }}
+                          >
+                              <Ionicons name="chevron-forward" size={22} color="#FFF" />
+                          </TouchableOpacity>
+                      )}
+                  </>
+              )}
+              {heroItems.length > 1 && (
+                  <View style={{ position: "absolute", bottom: 12, left: 0, right: 0, flexDirection: "row", justifyContent: "center", gap: 4 }}>
+                      {heroItems.map((_, idx) => (
+                          <View
+                              key={idx}
+                              style={{
+                                  width: idx === activeHeroIndex ? 14 : 6,
+                                  height: 6,
+                                  borderRadius: 3,
+                                  backgroundColor: idx === activeHeroIndex ? "#FFFFFF" : "rgba(255,255,255,0.5)",
+                              }}
+                          />
+                      ))}
                   </View>
               )}
               <View style={styles.heroOverlay}>
@@ -3468,9 +3524,10 @@ export default function CarDetailsScreen() {
 
       <Modal visible={viewerVisible} transparent={true} animationType="fade" onRequestClose={() => setViewerVisible(false)}>
           <View style={{ flex: 1, backgroundColor: "#000", justifyContent: "center" }}>
-              <ScrollView 
-                  horizontal 
-                  pagingEnabled 
+              <ScrollView
+                  ref={viewerScrollRef}
+                  horizontal
+                  pagingEnabled
                   showsHorizontalScrollIndicator={false}
                   contentOffset={{ x: viewerIndex * Dimensions.get("window").width, y: 0 }}
                   onMomentumScrollEnd={(e) => {
@@ -3509,12 +3566,45 @@ export default function CarDetailsScreen() {
                   ))}
               </ScrollView>
               
-              <TouchableOpacity 
+              <TouchableOpacity
                   style={{ position: "absolute", top: 40, right: 20, zIndex: 999, elevation: 10, padding: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 20 }}
                   onPress={() => setViewerVisible(false)}
               >
                   <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
+
+              {Platform.OS === 'web' && heroItems.length > 1 && (
+                  <>
+                      {viewerIndex > 0 && (
+                          <TouchableOpacity
+                              activeOpacity={0.8}
+                              accessibilityLabel="Foto anterior"
+                              onPress={() => {
+                                  const newIndex = Math.max(0, viewerIndex - 1);
+                                  viewerScrollRef.current?.scrollTo({ x: newIndex * Dimensions.get("window").width, y: 0, animated: true });
+                                  setViewerIndex(newIndex);
+                              }}
+                              style={{ position: "absolute", left: 20, top: Dimensions.get("window").height / 2 - 22, width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", zIndex: 999, elevation: 10 }}
+                          >
+                              <Ionicons name="chevron-back" size={26} color="#FFF" />
+                          </TouchableOpacity>
+                      )}
+                      {viewerIndex < heroItems.length - 1 && (
+                          <TouchableOpacity
+                              activeOpacity={0.8}
+                              accessibilityLabel="Foto siguiente"
+                              onPress={() => {
+                                  const newIndex = Math.min(heroItems.length - 1, viewerIndex + 1);
+                                  viewerScrollRef.current?.scrollTo({ x: newIndex * Dimensions.get("window").width, y: 0, animated: true });
+                                  setViewerIndex(newIndex);
+                              }}
+                              style={{ position: "absolute", right: 20, top: Dimensions.get("window").height / 2 - 22, width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center", zIndex: 999, elevation: 10 }}
+                          >
+                              <Ionicons name="chevron-forward" size={26} color="#FFF" />
+                          </TouchableOpacity>
+                      )}
+                  </>
+              )}
 
               <View style={{ position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "rgba(0,0,0,0.5)", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, zIndex: 999, elevation: 10 }}>
                   <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 16 }}>{viewerIndex + 1} / {heroItems.length}</Text>

@@ -7,6 +7,7 @@ import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { isDealerPlan } from "@/lib/planChecks";
 import { shareProfile } from "@/lib/share";
 import type { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
@@ -551,7 +552,7 @@ export default function MyCarsTab() {
       <WebContainer>
       <Header />
       <View style={{ padding: 16, flex: 1 }}>
-        {Platform.OS === 'web' && (
+        {Platform.OS === 'web' && !isDealerPlan(profile?.plan) && (
             <View style={{ marginBottom: 16 }}>
                 <DownloadAppBanner message="Descargá la App para gestionar mejor tus ventas" />
             </View>

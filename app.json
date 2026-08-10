@@ -2,7 +2,7 @@
   "expo": {
     "name": "Matchcars",
     "slug": "matchcars",
-    "version": "1.7.3",
+    "version": "1.8.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "matchcars",
@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.matchcars.app",
       "associatedDomains": ["applinks:matchcars.app"],
-      "buildNumber": "1.7.3",
+      "buildNumber": "1.8.1",
       "googleServicesFile": "./GoogleService-Info.plist",
       "newArchEnabled": true,
       "infoPlist": {
@@ -64,7 +64,7 @@
         }
       ],
       "newArchEnabled": true,
-      "versionCode": 31,
+      "versionCode": 41,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/icon.png"

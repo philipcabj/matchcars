@@ -15,6 +15,7 @@ import { logger } from "@/lib/logger";
 import { calcMatchScore } from "@/lib/matchScore";
 import { sendNotificationEmail } from "@/lib/mail";
 import { getBoostScoreMultiplier, hasUnlimitedFeatured, hasWeekendBoost, isDealerPlan } from "@/lib/planChecks";
+import { getListingYears } from "@/lib/pricing";
 import type { BuyerPreferences } from "@/types/user";
 import type { Vehicle } from "@/types/vehicle";
 import { safeDate } from "@/utils/dateUtils";
@@ -75,6 +76,11 @@ export default function AutosPublicTab() {
   const [provinceQuery, setProvinceQuery] = useState("");
   const [yearMinOpen, setYearMinOpen] = useState(false);
   const [yearMaxOpen, setYearMaxOpen] = useState(false);
+  // Years that currently have an active listing (scoped to the selected brand/model, if any),
+  // so the year filter doesn't offer years with nothing to find. Falls back to the generic
+  // 40-year range while loading or if the lookup comes back empty.
+  const [yearFilterOptions, setYearFilterOptions] = useState<number[] | null>(null);
+  const [yearFilterLoading, setYearFilterLoading] = useState(false);
   const [priceMinOpen, setPriceMinOpen] = useState(false);
   const [priceMaxOpen, setPriceMaxOpen] = useState(false);
   const [kmMinOpen, setKmMinOpen] = useState(false);
@@ -477,6 +483,18 @@ export default function AutosPublicTab() {
     }
   }
 
+  async function loadYearFilterOptions() {
+    setYearFilterLoading(true);
+    try {
+      const years = await getListingYears(brandFilter || undefined, modelFilter || undefined);
+      setYearFilterOptions(years.length > 0 ? years : null);
+    } catch {
+      setYearFilterOptions(null);
+    } finally {
+      setYearFilterLoading(false);
+    }
+  }
+
   useEffect(() => {
     const PAGE_SIZE = 20;
     setVehicles([]);
@@ -802,16 +820,16 @@ export default function AutosPublicTab() {
             <Ionicons name="chevron-forward" size={16} color={theme.accent} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => router.push("/(screens)/compare" as any)}
+            onPress={() => router.push("/(screens)/tasador" as any)}
             style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.border }}
             activeOpacity={0.8}
           >
             <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#8B5CF6", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="git-compare-outline" size={18} color="#fff" />
+              <Ionicons name="calculator-outline" size={18} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>Comparador</Text>
-              <Text style={{ color: theme.textMuted, fontSize: 11 }}>Comparar modelos</Text>
+              <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>¿Cuánto vale tu auto?</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11 }}>Estimación de precio gratis</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#8B5CF6" />
           </TouchableOpacity>
@@ -977,10 +995,10 @@ export default function AutosPublicTab() {
             </View>
           )}
           <View style={{ flexDirection: "row", gap: 6 }}>
-            <TouchableOpacity onPress={() => setYearMinOpen((p) => !p)} style={{ flex: 1, borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
+            <TouchableOpacity onPress={async () => { await loadYearFilterOptions(); setYearMinOpen((p) => !p); }} style={{ flex: 1, borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
               <Text style={{ color: theme.inputText, fontWeight: yearMin ? "700" : "400", fontSize: 13 }}>{yearMin ? `Año mín: ${yearMin}` : "Año mín"}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setYearMaxOpen((p) => !p)} style={{ flex: 1, borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
+            <TouchableOpacity onPress={async () => { await loadYearFilterOptions(); setYearMaxOpen((p) => !p); }} style={{ flex: 1, borderWidth: 1, borderColor: theme.likeBoxBackground, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: theme.inputBackground }}>
               <Text style={{ color: theme.inputText, fontWeight: yearMax ? "700" : "400", fontSize: 13 }}>{yearMax ? `Año máx: ${yearMax}` : "Año máx"}</Text>
             </TouchableOpacity>
           </View>
@@ -994,13 +1012,19 @@ export default function AutosPublicTab() {
                   <Text style={{ color: theme.text }}>Cerrar</Text>
                 </TouchableOpacity>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled">
-                {YEAR_OPTIONS.slice().reverse().map((yo) => (
-                  <TouchableOpacity key={`ymin-${yo}`} onPress={() => { setYearMin(String(yo)); setYearMinOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: String(yo) === yearMin ? `${theme.accent}22` : undefined }}>
-                    <Text style={{ color: String(yo) === yearMin ? theme.accent : theme.text }}>{yo}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {yearFilterLoading ? (
+                <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color={theme.accent} size="small" />
+                </View>
+              ) : (
+                <ScrollView keyboardShouldPersistTaps="handled">
+                  {(yearFilterOptions ?? YEAR_OPTIONS).slice().reverse().map((yo) => (
+                    <TouchableOpacity key={`ymin-${yo}`} onPress={() => { setYearMin(String(yo)); setYearMinOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: String(yo) === yearMin ? `${theme.accent}22` : undefined }}>
+                      <Text style={{ color: String(yo) === yearMin ? theme.accent : theme.text }}>{yo}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
           )}
           {yearMaxOpen && (
@@ -1013,13 +1037,19 @@ export default function AutosPublicTab() {
                   <Text style={{ color: theme.text }}>Cerrar</Text>
                 </TouchableOpacity>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled">
-                {YEAR_OPTIONS.map((yo) => (
-                  <TouchableOpacity key={`ymax-${yo}`} onPress={() => { setYearMax(String(yo)); setYearMaxOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: String(yo) === yearMax ? `${theme.accent}22` : undefined }}>
-                    <Text style={{ color: String(yo) === yearMax ? theme.accent : theme.text }}>{yo}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              {yearFilterLoading ? (
+                <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                  <ActivityIndicator color={theme.accent} size="small" />
+                </View>
+              ) : (
+                <ScrollView keyboardShouldPersistTaps="handled">
+                  {(yearFilterOptions ?? YEAR_OPTIONS).map((yo) => (
+                    <TouchableOpacity key={`ymax-${yo}`} onPress={() => { setYearMax(String(yo)); setYearMaxOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 12, backgroundColor: String(yo) === yearMax ? `${theme.accent}22` : undefined }}>
+                      <Text style={{ color: String(yo) === yearMax ? theme.accent : theme.text }}>{yo}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
           )}
           <View style={{ flexDirection: "row", gap: 6 }}>

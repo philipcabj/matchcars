@@ -172,6 +172,7 @@ export default function NotificationsScreen() {
       pathname: "/(screens)/chat/[uid]",
       params: {
         uid: peerUid,
+        conversationId: item.conversationId,
         vehicleId: item.vehicleId,
         vehicleData: item.vehicleSnapshot ? JSON.stringify(item.vehicleSnapshot) : undefined,
       },
@@ -524,7 +525,7 @@ export default function NotificationsScreen() {
                         const isUnread = originalIsUnread && (!lastSeenAt || (item.updatedAt?.seconds * 1000 > (typeof lastSeenAt.toMillis === 'function' ? lastSeenAt.toMillis() : lastSeenAt.seconds * 1000)));
                         
                         const handlePress = () => {
-                            const params: any = { uid: item.peerId, name: profiles.get(item.peerId)?.name || item.peerName || "Usuario" };
+                            const params: any = { uid: item.peerId, name: profiles.get(item.peerId)?.name || item.peerName || "Usuario", conversationId: item.id };
                             if (item.vehicleData) {
                                 params.vehicleId = item.vehicleId;
                                 params.vehicleData = JSON.stringify(item.vehicleData);

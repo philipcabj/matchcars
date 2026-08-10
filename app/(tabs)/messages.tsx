@@ -447,14 +447,15 @@ export default function MessagesTab() {
     return (
       <Swipeable renderRightActions={renderRightActions}>
         <TouchableOpacity
-          onPress={() => router.push({ 
-              pathname: "/(screens)/chat/[uid]", 
-              params: { 
-                  uid: item.otherUid, 
+          onPress={() => router.push({
+              pathname: "/(screens)/chat/[uid]",
+              params: {
+                  uid: item.otherUid,
                   name: displayName,
+                  conversationId: item.id,
                   vehicleId: item.vehicleId,
                   vehicleData: item.vehicleData ? JSON.stringify(item.vehicleData) : undefined
-              } 
+              }
           })}
           onLongPress={() => handleDeleteChat(item)}
           style={{
@@ -635,6 +636,7 @@ export default function MessagesTab() {
                         params: {
                           uid: item.otherUid,
                           name: displayName,
+                          conversationId: item.id,
                           vehicleId: item.vehicleId,
                           vehicleData: item.vehicleData ? JSON.stringify(item.vehicleData) : undefined,
                         },

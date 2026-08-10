@@ -386,7 +386,7 @@ export default function LeadsScreen() {
         onPress={() =>
           router.push({
             pathname: "/(screens)/chat/[uid]",
-            params: { uid: item.buyerId, vehicleId: item.vehicleId },
+            params: { uid: item.buyerId, conversationId: item.conversationId, vehicleId: item.vehicleId },
           })
         }
         style={{

@@ -3,6 +3,7 @@ import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { SelectionModal } from "@/components/SelectionModal";
 import { WebContainer } from "@/components/WebContainer";
+import { WebDealerAddCarForm } from "@/components/WebDealerAddCarForm";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { notifyAdminNewVehicle } from "@/lib/admin-notifications";
@@ -11,6 +12,7 @@ import { Analytics } from "@/lib/analytics";
 import { app, db, storage, vertexAI } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
+import { evaluateVehicleRisk } from "@/lib/riskScoring";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -246,7 +248,7 @@ const DEFAULT_MODELS_BY_MAKE: Record<string, string[]> = {
 };
 
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
-import { canUploadVideo, canUseAITools, getMaxCars, isDealerPlan } from "@/lib/planChecks";
+import { canUploadVideo, canUseAITools, canEnhancePhoto, getMaxCars, isDealerPlan } from "@/lib/planChecks";
 import { CITY_OPTIONS_BY_PROVINCE, PROVINCES } from "@/config/locations";
 
 export default function AddCarScreen() {
@@ -254,6 +256,10 @@ export default function AddCarScreen() {
   const { user, profile, refreshTrustLevel } = useAuth();
   const { theme, themeName } = useTheme();
   const insets = useSafeAreaInsets();
+
+  if (Platform.OS === "web" && isDealerPlan(profile?.plan)) {
+    return <WebDealerAddCarForm />;
+  }
 
   if (Platform.OS === "web") {
     return (
@@ -1017,39 +1023,99 @@ export default function AddCarScreen() {
     return result.uri;
   }
 
+  // Computes a 4:3 crop centered on a detected car bounding box, with 30% padding for context.
+  function computeCarCenteredCrop(box: BoundingBox, width: number, height: number, targetRatio: number) {
+    const carW = (box.xmax - box.xmin) * width;
+    const carH = (box.ymax - box.ymin) * height;
+
+    const padding = 0.30;
+    let w = carW * (1 + padding);
+    let h = carH * (1 + padding);
+
+    w = Math.min(w, width - 2);
+    h = Math.min(h, height - 2);
+
+    const currentRatio = w / h;
+    if (currentRatio > targetRatio) {
+      h = Math.min(w / targetRatio, height - 2);
+    } else {
+      w = Math.min(h * targetRatio, width - 2);
+    }
+
+    const centerX = (box.xmin + box.xmax) / 2;
+    const centerY = (box.ymin + box.ymax) / 2;
+
+    const x = centerX * width - w / 2;
+    const y = centerY * height - h / 2;
+
+    const finalW = Math.max(1, Math.floor(w));
+    const finalH = Math.max(1, Math.floor(h));
+    const finalX = Math.max(0, Math.min(Math.floor(x), width - finalW));
+    const finalY = Math.max(0, Math.min(Math.floor(y), height - finalH));
+
+    return { originX: finalX, originY: finalY, width: finalW, height: finalH };
+  }
+
+  function naiveCenterCrop(width: number, height: number, targetRatio: number) {
+    const currentRatio = width / height;
+    if (Math.abs(currentRatio - targetRatio) <= 0.05) return null;
+
+    let originX = 0;
+    let originY = 0;
+    let cropW = width;
+    let cropH = height;
+
+    if (currentRatio > targetRatio) {
+      cropW = height * targetRatio;
+      originX = (width - cropW) / 2;
+    } else {
+      cropH = width / targetRatio;
+      originY = (height - cropH) / 2;
+    }
+
+    return { originX, originY, width: cropW, height: cropH };
+  }
+
+  function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+    return Promise.race([
+      promise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+    ]);
+  }
+
   async function standardizeImage(uri: string): Promise<string> {
     const { width, height } = await getImageSize(uri);
     // Target 4:3 aspect ratio
     const targetRatio = 4 / 3;
-    const currentRatio = width / height;
-    
-    let cropAction = null;
-    
-    if (Math.abs(currentRatio - targetRatio) > 0.05) {
-        // Need to crop
-        let originX = 0;
-        let originY = 0;
-        let cropW = width;
-        let cropH = height;
-        
-        if (currentRatio > targetRatio) {
-            // Image is wider than 4:3, crop width
-            cropW = height * targetRatio;
-            originX = (width - cropW) / 2;
-        } else {
-            // Image is taller than 4:3, crop height
-            cropH = width / targetRatio;
-            originY = (height - cropH) / 2;
-        }
-        
-        cropAction = {
-            originX,
-            originY,
-            width: cropW,
-            height: cropH,
-        };
+
+    let cropAction: { originX: number; originY: number; width: number; height: number } | null = null;
+
+    // Try to center the crop on the detected car so the vehicle isn't cut off.
+    // Falls back silently to a plain center crop if detection fails or times out,
+    // so a slow/unavailable AI call never blocks the upload.
+    try {
+      // Las fotos de cámara pueden pesar varios MB a resolución original: leerlas
+      // en base64 directamente hacía que la detección superara el timeout casi
+      // siempre y terminara cayendo al recorte simple. Detectamos sobre una copia
+      // liviana; el box normalizado (0-1) igual se aplica sobre el tamaño original.
+      const detectionCopy = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: Math.min(1280, width) } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const base64 = await FileSystem.readAsStringAsync(detectionCopy.uri, { encoding: "base64" });
+      const aiResult = await withTimeout(detectCar(base64), 8000);
+      if (aiResult?.success && aiResult.box) {
+        cropAction = computeCarCenteredCrop(aiResult.box, width, height, targetRatio);
+      }
+    } catch (e) {
+      logger.log("Smart crop detection failed, falling back to center crop", e);
     }
-    
+
+    if (!cropAction) {
+      cropAction = naiveCenterCrop(width, height, targetRatio);
+    }
+
     const actions: any[] = [];
     if (cropAction) {
         actions.push({ crop: cropAction });
@@ -1751,11 +1817,14 @@ export default function AddCarScreen() {
 
   async function handleProEditorAction(action: "blurPlate" | "enhance") {
     const plan = profile?.plan || "free";
-    
-    if (!canUseAITools(plan)) {
+
+    const allowed = action === "blurPlate" ? canUseAITools(plan) : canEnhancePhoto(plan);
+    if (!allowed) {
       showAlert(
         "Función Premium",
-        "Las herramientas de IA son exclusivas para usuarios PRO Plus o superiores.",
+        action === "blurPlate"
+          ? "Tapar la patente automáticamente es exclusivo para usuarios PRO Plus o superiores."
+          : "Mejorar el encuadre de la foto con IA es exclusivo para usuarios con plan pago.",
         "info",
         () => router.push("/(screens)/subscribe")
       );
@@ -2024,92 +2093,6 @@ export default function AddCarScreen() {
       setVideoUri("");
       setVideoProgress(0);
   };
-
-  async function evaluateVehicleRisk(options: {
-    brand: string;
-    model: string;
-    year: number;
-    price: number;
-    currency: "ARS" | "USD";
-    description: string;
-    userId: string;
-    trustLevel: string;
-    coverImage: string;
-  }) {
-    const flags: string[] = [];
-    let score = 0;
-
-    try {
-      const analysis = await analyzeMarketPrice(
-        options.brand,
-        options.model,
-        options.year,
-        options.currency
-      );
-      if (analysis.avg > 0) {
-        if (options.price < analysis.avg * 0.6) {
-          flags.push("price_outlier");
-          score += 4;
-        } else if (options.price > analysis.avg * 1.5) {
-          flags.push("price_high_outlier");
-          score += 3;
-        }
-        const currentYear = new Date().getFullYear();
-        if (options.year >= currentYear && options.price < analysis.avg * 0.8) {
-          flags.push("year_price_mismatch");
-          score += 2;
-        }
-      }
-    } catch {
-    }
-
-    try {
-      const now = new Date();
-      const from = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      const qRecent = query(
-        collection(db, "vehicles"),
-        where("userId", "==", options.userId),
-        where("createdAt", ">=", Timestamp.fromDate(from))
-      );
-      const snapRecent = await getDocs(qRecent);
-      if (snapRecent.docs.length >= 3 && options.trustLevel !== "verified") {
-        flags.push("new_user_mass");
-        score += 3;
-      }
-    } catch {
-    }
-
-    if (options.description) {
-      const text = options.description.toLowerCase();
-      const hasPhone = /\d{8,}/.test(text);
-      const hasLink = text.includes("http://") || text.includes("https://") || text.includes("www.") || text.includes(".com");
-      if (hasPhone || hasLink) {
-        flags.push("external_contact");
-        score += 2;
-      }
-    }
-
-    try {
-      if (options.coverImage) {
-        const qDup = query(
-          collection(db, "vehicles"),
-          where("userId", "==", options.userId),
-          where("images.cover", "==", options.coverImage)
-        );
-        const snapDup = await getDocs(qDup);
-        if (!snapDup.empty) {
-          flags.push("duplicate_image");
-          score += 2;
-        }
-      }
-    } catch {
-    }
-
-    return {
-      flags: Array.from(new Set(flags)),
-      score,
-    };
-  }
 
   async function handleSubmit() {
     if (!user) {

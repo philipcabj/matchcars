@@ -71,6 +71,13 @@ service cloud.firestore {
       allow delete: if isSaleInvolved() || isStaff();
     }
 
+    // Progreso de carga masiva (bulk-import.tsx). Solo la Cloud Function
+    // startBulkImport escribe, vía Admin SDK, que ignora estas reglas.
+    match /bulkImportJobs/{jobId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
     // Reglas para vehículos
     match /vehicles/{vehicleId} {
       allow read: if true;
@@ -99,6 +106,20 @@ service cloud.firestore {
           request.resource.data.status == resource.data.status &&
           request.resource.data.price == resource.data.price &&
           request.resource.data.currency == resource.data.currency
+        ) ||
+        // Comprador confirma/deniega recepción tras "marcar como vendido"
+        // (chat/[uid].tsx handleConfirmReceived/handleDenyReceived): el auto
+        // queda "reserved" hasta que el comprador lo cierra a "sold" o lo
+        // devuelve a "available". Verificado contra sales/{vehicleId}.buyerId
+        // (mismo id que el vehículo) en vez de confiar en el uid del request;
+        // no puede tocar dueño/precio/moneda ni salir de ese único paso.
+        (
+          resource.data.status == "reserved" &&
+          request.resource.data.userId == resource.data.userId &&
+          request.resource.data.price == resource.data.price &&
+          request.resource.data.currency == resource.data.currency &&
+          (request.resource.data.status == "sold" || request.resource.data.status == "available") &&
+          get(/databases/$(database)/documents/sales/$(vehicleId)).data.buyerId == request.auth.uid
         )
       );
       allow delete: if request.auth != null && (
@@ -180,6 +201,46 @@ service cloud.firestore {
         && request.resource.data.reviewerId == request.auth.uid
         && request.resource.data.reviewerId != request.resource.data.sellerId;
       allow update, delete: if isStaff();
+    }
+
+    // ── Portal de agencias (nuevo, en construcción) ──────────────────────────
+    // Modelo v1: agencyId == uid del usuario dueño (el mismo usuario "pro_dealer"
+    // que ya existe en /users). No requiere migración de datos existentes: el
+    // doc en /agencies/{agencyId} se crea recién cuando el dueño entra por primera
+    // vez al portal. /members permite, a futuro, sumar empleados con roles sin
+    // tocar el modelo actual de un usuario = una cuenta.
+    function isAgencyMember(agencyId) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/agencies/$(agencyId)/members/$(request.auth.uid));
+    }
+    function agencyMemberRole(agencyId) {
+      return get(/databases/$(database)/documents/agencies/$(agencyId)/members/$(request.auth.uid)).data.role;
+    }
+    function canManageAgency(agencyId) {
+      return request.auth != null && (
+        request.auth.uid == agencyId ||
+        isStaff() ||
+        (isAgencyMember(agencyId) && agencyMemberRole(agencyId) in ['owner', 'manager'])
+      );
+    }
+
+    match /agencies/{agencyId} {
+      allow read: if true;
+      allow create, update, delete: if canManageAgency(agencyId);
+
+      match /members/{memberId} {
+        allow read: if request.auth != null && (canManageAgency(agencyId) || request.auth.uid == memberId);
+        allow write: if canManageAgency(agencyId);
+      }
+    }
+
+    // Índice inverso uid -> agencia (para que un miembro invitado, con su propio
+    // uid distinto de agencyId, sepa a qué agencia pertenece al entrar al portal).
+    // Solo lo escribe el backend del portal (Admin SDK, bypassea reglas) al
+    // invitar/quitar miembros — por eso "write: if false" acá.
+    match /agencyMemberships/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isStaff());
+      allow write: if false;
     }
   }
 }

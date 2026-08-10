@@ -13,7 +13,7 @@ import { Offer, LeadStatus } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { addDoc, arrayUnion, collection, deleteDoc, doc, getDoc, increment, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, deleteDoc, doc, getDoc, increment, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, FlatList, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -22,7 +22,7 @@ export default function ChatWithUserScreen() {
   const { theme } = useTheme();
   const { user, profile } = useAuth();
   const router = useRouter();
-  const { uid, name: paramName, vehicleId, vehicleData: vehicleDataParam } = useLocalSearchParams<{ uid: string; name?: string; vehicleId?: string; vehicleData?: string }>();
+  const { uid, name: paramName, vehicleId, vehicleData: vehicleDataParam, conversationId: conversationIdParam } = useLocalSearchParams<{ uid: string; name?: string; vehicleId?: string; vehicleData?: string; conversationId?: string }>();
   const peerUid = typeof uid === "string" ? uid : "";
   const [loading, setLoading] = useState(true);
   const [peerName, setPeerName] = useState<string>("");
@@ -188,7 +188,7 @@ export default function ChatWithUserScreen() {
           amount: amountText,
         }).catch(() => {});
         if (peerPushToken) {
-          sendPushNotification(peerPushToken, "¡Acuerdo cerrado!", `Llegaron a un acuerdo por ${amountText} · ${carModel}`, { url: `matchcars://chat/${user.uid}` });
+          sendPushNotification(peerPushToken, "¡Acuerdo cerrado!", `Llegaron a un acuerdo por ${amountText} · ${carModel}`, { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` });
         }
       }
     } else if (action === "reject") {
@@ -275,12 +275,18 @@ export default function ChatWithUserScreen() {
           amount: amountText,
         }).catch(() => {});
         if (peerPushToken) {
-          sendPushNotification(peerPushToken, "Te hicieron una contraoferta", `${myName} contraofertó ${amountText} por ${carModel}`, { url: `matchcars://chat/${user.uid}` });
+          sendPushNotification(peerPushToken, "Te hicieron una contraoferta", `${myName} contraofertó ${amountText} por ${carModel}`, { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` });
         }
       }
     }
   };
 
+  // Con comprador real: el auto pasa a "reserved" (no "sold" todavía) hasta
+  // que el comprador confirme que lo recibió (ver handleConfirmReceived /
+  // handleDenyReceived más abajo) — evita cerrar la venta unilateralmente.
+  // Sin buyerId (no debería pasar acá: este botón solo existe si hay una
+  // oferta con comprador real) se deja como red de seguridad yendo directo
+  // a "sold", igual que antes.
   const handleMarkAsSold = async () => {
     if (!activeOffer?.vehicleId || !user?.uid || markingAsSold) return;
     setMarkingAsSold(true);
@@ -289,45 +295,120 @@ export default function ChatWithUserScreen() {
       const offerRef = doc(db, "offers", activeOffer.id);
       // ID = vehicleId → un único documento de venta por vehículo, sin duplicados
       const saleRef = doc(db, "sales", activeOffer.vehicleId);
+      const buyerId = activeOffer.buyerId ?? peerUid;
+      const pendingConfirmation = !!buyerId;
+      const deadline = Timestamp.fromMillis(Date.now() + 3 * 24 * 60 * 60 * 1000);
       await runTransaction(db, async (t) => {
         const vehicleSnap = await t.get(vehicleRef);
         if (!vehicleSnap.exists()) throw new Error("Vehículo no encontrado.");
-        t.update(vehicleRef, { status: "sold", published: false, soldAt: serverTimestamp(), soldViaOfferId: activeOffer.id });
+        t.update(vehicleRef, {
+          status: pendingConfirmation ? "reserved" : "sold",
+          published: false,
+          soldAt: serverTimestamp(),
+          soldViaOfferId: activeOffer.id,
+        });
         t.update(offerRef, { vehicleSold: true });
         t.set(saleRef, {
           vehicleId: activeOffer.vehicleId,
           sellerId: user.uid,
-          buyerId: activeOffer.buyerId ?? peerUid,
+          buyerId,
           finalPrice: activeOffer.counterAmount ?? activeOffer.amount ?? 0,
           currency: activeOffer.counterCurrency ?? activeOffer.currency ?? "ARS",
           soldAt: serverTimestamp(),
           source: "matchcars",
           vehicleSnapshot: activeOffer.vehicleSnapshot ?? {},
+          confirmedByBuyer: pendingConfirmation ? null : true,
+          ...(pendingConfirmation ? { buyerConfirmDeadline: deadline } : { confirmedAt: serverTimestamp() }),
         }, { merge: true });
       });
-      showAlert("¡Venta registrada!", "El vehículo fue marcado como vendido.", "success");
-      if (activeOffer.buyerId) {
-        addDoc(collection(db, "users", activeOffer.buyerId, "offer_notifications"), {
+      showAlert(
+        pendingConfirmation ? "¡Listo!" : "¡Venta registrada!",
+        pendingConfirmation ? "Le avisamos al comprador — se confirma cuando él lo reciba." : "El vehículo fue marcado como vendido.",
+        "success"
+      );
+      if (buyerId) {
+        addDoc(collection(db, "users", buyerId, "offer_notifications"), {
           type: "vehicle_sold", offerId: activeOffer.id, vehicleId: activeOffer.vehicleId,
-          sellerId: user.uid, buyerId: activeOffer.buyerId,
+          sellerId: user.uid, buyerId,
           vehicleSnapshot: activeOffer.vehicleSnapshot ?? {}, read: false, createdAt: serverTimestamp(),
         }).catch(() => {});
 
         const carModel = `${activeOffer.vehicleSnapshot?.brand ?? ""} ${activeOffer.vehicleSnapshot?.model ?? ""}`.trim();
         sendNotificationEmail("vehicle_sold", {
-          recipientUid: activeOffer.buyerId,
+          recipientUid: buyerId,
           senderName: "MatchCars",
-          subject: `¡Venta confirmada! ${carModel}`,
+          subject: `Confirmá la recepción de tu ${carModel}`,
           carModel,
         }).catch(() => {});
         if (peerPushToken) {
-          sendPushNotification(peerPushToken, "¡Venta confirmada!", `${carModel} fue marcado como vendido. ¡Felicitaciones!`, { url: `matchcars://chat/${user.uid}` });
+          sendPushNotification(peerPushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` });
         }
       }
     } catch (err: any) {
       showAlert("Error", err?.message ?? "No se pudo marcar como vendido.", "error");
     } finally {
       setMarkingAsSold(false);
+    }
+  };
+
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
+
+  const handleConfirmReceived = async () => {
+    if (!currentVehicleId || !user?.uid || confirmingReceipt) return;
+    setConfirmingReceipt(true);
+    try {
+      const vehicleRef = doc(db, "vehicles", currentVehicleId);
+      const saleRef = doc(db, "sales", currentVehicleId);
+      const sellerId = activeVehicleData?.sellerId;
+      await runTransaction(db, async (t) => {
+        t.update(vehicleRef, { status: "sold" });
+        t.update(saleRef, { confirmedByBuyer: true, confirmedAt: serverTimestamp() });
+      });
+      showAlert("¡Gracias!", "Venta confirmada. Ahora podés calificar al vendedor.", "success");
+      if (sellerId) {
+        const carModel = `${activeVehicleData?.brand ?? ""} ${activeVehicleData?.model ?? ""}`.trim();
+        sendNotificationEmail("vehicle_sold", { recipientUid: sellerId, senderName: "MatchCars", subject: `¡Venta confirmada! ${carModel}`, carModel }).catch(() => {});
+        if (peerPushToken) {
+          sendPushNotification(peerPushToken, "¡Venta confirmada!", `El comprador confirmó la recepción de ${carModel}.`, { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` });
+        }
+      }
+    } catch (err: any) {
+      showAlert("Error", err?.message ?? "No se pudo confirmar.", "error");
+    } finally {
+      setConfirmingReceipt(false);
+    }
+  };
+
+  const handleDenyReceived = async () => {
+    if (!currentVehicleId || !user?.uid || confirmingReceipt) return;
+    setConfirmingReceipt(true);
+    try {
+      const vehicleRef = doc(db, "vehicles", currentVehicleId);
+      const saleRef = doc(db, "sales", currentVehicleId);
+      const participants = await resolveLeadParticipants();
+      const sellerId = activeVehicleData?.sellerId;
+      await runTransaction(db, async (t) => {
+        t.update(vehicleRef, { status: "available", published: true });
+        t.update(saleRef, { confirmedByBuyer: false });
+      });
+      if (participants) {
+        const leadId = `${participants.sellerId}_${participants.buyerId}_${participants.vehicleId}`;
+        await updateDoc(doc(db, "leads", leadId), {
+          status: "negotiation", revertedAt: serverTimestamp(), revertReason: "buyer_declined",
+        }).catch(() => {});
+      }
+      showAlert("Listo", "Le avisamos al vendedor. El auto vuelve a estar disponible.", "info");
+      if (sellerId) {
+        const carModel = `${activeVehicleData?.brand ?? ""} ${activeVehicleData?.model ?? ""}`.trim();
+        sendNotificationEmail("deal_canceled", { recipientUid: sellerId, senderName: "MatchCars", subject: `${carModel}: el comprador indicó que no lo recibió`, carModel }).catch(() => {});
+        if (peerPushToken) {
+          sendPushNotification(peerPushToken, "La venta no se confirmó", `El comprador indicó que no recibió ${carModel} — volvió a estar disponible.`, { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` });
+        }
+      }
+    } catch (err: any) {
+      showAlert("Error", err?.message ?? "No se pudo actualizar.", "error");
+    } finally {
+      setConfirmingReceipt(false);
     }
   };
 
@@ -431,12 +512,23 @@ export default function ChatWithUserScreen() {
     await updateDoc(ref, { unreadCount: 0 });
   };
 
+  // Si quien navega ya sabe qué documento abrir (ej. messages.tsx, que tiene
+  // el id real de la conversación tapeada en la lista) lo pasa directo por
+  // `conversationId` y se usa tal cual, sin recalcular nada — así una
+  // conversación vieja (esquema par-de-usuarios, de antes de scopear por
+  // auto) se sigue abriendo en el mismo documento donde está su historial,
+  // en vez de calcular un id "por auto" que no existe. Recalcular por
+  // vehicleId (mismo criterio que leadId = sellerId_buyerId_vehicleId) solo
+  // aplica para ARRANCAR una conversación nueva sin id conocido todavía (ej.
+  // "Mensajear"/"Hacer oferta" desde car/[id].tsx). Sin auto en contexto
+  // (ej. "Mensaje" desde un perfil), es el hilo general de siempre.
   const convId = useMemo(() => {
+    if (conversationIdParam) return String(conversationIdParam);
     const a = String(user?.uid || "");
     const b = String(peerUid || "");
-    const arr = [a, b].sort();
-    return arr.join("_");
-  }, [user?.uid, peerUid]);
+    const pair = [a, b].sort().join("_");
+    return currentVehicleId ? `${pair}_${currentVehicleId}` : pair;
+  }, [conversationIdParam, user?.uid, peerUid, currentVehicleId]);
 
   const [activeOffer, setActiveOffer] = useState<(Offer & { id: string }) | null>(null);
 
@@ -470,26 +562,32 @@ export default function ChatWithUserScreen() {
     return () => { unsub1(); unsub2(); };
   }, [convId, user?.uid]);
 
-  // Listener del documento de venta (para ratings)
+  // Listener del documento de venta — sigue al auto de ESTA conversación
+  // (currentVehicleId), no a activeOffer: un cierre manual (portal, sin
+  // oferta formal) también tiene que poder mostrar el panel de confirmar/
+  // calificar acá.
   useEffect(() => {
-    if (!(activeOffer as any)?.vehicleSold || !activeOffer?.vehicleId) { setSaleData(null); return; }
+    if (!currentVehicleId) { setSaleData(null); return; }
     const unsub = onSnapshot(
-      doc(db, "sales", activeOffer.vehicleId),
+      doc(db, "sales", currentVehicleId),
       (snap) => setSaleData(snap.exists() ? { id: snap.id, ...snap.data() } : null),
       (err) => console.error("[sale listener]", err.code)
     );
     return () => unsub();
-  }, [(activeOffer as any)?.vehicleSold, activeOffer?.vehicleId]);
+  }, [currentVehicleId]);
 
   const handleSubmitRating = async () => {
-    if (!ratingScore || !activeOffer || !user?.uid || submittingRating) return;
-    const isSeller = user.uid === activeOffer.sellerId;
+    // Usa saleData (siempre tiene sellerId/buyerId, venga de una oferta
+    // formal o de un cierre manual desde el portal) en vez de activeOffer,
+    // que puede no existir en el segundo caso.
+    if (!ratingScore || !saleData || !currentVehicleId || !user?.uid || submittingRating) return;
+    const isSeller = user.uid === saleData.sellerId;
     const ratingField = isSeller ? "ratingBySeller" : "ratingByBuyer";
-    const ratedUserId = isSeller ? activeOffer.buyerId : activeOffer.sellerId;
+    const ratedUserId = isSeller ? saleData.buyerId : saleData.sellerId;
     if (!ratedUserId) return;
     setSubmittingRating(true);
     try {
-      await updateDoc(doc(db, "sales", activeOffer.vehicleId), {
+      await updateDoc(doc(db, "sales", currentVehicleId), {
         [ratingField]: { score: ratingScore, comment: ratingComment.trim() || null, ratedAt: serverTimestamp(), ratedByUid: user.uid },
       });
       // Actualizar promedio en el perfil del usuario calificado
@@ -665,35 +763,12 @@ export default function ChatWithUserScreen() {
              } catch {}
           }
         } else if (cSnap.exists()) {
-            // Try to recover vehicleId from conversation if not in params
+            // Hilo general (sin vehicleId en los params): a lo sumo se muestra
+            // el auto cacheado en el doc como contexto informativo, pero NUNCA
+            // se cambia currentVehicleId acá — eso saltaría a un hilo por-auto
+            // distinto a mitad de conversación. Un hilo general se queda general.
             const d = cSnap.data() as any;
-
-            if (d.vehicleId && !currentVehicleId) {
-                setCurrentVehicleId(d.vehicleId);
-            }
-
-            if (d.vehicleId && !activeVehicleData) {
-                // Fetch vehicle data if missing
-                try {
-                    const vRef = doc(db, "vehicles", d.vehicleId);
-                    const vSnap = await getDoc(vRef);
-                    if (vSnap.exists()) {
-                        const v = vSnap.data() as any;
-                        const vData = {
-                            id: vSnap.id,
-                            brand: v.brand,
-                            model: v.model,
-                            year: v.year,
-                            price: v.price,
-                            currency: v.currency,
-                            cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? ""
-                        };
-                        setActiveVehicleData(vData);
-                        // Update conversation with vehicleData for future
-                        await updateDoc(cRef, { vehicleData: vData });
-                    }
-                } catch {}
-            } else if (d.vehicleData && !activeVehicleData) {
+            if (d.vehicleData && !activeVehicleData) {
                 setActiveVehicleData(d.vehicleData);
             }
         }
@@ -807,7 +882,7 @@ export default function ChatWithUserScreen() {
             peerPushToken,
             myName,
             text,
-            { url: `matchcars://chat/${user.uid}` }
+            { url: `matchcars://chat/${user.uid}${currentVehicleId ? `?vehicleId=${currentVehicleId}` : ""}` }
         );
       } else {
         logger.log("No peer push token found for user:", peerUid);
@@ -1007,6 +1082,29 @@ export default function ChatWithUserScreen() {
             <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </TouchableOpacity>
         )}
+        {activeVehicleData && (activeVehicleData.status === "sold" || activeVehicleData.status === "deleted") && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: theme.error + "15",
+              borderColor: theme.error + "44",
+              borderWidth: 1,
+              borderRadius: 10,
+              padding: 10,
+              marginHorizontal: 16,
+              marginTop: 8,
+            }}
+          >
+            <Ionicons name="alert-circle" size={18} color={theme.error} />
+            <Text style={{ color: theme.error, fontSize: 12, fontWeight: "600", flex: 1 }}>
+              {activeVehicleData.status === "sold"
+                ? "Este auto ya fue vendido — cualquier oferta nueva no va a poder concretarse."
+                : "Esta publicación fue eliminada — cualquier oferta nueva no va a poder concretarse."}
+            </Text>
+          </View>
+        )}
         {/* Active offer card */}
         {activeOffer && (
           <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
@@ -1131,6 +1229,89 @@ export default function ChatWithUserScreen() {
             )}
           </View>
         )}
+        {/* Confirmación de entrega — independiente de que haya oferta formal:
+            un cierre manual (portal, sin oferta) también deja el auto en
+            "reserved" y necesita este mismo panel del lado del comprador. */}
+        {activeVehicleData?.status === "reserved" && saleData?.confirmedByBuyer === null && (() => {
+          const isSeller = user?.uid === activeVehicleData?.sellerId;
+          return (
+            <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+              <View style={{ backgroundColor: "#F59E0B15", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#F59E0B44" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Ionicons name="time-outline" size={24} color="#F59E0B" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: "#F59E0B", fontWeight: "800", fontSize: 14 }}>
+                      {isSeller ? "Esperando confirmación del comprador" : "¿Recibiste tu auto?"}
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {isSeller
+                        ? "Le avisamos — la venta se cierra cuando confirme."
+                        : "El vendedor marcó esta venta como entregada. Confirmá para calificarlo."}
+                    </Text>
+                  </View>
+                </View>
+                {!isSeller && (
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
+                    <TouchableOpacity
+                      disabled={confirmingReceipt}
+                      onPress={handleConfirmReceived}
+                      style={{ flex: 1, borderRadius: 8, paddingVertical: 9, alignItems: "center", backgroundColor: "#10B981", opacity: confirmingReceipt ? 0.7 : 1 }}
+                    >
+                      <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>Confirmé que lo recibí</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      disabled={confirmingReceipt}
+                      onPress={handleDenyReceived}
+                      style={{ flex: 1, borderRadius: 8, paddingVertical: 9, alignItems: "center", borderWidth: 1, borderColor: "#EF4444", opacity: confirmingReceipt ? 0.7 : 1 }}
+                    >
+                      <Text style={{ color: "#EF4444", fontWeight: "700", fontSize: 13 }}>No lo recibí</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </View>
+          );
+        })()}
+        {/* Calificación tras confirmar — igual criterio que el panel de arriba,
+            pero sin depender de que haya offer: sigue a saleData directamente. */}
+        {!activeOffer && saleData?.confirmedByBuyer === true && (() => {
+          const isSeller = user?.uid === saleData?.sellerId;
+          const myRating = isSeller ? saleData?.ratingBySeller : saleData?.ratingByBuyer;
+          if (myRating) return null;
+          return (
+            <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+              <View style={{ backgroundColor: "#10B98115", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#10B98144" }}>
+                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13, marginBottom: 6 }}>
+                  {isSeller ? "Calificá al comprador" : "Calificá al vendedor"}
+                </Text>
+                <View style={{ flexDirection: "row", gap: 6, marginBottom: 8 }}>
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <TouchableOpacity key={star} onPress={() => setRatingScore(star)}>
+                      <Ionicons name={star <= ratingScore ? "star" : "star-outline"} size={30} color="#F59E0B" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TextInput
+                  value={ratingComment}
+                  onChangeText={setRatingComment}
+                  placeholder="Comentario (opcional)"
+                  placeholderTextColor={theme.textMuted}
+                  style={{ borderWidth: 1, borderColor: theme.badgeBorder, borderRadius: 8, padding: 8, color: theme.text, fontSize: 13, marginBottom: 8, minHeight: 40 }}
+                  multiline
+                />
+                <TouchableOpacity
+                  onPress={handleSubmitRating}
+                  disabled={!ratingScore || submittingRating}
+                  style={{ backgroundColor: "#F59E0B", borderRadius: 8, paddingVertical: 9, alignItems: "center", opacity: submittingRating || !ratingScore ? 0.7 : 1 }}
+                >
+                  <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>
+                    {submittingRating ? "Enviando..." : "Enviar calificación"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
         <View style={{ flex: 1, paddingHorizontal: 16 }}>
           {loading ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
