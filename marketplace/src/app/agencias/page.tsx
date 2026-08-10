@@ -30,19 +30,23 @@ export default async function AgenciesPage({ searchParams }: { searchParams: Pro
       </div>
 
       <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4">
-        <label className="flex flex-1 min-w-[180px] flex-col gap-1 text-xs font-medium text-muted-foreground">
+        <label className="flex w-full min-w-[180px] flex-1 flex-col gap-1 text-xs font-medium text-muted-foreground">
           Buscar
           <input
             type="text"
             name="search"
             defaultValue={search ?? ""}
             placeholder="Nombre, ciudad o marca…"
-            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
           />
         </label>
-        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+        <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground sm:w-auto">
           Provincia
-          <select name="province" defaultValue={province ?? ""} className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground">
+          <select
+            name="province"
+            defaultValue={province ?? ""}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground sm:w-auto"
+          >
             <option value="">Todas</option>
             {provinces.map((p) => (
               <option key={p} value={p}>
@@ -51,15 +55,19 @@ export default async function AgenciesPage({ searchParams }: { searchParams: Pro
             ))}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+        <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground sm:w-auto">
           Orden
-          <select name="sort" defaultValue={sort} className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground">
+          <select
+            name="sort"
+            defaultValue={sort}
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground sm:w-auto"
+          >
             <option value="name">A-Z</option>
             <option value="rating">Mejor valoradas</option>
             <option value="cars">Más autos</option>
           </select>
         </label>
-        <button type="submit" className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground">
+        <button type="submit" className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground sm:w-auto">
           Buscar
         </button>
       </form>
