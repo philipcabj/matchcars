@@ -48,6 +48,10 @@ export interface PublicVehicle {
   sellerTrustLevel: string;
   sellerRating: number;
   sellerReviewCount: number;
+  // Se completan aparte (enrichWithSellerInfo) — no están denormalizados en
+  // el propio doc del vehículo, hay que leer users/{userId}.
+  sellerIsDealer: boolean;
+  sellerLogoUrl: string | null;
   isFeatured: boolean;
   views: number;
   likesCount: number;
@@ -115,6 +119,8 @@ function mapVehicleDoc(id: string, data: FirebaseFirestore.DocumentData): Public
     sellerTrustLevel: data.sellerTrustLevel ?? "new",
     sellerRating: data.sellerRating ?? 0,
     sellerReviewCount: data.sellerReviewCount ?? 0,
+    sellerIsDealer: false,
+    sellerLogoUrl: null,
     isFeatured: !!data.isFeatured,
     views: data.views ?? 0,
     likesCount: data.likesCount ?? 0,
@@ -167,6 +173,30 @@ const fetchPublishedVehicles = cache(async (): Promise<PublicVehicle[]> => {
   return snap.docs.map((d) => mapVehicleDoc(d.id, d.data())).filter((v) => v.price > 0 && v.brand);
 });
 
+// isDealer/logo del vendedor no están denormalizados en el doc del vehículo
+// (a diferencia de sellerRating/sellerTrustLevel) — hay que leer users/**.
+// Se hace con un solo getAll() por página (no 1 query por auto) para no
+// disparar N lecturas en una grilla de 24 autos.
+async function enrichWithSellerInfo(vehicles: PublicVehicle[]): Promise<PublicVehicle[]> {
+  const userIds = Array.from(new Set(vehicles.map((v) => v.userId).filter(Boolean)));
+  if (userIds.length === 0) return vehicles;
+
+  const refs = userIds.map((uid) => adminDb.doc(`users/${uid}`));
+  const snaps = await adminDb.getAll(...refs);
+  const infoByUid = new Map<string, { isDealer: boolean; logoUrl: string | null }>();
+  snaps.forEach((snap, i) => {
+    if (!snap.exists) return;
+    const data = snap.data()!;
+    const plan: string = data.plan || "free";
+    infoByUid.set(userIds[i], { isDealer: /pro_dealer/.test(plan), logoUrl: data.logoUrl || data.avatarUrl || null });
+  });
+
+  return vehicles.map((v) => {
+    const info = infoByUid.get(v.userId);
+    return info ? { ...v, sellerIsDealer: info.isDealer, sellerLogoUrl: info.logoUrl } : v;
+  });
+}
+
 export async function listVehicles(filters: VehicleFilters = {}): Promise<VehicleListResult> {
   let vehicles = await fetchPublishedVehicles();
 
@@ -190,8 +220,9 @@ export async function listVehicles(filters: VehicleFilters = {}): Promise<Vehicl
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, filters.page ?? 1), totalPages);
   const start = (page - 1) * PAGE_SIZE;
+  const pageVehicles = await enrichWithSellerInfo(vehicles.slice(start, start + PAGE_SIZE));
 
-  return { vehicles: vehicles.slice(start, start + PAGE_SIZE), total, page, totalPages };
+  return { vehicles: pageVehicles, total, page, totalPages };
 }
 
 // Todos los vehículos publicados, sin paginar — para el sitemap.
@@ -257,10 +288,11 @@ export async function getSimilarVehicles(vehicle: PublicVehicle, take = 4): Prom
     .where("brand", "==", vehicle.brand)
     .limit(take + 1)
     .get();
-  return snap.docs
+  const similar = snap.docs
     .map((d) => mapVehicleDoc(d.id, d.data()))
     .filter((v) => v.id !== vehicle.id)
     .slice(0, take);
+  return enrichWithSellerInfo(similar);
 }
 
 export interface SellerProfile {

@@ -1,8 +1,8 @@
 import { AgencyCard } from "@/components/AgencyCard";
+import { AppDownloadCard } from "@/components/AppDownloadCard";
 import { FilterBar } from "@/components/FilterBar";
 import { VehicleCard } from "@/components/VehicleCard";
 import { getFeaturedAgencies } from "@/lib/agencies";
-import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 import { getUsdToArsRate } from "@/lib/pricing-admin";
 import { getFeaturedVehicles, getFilterOptions, getPopularBrands, listVehicles, VehicleFilters } from "@/lib/vehicles";
 import type { Metadata } from "next";
@@ -89,6 +89,10 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         <p className="text-sm text-muted-foreground">Autos usados de particulares y agencias verificadas.</p>
 
+        <div className="xl:hidden">
+          <AppDownloadCard />
+        </div>
+
         <Link
           href="/tasador"
           className="flex items-center justify-between gap-3 rounded-xl border border-border bg-accent/5 px-4 py-2.5 transition hover:border-accent"
@@ -134,28 +138,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </div>
 
       <aside className="hidden w-72 shrink-0 flex-col gap-4 xl:flex">
-        <div className="flex flex-col gap-3 rounded-2xl bg-[#0E1117] p-5 text-white shadow-lg">
-          <p className="text-base font-extrabold">
-            📲 Llevá Match<span className="text-accent">Cars</span> en el bolsillo
-          </p>
-          <p className="text-xs leading-relaxed text-white/70">
-            Chateá con vendedores, recibí notificaciones al instante y publicá tu auto gratis desde la app.
-          </p>
-          <div className="flex flex-col gap-2">
-            <a
-              href={APPLE_URL}
-              className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2.5 text-xs font-bold text-[#0E1117] transition hover:bg-white/90"
-            >
-              🍏 Descargar en App Store
-            </a>
-            <a
-              href={PLAY_URL}
-              className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2.5 text-xs font-bold text-[#0E1117] transition hover:bg-white/90"
-            >
-              🤖 Descargar en Google Play
-            </a>
-          </div>
-        </div>
+        <AppDownloadCard />
 
         <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
           <div>

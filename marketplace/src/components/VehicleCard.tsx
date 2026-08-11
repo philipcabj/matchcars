@@ -29,10 +29,20 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sin foto</div>
         )}
-        {vehicle.isFeatured && (
-          <span className="absolute left-3 top-3 rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground shadow">
-            Destacado
-          </span>
+        <div className="absolute left-3 top-3 flex flex-col items-start gap-1.5">
+          {vehicle.isFeatured && (
+            <span className="rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground shadow">Destacado</span>
+          )}
+          {vehicle.sellerIsDealer && (
+            <span className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow">
+              ✓ Agencia verificada
+            </span>
+          )}
+        </div>
+        {vehicle.sellerIsDealer && vehicle.sellerLogoUrl && (
+          <div className="absolute bottom-3 left-3 h-9 w-9 overflow-hidden rounded-full border-2 border-white bg-card shadow">
+            <Image src={vehicle.sellerLogoUrl} alt="" fill sizes="36px" className="object-cover" />
+          </div>
         )}
         <CompareCheckbox vehicleId={vehicle.id} className="absolute right-3 top-3 bg-card/95 shadow" />
       </div>
@@ -46,9 +56,16 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
         <p className="mt-1 text-lg font-extrabold text-accent">
           {vehicle.currency} {vehicle.price.toLocaleString("es-AR")}
         </p>
-        <p className="truncate text-xs text-muted-foreground">
-          {[vehicle.city, vehicle.province].filter(Boolean).join(", ") || "Ubicación no informada"}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-xs text-muted-foreground">
+            {[vehicle.city, vehicle.province].filter(Boolean).join(", ") || "Ubicación no informada"}
+          </p>
+          {vehicle.sellerRating > 0 && (
+            <span className="flex shrink-0 items-center gap-0.5 text-xs font-semibold text-muted-foreground">
+              ★ {vehicle.sellerRating.toFixed(1)}
+            </span>
+          )}
+        </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {vehicle.acceptsFinancing && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">Financiación</span>

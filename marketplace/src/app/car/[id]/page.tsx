@@ -1,5 +1,6 @@
+import { CarDetailTabs } from "@/components/CarDetailTabs";
 import { PhotoGallery } from "@/components/Lightbox";
-import { StarRating } from "@/components/StarRating";
+import { ShareButton } from "@/components/ShareButton";
 import { VehicleCard } from "@/components/VehicleCard";
 import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
@@ -45,26 +46,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     },
   };
 }
-
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-3 text-center">
-      <p className="text-sm font-bold">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
-function SpecRow({ label, value }: { label: string; value: string }) {
-  if (!value) return null;
-  return (
-    <div className="flex justify-between gap-2 border-b border-border/60 py-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium">{value}</span>
-    </div>
-  );
-}
-
 
 export default async function CarDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -114,143 +95,22 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
         <div className="flex flex-col gap-4">
           <PhotoGallery photos={photos} alt={`${vehicle.brand} ${vehicle.model}`} />
 
-          <div>
-            <h1 className="text-2xl font-extrabold">
-              {vehicle.brand} {vehicle.model} {vehicle.version}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {vehicle.year} · {[vehicle.city, vehicle.province].filter(Boolean).join(", ")}
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-extrabold">
+                {vehicle.brand} {vehicle.model} {vehicle.version}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {vehicle.year} · {[vehicle.city, vehicle.province].filter(Boolean).join(", ")}
+              </p>
+            </div>
+            <ShareButton
+              url={`${APP_BASE_URL}/car/${vehicle.id}`}
+              title={`${vehicle.brand} ${vehicle.model} ${vehicle.version}`.trim()}
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile label="Kilómetros" value={vehicle.km ? `${vehicle.km.toLocaleString("es-AR")} km` : "—"} />
-            <StatTile label="Combustible" value={vehicle.fuelType || "—"} />
-            <StatTile label="Caja" value={vehicle.gearbox || "—"} />
-            <StatTile label="Dueño único" value={vehicle.singleOwner ? "Sí" : "—"} />
-          </div>
-
-          {vehicle.description && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-1 text-sm font-semibold">Descripción</p>
-              <p className="whitespace-pre-line text-sm text-foreground">{vehicle.description}</p>
-            </div>
-          )}
-
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-2 text-sm font-semibold">Ficha técnica</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-              <SpecRow label="Marca" value={vehicle.brand} />
-              <SpecRow label="Modelo" value={vehicle.model} />
-              <SpecRow label="Versión" value={vehicle.version} />
-              <SpecRow label="Año" value={vehicle.year ? String(vehicle.year) : ""} />
-              <SpecRow label="Motor" value={vehicle.engine} />
-              <SpecRow label="Combustible" value={vehicle.fuelType} />
-              <SpecRow label="Caja" value={vehicle.gearbox} />
-              <SpecRow label="Tracción" value={vehicle.wheelType} />
-              <SpecRow label="Airbags" value={vehicle.airbags} />
-              <SpecRow label="Levantavidrios" value={vehicle.windowsAuto} />
-              <SpecRow label="Tipo de operación" value={vehicle.operationType === "swap" ? "Permuta" : "Venta"} />
-              <SpecRow label="Motivo de venta" value={vehicle.sellingReason} />
-            </div>
-          </div>
-
-          {vehicle.features.length > 0 && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-2 text-sm font-semibold">Equipamiento</p>
-              <div className="flex flex-wrap gap-2">
-                {vehicle.features.map((f) => (
-                  <span key={f} className="rounded-full bg-background px-3 py-1 text-xs">
-                    {f}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(vehicle.serviceRecords || vehicle.vtvValid || vehicle.papersUpToDate || vehicle.warranty || vehicle.negotiablePrice || vehicle.immediateDelivery) && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-2 text-sm font-semibold">Características</p>
-              <div className="flex flex-wrap gap-2">
-                {vehicle.serviceRecords && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ Service oficial al día</span>}
-                {vehicle.vtvValid && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ VTV vigente</span>}
-                {vehicle.papersUpToDate && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ Papeles al día</span>}
-                {vehicle.warranty && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ Con garantía</span>}
-                {vehicle.negotiablePrice && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ Precio conversable</span>}
-                {vehicle.immediateDelivery && <span className="rounded-full bg-background px-3 py-1 text-xs">✓ Entrega inmediata</span>}
-              </div>
-            </div>
-          )}
-
-          {vehicle.priceHistory.length > 1 && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-2 text-sm font-semibold">Historial de precio</p>
-              <div className="flex flex-col gap-1">
-                {vehicle.priceHistory.map((h, i) => (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{h.changedAt ? new Date(h.changedAt).toLocaleDateString("es-AR") : "—"}</span>
-                    <span className="font-semibold">
-                      {h.currency} {Number(h.price).toLocaleString("es-AR")}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {vehicle.acceptsFinancing && vehicle.financing && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <p className="mb-2 text-sm font-semibold">Financiación</p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-                {vehicle.financing.entity && <SpecRow label="Entidad" value={vehicle.financing.entity} />}
-                {vehicle.financing.type && (
-                  <SpecRow
-                    label="Tipo"
-                    value={vehicle.financing.type === "sin_interes" ? "Sin interés" : vehicle.financing.type === "banco" ? "Bancaria" : "Propia"}
-                  />
-                )}
-                {!!vehicle.financing.downPayment && (
-                  <SpecRow label="Anticipo" value={`${vehicle.currency} ${vehicle.financing.downPayment.toLocaleString("es-AR")}`} />
-                )}
-                {!!vehicle.financing.monthlyPayment && (
-                  <SpecRow label="Cuota estimada" value={`${vehicle.currency} ${vehicle.financing.monthlyPayment.toLocaleString("es-AR")}`} />
-                )}
-                {!!vehicle.financing.months && <SpecRow label="Plazo" value={`${vehicle.financing.months} meses`} />}
-                {!!vehicle.financing.rate && <SpecRow label="Tasa" value={`${vehicle.financing.rate}%`} />}
-              </div>
-            </div>
-          )}
-
-          {(seller?.isDealer || vehicle.sellerReviewCount > 0 || reviews.length > 0) && (
-            <div className="rounded-2xl border border-border bg-card p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold">Reseñas del vendedor</p>
-                {vehicle.sellerRating > 0 && (
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <StarRating rating={vehicle.sellerRating} />
-                    <span>
-                      {vehicle.sellerRating.toFixed(1)} ({vehicle.sellerReviewCount})
-                    </span>
-                  </div>
-                )}
-              </div>
-              {reviews.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Todavía no hay reseñas.</p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {reviews.map((r) => (
-                    <div key={r.id} className="border-b border-border/60 pb-2 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold">{r.reviewerName}</p>
-                        <StarRating rating={r.rating} />
-                      </div>
-                      {r.comment && <p className="mt-0.5 text-sm text-muted-foreground">{r.comment}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <CarDetailTabs vehicle={vehicle} reviews={reviews} />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -285,11 +145,13 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
                     : "rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground"
                 }
               >
-                Seguir por la app
+                {waLink || mailLink ? "Hacer una oferta en la app" : "Ver en la app"}
               </a>
             </div>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              {waLink || mailLink ? "También podés seguir la conversación desde la app." : "Se abre en la app de Matchcars para continuar."}
+              {waLink || mailLink
+                ? "Para ofertas formales y seguimiento del chat, abrí la app."
+                : "Se abre en la app de Matchcars para continuar."}
             </p>
             <p className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-center text-[11px] text-muted-foreground">
               Para mensajes privados dentro de la app, descargá MatchCars:{" "}
