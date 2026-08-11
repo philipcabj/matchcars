@@ -1,25 +1,26 @@
 @import "tailwindcss";
 
 /*
- * Mismos tokens que portal/src/app/globals.css (portados de config/theme.ts)
- * para que el sitio se sienta de la misma familia visual que la app y el
- * portal. Tema claro fijo, igual criterio que el portal.
+ * PRUEBA: tema oscuro (a pedido, para ver cómo queda) — usa el mismo
+ * #0E1117 de marca que ya está en el splash de la app y el header de los
+ * emails. Si no convence, se revierte fácil volviendo a los valores de
+ * portal/src/app/globals.css (fondo claro, mismos tokens que el portal).
  */
 :root {
-  color-scheme: light;
-  --background: #fafafa;
-  --foreground: #111827;
-  --card: #ffffff;
-  --card-foreground: #111827;
-  --muted: #9ca3af;
-  --muted-foreground: #6b7280;
-  --border: #e5e7eb;
+  color-scheme: dark;
+  --background: #0e1117;
+  --foreground: #f3f4f6;
+  --card: #171b24;
+  --card-foreground: #f3f4f6;
+  --muted: #6b7280;
+  --muted-foreground: #9ca3af;
+  --border: #262b36;
   --accent: #f97316;
   --accent-foreground: #ffffff;
-  --primary: #2563eb;
+  --primary: #3b82f6;
   --primary-foreground: #ffffff;
   --success: #22c55e;
-  --error: #b91c1c;
+  --error: #f87171;
 }
 
 @theme inline {
