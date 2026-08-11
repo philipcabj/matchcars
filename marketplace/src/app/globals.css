@@ -1,12 +1,30 @@
 @import "tailwindcss";
 
 /*
- * PRUEBA: tema oscuro (a pedido, para ver cómo queda) — usa el mismo
- * #0E1117 de marca que ya está en el splash de la app y el header de los
- * emails. Si no convence, se revierte fácil volviendo a los valores de
- * portal/src/app/globals.css (fondo claro, mismos tokens que el portal).
+ * Tema claro (crema, oficial) por default, con oscuro como alternativa
+ * elegible por el usuario (ver ThemeToggle.tsx) — persiste en localStorage,
+ * se aplica antes del primer paint (script inline en layout.tsx) para que no
+ * haya flash del tema equivocado. El oscuro usa el mismo #0E1117 de marca
+ * que ya está en el splash de la app y el header de los emails.
  */
 :root {
+  color-scheme: light;
+  --background: #f5f0e6;
+  --foreground: #1f1b16;
+  --card: #fffdf8;
+  --card-foreground: #1f1b16;
+  --muted: #a8987c;
+  --muted-foreground: #6b5f4d;
+  --border: #e8dfce;
+  --accent: #f97316;
+  --accent-foreground: #ffffff;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --success: #16a34a;
+  --error: #b91c1c;
+}
+
+:root.dark {
   color-scheme: dark;
   --background: #0e1117;
   --foreground: #f3f4f6;
@@ -45,4 +63,5 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }

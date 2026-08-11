@@ -3,6 +3,7 @@
 import { useCompare } from "@/contexts/CompareContext";
 import Link from "next/link";
 import { useState } from "react";
+import { ThemeToggle } from "./ThemeToggle";
 
 const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "http://localhost:3000";
 
@@ -40,25 +41,29 @@ export function NavBar() {
           <a href={PORTAL_URL} className="rounded-full bg-accent/10 px-3 py-1.5 text-sm font-semibold text-accent hover:bg-accent/20">
             Portal de Agencias →
           </a>
+          <ThemeToggle />
         </nav>
 
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}
-          aria-expanded={menuOpen}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-foreground md:hidden"
-        >
-          {menuOpen ? (
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M2 2l14 14M16 2L2 16" strokeLinecap="round" />
-            </svg>
-          ) : (
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M2 4h14M2 9h14M2 14h14" strokeLinecap="round" />
-            </svg>
-          )}
-        </button>
+        <div className="flex items-center gap-2 md:hidden">
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}
+            aria-expanded={menuOpen}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-foreground"
+          >
+            {menuOpen ? (
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 2l14 14M16 2L2 16" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 4h14M2 9h14M2 14h14" strokeLinecap="round" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
       {menuOpen && (

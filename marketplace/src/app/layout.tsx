@@ -35,6 +35,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        {/* Corre antes del primer paint (beforeInteractive) para que no haya
+            flash del tema equivocado — crema es el default, oscuro solo si
+            el usuario lo eligió antes (ThemeToggle.tsx persiste en localStorage). */}
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`
+            try {
+              if (localStorage.getItem('mc-theme') === 'dark') {
+                document.documentElement.classList.add('dark');
+              }
+            } catch (e) {}
+          `}
+        </Script>
         <Script async src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`} strategy="afterInteractive" />
         <Script id="ga-init" strategy="afterInteractive">
           {`

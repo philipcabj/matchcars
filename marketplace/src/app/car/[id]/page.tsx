@@ -291,7 +291,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
               {waLink || mailLink ? "También podés seguir la conversación desde la app." : "Se abre en la app de Matchcars para continuar."}
             </p>
-            <p className="mt-3 rounded-lg bg-background px-3 py-2 text-center text-[11px] text-muted-foreground">
+            <p className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-center text-[11px] text-muted-foreground">
               Para mensajes privados dentro de la app, descargá MatchCars:{" "}
               <a href={APPLE_URL} className="font-semibold text-accent">
                 App Store
