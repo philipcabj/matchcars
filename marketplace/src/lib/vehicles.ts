@@ -322,6 +322,48 @@ export async function getSellerProfile(userId: string): Promise<SellerProfile | 
   };
 }
 
+export interface UserProfile {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+  description: string;
+  rating: number;
+  reviewCount: number;
+  isDealer: boolean;
+  slug: string | null;
+  whatsapp: string;
+  email: string;
+}
+
+// Perfil público de un vendedor particular (matchcars.app/user-profile/{uid}).
+// Si resulta ser una agencia (isDealer), la página redirige a /agencia/{slug}
+// — esta función igual expone isDealer/slug para que la página pueda hacerlo.
+export async function getUserProfile(uid: string): Promise<UserProfile | null> {
+  if (!uid) return null;
+  const snap = await adminDb.doc(`users/${uid}`).get();
+  if (!snap.exists) return null;
+  const data = snap.data()!;
+  const plan: string = data.plan || "free";
+  const displayName =
+    data.displayName ||
+    (data.firstName || data.lastName ? `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim() : "") ||
+    data.email ||
+    "Usuario";
+
+  return {
+    id: snap.id,
+    displayName,
+    avatarUrl: data.avatarUrl || data.photoURL || null,
+    description: data.description || "",
+    rating: typeof data.sellerRating === "number" ? data.sellerRating : 0,
+    reviewCount: data.sellerReviewCount || 0,
+    isDealer: /pro_dealer/.test(plan),
+    slug: data.slug || null,
+    whatsapp: data.whatsapp || "",
+    email: data.email || "",
+  };
+}
+
 // Stock completo de un vendedor puntual — para la ficha de agencia. Ya se
 // sabe de antemano si es agencia y cuál es su logo, así que se pisan esos
 // campos acá en vez de pagar otro getAll() vía enrichWithSellerInfo.
