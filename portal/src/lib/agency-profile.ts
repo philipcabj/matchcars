@@ -16,6 +16,7 @@ export interface AgencyProfileFields {
   foundedYear: string;
   brandSpecialties: string[];
   watermarkEnabled: boolean;
+  businessCoordinates: { latitude: number; longitude: number } | null;
 }
 
 export const EMPTY_AGENCY_PROFILE: AgencyProfileFields = {
@@ -35,4 +36,5 @@ export const EMPTY_AGENCY_PROFILE: AgencyProfileFields = {
   foundedYear: "",
   brandSpecialties: [],
   watermarkEnabled: false,
+  businessCoordinates: null,
 };

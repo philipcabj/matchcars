@@ -11,7 +11,14 @@ import { PROVINCES, CITY_OPTIONS_BY_PROVINCE } from "@/lib/locations";
 import { AgencyProfileFields, EMPTY_AGENCY_PROFILE } from "@/lib/agency-profile";
 import { parseJsonResponse } from "@/lib/api-client";
 import { uploadAgencyBanner, uploadAgencyLogo } from "@/lib/upload";
+import dynamic from "next/dynamic";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+
+// Leaflet toca `window` al importarse — no puede renderizarse en el server.
+const LocationPicker = dynamic(() => import("@/components/LocationPicker").then((m) => m.LocationPicker), {
+  ssr: false,
+  loading: () => <div className="h-56 w-full animate-pulse rounded-lg border border-border bg-card" />,
+});
 
 // Misma lista que usa edit-profile.tsx de la app — para que las especialidades
 // elegidas acá coincidan con las que la app también puede mostrar/editar.
@@ -217,6 +224,11 @@ export default function AgencyProfilePage() {
         <Field label="Dirección">
           <input className={inputClass} value={values.businessAddress} onChange={(e) => set("businessAddress", e.target.value)} />
         </Field>
+
+        <div>
+          <p className="mb-2 text-sm font-medium">Ubicación en el mapa</p>
+          <LocationPicker value={values.businessCoordinates} onChange={(c) => set("businessCoordinates", c)} />
+        </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Provincia">

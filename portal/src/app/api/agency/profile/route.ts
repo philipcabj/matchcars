@@ -48,6 +48,12 @@ export const GET = withApiErrors(async (request) => {
   if (!snap.exists) return Response.json({ error: "Agencia no encontrada" }, { status: 404 });
   const data = snap.data()!;
 
+  const coords = data.businessCoordinates;
+  const businessCoordinates =
+    coords && typeof coords.latitude === "number" && typeof coords.longitude === "number"
+      ? { latitude: coords.latitude, longitude: coords.longitude }
+      : null;
+
   const profile: AgencyProfileFields = {
     agencyName: data.agencyName || "",
     description: data.description || "",
@@ -65,6 +71,7 @@ export const GET = withApiErrors(async (request) => {
     foundedYear: data.foundedYear ? String(data.foundedYear) : "",
     brandSpecialties: Array.isArray(data.brandSpecialties) ? data.brandSpecialties : [],
     watermarkEnabled: !!data.watermarkEnabled,
+    businessCoordinates,
   };
 
   return Response.json({ profile, canUseWatermark: canUseWatermark(data.plan || "free") });
@@ -81,6 +88,18 @@ export const PATCH = withApiErrors(async (request) => {
   const update: Record<string, unknown> = {};
   for (const field of STRING_FIELDS) {
     if (typeof body[field] === "string") update[field] = body[field].trim();
+  }
+  if (body.businessCoordinates === null) {
+    update.businessCoordinates = null;
+  } else if (
+    body.businessCoordinates &&
+    typeof body.businessCoordinates.latitude === "number" &&
+    typeof body.businessCoordinates.longitude === "number"
+  ) {
+    update.businessCoordinates = {
+      latitude: body.businessCoordinates.latitude,
+      longitude: body.businessCoordinates.longitude,
+    };
   }
   if (Array.isArray(body.brandSpecialties)) {
     update.brandSpecialties = body.brandSpecialties.filter((b: unknown) => typeof b === "string" && b.trim()).map((b: string) => b.trim());
