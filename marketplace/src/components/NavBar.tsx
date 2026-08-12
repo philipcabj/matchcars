@@ -21,11 +21,16 @@ export function NavBar() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        {/* El logo tiene fondo oscuro incorporado a la imagen — con el header
-            en tema oscuro se perdía por completo. bg-white fijo le da un
-            fondo consistente en los dos temas, no varía con --card. */}
-        <Link href="/" className="flex items-center rounded-xl bg-white p-1 shadow-sm">
-          <Image src="/brand/logo-icon.png" alt="MatchCars" width={40} height={40} className="rounded-lg" priority />
+        <Link href="/" className="flex items-center gap-2">
+          {/* El logo tiene fondo oscuro incorporado a la imagen — con el
+              header en tema oscuro se perdía por completo. bg-white fijo le
+              da un fondo consistente en los dos temas, no varía con --card. */}
+          <span className="flex items-center rounded-xl bg-white p-1 shadow-sm">
+            <Image src="/brand/logo-icon.png" alt="" width={36} height={36} className="rounded-lg" priority />
+          </span>
+          <span className="text-lg font-extrabold">
+            Match<span className="text-accent">Cars</span>
+          </span>
         </Link>
 
         <nav className="hidden items-center gap-5 md:flex">

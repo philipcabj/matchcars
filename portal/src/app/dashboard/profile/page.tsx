@@ -13,6 +13,15 @@ import { parseJsonResponse } from "@/lib/api-client";
 import { uploadAgencyBanner, uploadAgencyLogo } from "@/lib/upload";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
+// Misma lista que usa edit-profile.tsx de la app — para que las especialidades
+// elegidas acá coincidan con las que la app también puede mostrar/editar.
+const BRANDS = [
+  "Toyota", "Volkswagen", "Chevrolet", "Ford", "Renault", "Fiat", "Peugeot",
+  "Citroën", "Honda", "Nissan", "Hyundai", "Kia", "Suzuki", "Jeep", "RAM",
+  "BMW", "Mercedes-Benz", "Audi", "Volvo", "Land Rover", "Lexus", "Mazda",
+  "Mitsubishi", "Subaru", "Chery", "BYD", "MG", "Dodge",
+];
+
 function slugify(s: string): string {
   return s
     .trim()
@@ -247,15 +256,31 @@ export default function AgencyProfilePage() {
           </Field>
         </div>
 
-        <Field label="Marcas en las que te especializás">
-          <input
-            className={inputClass}
-            value={values.brandSpecialties.join(", ")}
-            onChange={(e) => set("brandSpecialties", e.target.value.split(",").map((b) => b.trim()).filter(Boolean))}
-            placeholder="Toyota, Ford, Volkswagen"
-          />
-          <span className="text-xs text-muted-foreground">Separadas por coma.</span>
-        </Field>
+        <div>
+          <p className="mb-2 text-sm font-medium">Marcas en las que te especializás</p>
+          <div className="flex flex-wrap gap-1.5">
+            {BRANDS.map((brand) => {
+              const selected = values.brandSpecialties.includes(brand);
+              return (
+                <button
+                  key={brand}
+                  type="button"
+                  onClick={() =>
+                    set(
+                      "brandSpecialties",
+                      selected ? values.brandSpecialties.filter((b) => b !== brand) : [...values.brandSpecialties, brand]
+                    )
+                  }
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    selected ? "border-accent bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  {brand}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {error && <p className="text-sm text-error">{error}</p>}
         {success && <p className="text-sm text-success">Guardado.</p>}
