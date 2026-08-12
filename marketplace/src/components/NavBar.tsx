@@ -1,6 +1,7 @@
 "use client";
 
 import { useCompare } from "@/contexts/CompareContext";
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
@@ -20,11 +21,9 @@ export function NavBar() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link
-          href="/"
-          className="bg-gradient-to-r from-pink-500 to-cyan-400 bg-clip-text text-lg font-extrabold text-transparent"
-        >
-          MatchCars
+        <Link href="/" className="flex items-center gap-2 text-lg font-extrabold">
+          <Image src="/brand/logo-icon.png" alt="" width={28} height={28} className="rounded-lg" />
+          Match<span className="text-accent">Cars</span>
         </Link>
 
         <nav className="hidden items-center gap-5 md:flex">

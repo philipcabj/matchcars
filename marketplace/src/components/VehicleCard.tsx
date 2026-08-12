@@ -29,19 +29,14 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sin foto</div>
         )}
-        <div className="absolute left-3 top-3 flex flex-col items-start gap-1.5">
-          {vehicle.isFeatured && (
-            <span className="rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground shadow">Destacado</span>
-          )}
-          {vehicle.sellerIsDealer && (
-            <span className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-bold text-primary-foreground shadow">
-              ✓ Agencia verificada
-            </span>
-          )}
-        </div>
+        {vehicle.isFeatured && (
+          <span className="absolute left-3 top-3 rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground shadow">
+            Destacado
+          </span>
+        )}
         {vehicle.sellerIsDealer && vehicle.sellerLogoUrl && (
-          <div className="absolute bottom-3 left-3 h-9 w-9 overflow-hidden rounded-full border-2 border-white bg-card shadow">
-            <Image src={vehicle.sellerLogoUrl} alt="" fill sizes="36px" className="object-cover" />
+          <div className="absolute bottom-3 left-3 h-8 w-8 overflow-hidden rounded-full border-2 border-card bg-card shadow">
+            <Image src={vehicle.sellerLogoUrl} alt="" fill sizes="32px" className="object-cover" />
           </div>
         )}
         <CompareCheckbox vehicleId={vehicle.id} className="absolute right-3 top-3 bg-card/95 shadow" />
@@ -67,6 +62,9 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
           )}
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
+          {vehicle.sellerIsDealer && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">✓ Agencia verificada</span>
+          )}
           {vehicle.acceptsFinancing && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">Financiación</span>
           )}

@@ -5,7 +5,7 @@ import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 // nunca se veía ninguna promoción para bajar la app.
 export function AppDownloadCard() {
   return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-[#0E1117] p-5 text-white shadow-lg">
+    <div className="flex flex-col gap-3 rounded-2xl border border-accent/50 bg-gradient-to-br from-[#1a2030] to-[#0E1117] p-5 text-white shadow-lg">
       <p className="text-base font-extrabold">
         📲 Llevá Match<span className="text-accent">Cars</span> en el bolsillo
       </p>

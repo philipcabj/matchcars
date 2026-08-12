@@ -150,7 +150,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
       {similar.length > 0 && (
         <div className="flex flex-col gap-3 pt-4">
           <p className="text-lg font-bold">Autos similares</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {similar.map((v) => (
               <VehicleCard key={v.id} vehicle={v} />
             ))}

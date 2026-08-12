@@ -122,7 +122,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             No encontramos autos con esos filtros.
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {vehicles.map((v) => (
               <VehicleCard key={v.id} vehicle={v} />
             ))}

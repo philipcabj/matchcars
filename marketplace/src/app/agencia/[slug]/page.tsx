@@ -52,8 +52,17 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="relative h-32 w-full bg-gradient-to-r from-accent/30 to-primary/20 sm:h-44">
-          {agency.bannerUrl && <Image src={agency.bannerUrl} alt="" fill sizes="100vw" className="object-cover" />}
+        <div className="relative flex h-40 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-accent/25 via-primary/15 to-accent/10 sm:h-56">
+          {agency.bannerUrl ? (
+            <Image src={agency.bannerUrl} alt="" fill sizes="100vw" className="object-cover" />
+          ) : (
+            <div className="flex flex-col items-center gap-2 px-6 text-center">
+              <p className="text-2xl font-extrabold sm:text-4xl">{agency.name}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:text-sm">
+                Agencia verificada en MatchCars
+              </p>
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:gap-6">
           <div className="relative -mt-14 h-24 w-24 shrink-0 overflow-hidden rounded-2xl border-4 border-card bg-background shadow sm:-mt-16 sm:h-28 sm:w-28">
