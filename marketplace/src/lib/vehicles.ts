@@ -322,6 +322,14 @@ export async function getSellerProfile(userId: string): Promise<SellerProfile | 
   };
 }
 
+// Stock completo de un vendedor puntual — para la ficha de agencia. Ya se
+// sabe de antemano si es agencia y cuál es su logo, así que se pisan esos
+// campos acá en vez de pagar otro getAll() vía enrichWithSellerInfo.
+export async function getVehiclesBySeller(userId: string, sellerIsDealer: boolean, sellerLogoUrl: string | null): Promise<PublicVehicle[]> {
+  const vehicles = await fetchPublishedVehicles();
+  return vehicles.filter((v) => v.userId === userId).map((v) => ({ ...v, sellerIsDealer, sellerLogoUrl }));
+}
+
 // Cantidad de autos publicados por vendedor — para el directorio de agencias.
 // Reusa el mismo lote cacheado (fetchPublishedVehicles) en vez de una query
 // por agencia.

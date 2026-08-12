@@ -115,3 +115,56 @@ export async function getFeaturedAgencies(take = 4): Promise<Agency[]> {
   const sorted = [...agencies].sort((a, b) => planRank(b.plan) - planRank(a.plan) || b.activeCars - a.activeCars);
   return sorted.slice(0, take);
 }
+
+export interface AgencyProfile extends Agency {
+  bannerUrl: string | null;
+  description: string;
+  businessAddress: string;
+  businessHours: string;
+  website: string;
+  instagram: string;
+  whatsapp: string;
+  email: string;
+}
+
+// Ficha propia de una agencia (matchcars.app/agencia/{slug}). El parámetro
+// puede ser el slug elegido por la agencia o, si no tiene uno cargado, su
+// uid directo — mismo criterio de fallback que ya usan AgencyCard y el
+// bloque de vendedor de la ficha del auto (`slug || vehicle.userId`).
+export async function getAgencyProfile(slugOrId: string): Promise<AgencyProfile | null> {
+  const bySlug = await adminDb.collection("users").where("slug", "==", slugOrId).limit(1).get();
+  const doc = !bySlug.empty ? bySlug.docs[0] : await adminDb.doc(`users/${slugOrId}`).get();
+  if (!doc.exists) return null;
+
+  const data = doc.data()!;
+  const plan: string = data.plan || "free";
+  if (planRank(plan) === 0) return null; // no es agencia (o plan no reconocido) — no tiene ficha propia
+
+  const carCounts = await getVehicleCountsByUser();
+  const name =
+    data.agencyName ||
+    (data.firstName || data.lastName ? `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim() : data.displayName || data.email || "Agencia");
+
+  return {
+    id: doc.id,
+    slug: data.slug || null,
+    name,
+    city: data.location?.city ?? data.city ?? "",
+    province: data.location?.province ?? data.province ?? "",
+    photoURL: data.photoURL || data.avatar || data.logoUrl || null,
+    rating: typeof data.sellerRating === "number" ? data.sellerRating : 0,
+    reviewCount: data.sellerReviewCount || 0,
+    activeCars: carCounts[doc.id] ?? 0,
+    brandSpecialties: Array.isArray(data.brandSpecialties) ? data.brandSpecialties : [],
+    foundedYear: data.foundedYear || null,
+    plan,
+    bannerUrl: data.bannerUrl || null,
+    description: data.description || "",
+    businessAddress: data.businessAddress || "",
+    businessHours: data.businessHours || "",
+    website: data.website || "",
+    instagram: data.instagram || "",
+    whatsapp: data.whatsapp || "",
+    email: data.email || "",
+  };
+}
