@@ -108,7 +108,7 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col gap-4 lg:order-1">
+        <div className="flex flex-col gap-4">
           {agency.description && (
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-1 text-sm font-semibold">Sobre la agencia</p>

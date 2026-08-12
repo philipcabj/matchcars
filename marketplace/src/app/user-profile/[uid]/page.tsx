@@ -80,7 +80,7 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col gap-4 lg:order-1">
+        <div className="flex flex-col gap-4">
           {profile.description && (
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-1 text-sm font-semibold">Sobre el vendedor</p>
