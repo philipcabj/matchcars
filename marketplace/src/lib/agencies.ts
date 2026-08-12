@@ -125,6 +125,8 @@ export interface AgencyProfile extends Agency {
   instagram: string;
   whatsapp: string;
   email: string;
+  soldCount: number;
+  businessCoordinates: { latitude: number; longitude: number } | null;
 }
 
 // Ficha propia de una agencia (matchcars.app/agencia/{slug}). El parámetro
@@ -140,10 +142,18 @@ export async function getAgencyProfile(slugOrId: string): Promise<AgencyProfile 
   const plan: string = data.plan || "free";
   if (planRank(plan) === 0) return null; // no es agencia (o plan no reconocido) — no tiene ficha propia
 
-  const carCounts = await getVehicleCountsByUser();
+  const [carCounts, soldSnap] = await Promise.all([
+    getVehicleCountsByUser(),
+    adminDb.collection("vehicles").where("userId", "==", doc.id).where("status", "==", "sold").count().get(),
+  ]);
   const name =
     data.agencyName ||
     (data.firstName || data.lastName ? `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim() : data.displayName || data.email || "Agencia");
+  const coords = data.businessCoordinates;
+  const businessCoordinates =
+    coords && typeof coords.latitude === "number" && typeof coords.longitude === "number"
+      ? { latitude: coords.latitude, longitude: coords.longitude }
+      : null;
 
   return {
     id: doc.id,
@@ -166,5 +176,7 @@ export async function getAgencyProfile(slugOrId: string): Promise<AgencyProfile 
     instagram: data.instagram || "",
     whatsapp: data.whatsapp || "",
     email: data.email || "",
+    soldCount: soldSnap.data().count,
+    businessCoordinates,
   };
 }

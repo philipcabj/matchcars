@@ -1,8 +1,10 @@
 import { SellerContactButtons } from "@/components/SellerContactButtons";
-import { ShareButton } from "@/components/ShareButton";
+import { ShareModal } from "@/components/ShareModal";
 import { StarRating } from "@/components/StarRating";
 import { VehicleCard } from "@/components/VehicleCard";
+import { legacyAppUrl } from "@/lib/app-links";
 import { getAgencyProfile } from "@/lib/agencies";
+import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerReviews, getVehiclesBySeller } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
@@ -10,14 +12,25 @@ import { notFound } from "next/navigation";
 
 const APP_BASE_URL = "https://matchcars.app";
 
+function StatTile({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="flex flex-1 flex-col items-center gap-0.5 rounded-xl border border-border bg-background px-3 py-3 text-center">
+      <p className="text-xl font-extrabold text-accent">{value}</p>
+      <p className="text-[11px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 async function loadPageData(slug: string) {
   const agency = await getAgencyProfile(slug);
   if (!agency) return null;
-  const [vehicles, reviews] = await Promise.all([
+  const profileUrl = `${APP_BASE_URL}/agencia/${agency.slug ?? agency.id}`;
+  const [vehicles, reviews, qrSvg] = await Promise.all([
     getVehiclesBySeller(agency.id, true, agency.photoURL),
     getSellerReviews(agency.id),
+    generateQrSvg(profileUrl),
   ]);
-  return { agency, vehicles, reviews };
+  return { agency, vehicles, reviews, profileUrl, qrSvg };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -45,9 +58,9 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
   const { slug } = await params;
   const data = await loadPageData(slug);
   if (!data) notFound();
-  const { agency, vehicles, reviews } = data;
+  const { agency, vehicles, reviews, profileUrl, qrSvg } = data;
 
-  const appUrl = `${APP_BASE_URL}/app/user-profile/${agency.id}`;
+  const appUrl = legacyAppUrl(`/user-profile/${agency.id}`);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -94,7 +107,7 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
               </div>
             )}
           </div>
-          <ShareButton url={`${APP_BASE_URL}/agencia/${agency.slug ?? agency.id}`} title={agency.name} />
+          <ShareModal url={profileUrl} title={agency.name} qrSvg={qrSvg} />
         </div>
         {agency.brandSpecialties.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-5 pb-5">
@@ -109,6 +122,12 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-4">
+          <div className="flex gap-3">
+            <StatTile value={agency.activeCars} label="Publicados" />
+            <StatTile value={agency.soldCount} label="Vendidos" />
+            <StatTile value={agency.reviewCount} label="Reseñas" />
+          </div>
+
           {agency.description && (
             <div className="rounded-2xl border border-border bg-card p-4">
               <p className="mb-1 text-sm font-semibold">Sobre la agencia</p>
@@ -161,10 +180,30 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
 
           {(agency.businessAddress || agency.businessHours || agency.website || agency.instagram) && (
             <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm">
+              {agency.businessCoordinates && (
+                <div className="-mx-4 -mt-4 mb-1 h-40 w-[calc(100%+2rem)] overflow-hidden rounded-t-2xl">
+                  <iframe
+                    title={`Ubicación de ${agency.name}`}
+                    src={`https://maps.google.com/maps?q=${agency.businessCoordinates.latitude},${agency.businessCoordinates.longitude}&z=15&output=embed`}
+                    className="h-full w-full border-0"
+                    loading="lazy"
+                  />
+                </div>
+              )}
               {agency.businessAddress && (
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground">Dirección</p>
                   <p>{agency.businessAddress}</p>
+                  {!agency.businessCoordinates && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(agency.businessAddress)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-semibold text-accent"
+                    >
+                      Ver en Google Maps
+                    </a>
+                  )}
                 </div>
               )}
               {agency.businessHours && (

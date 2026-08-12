@@ -1,7 +1,9 @@
 import { SellerContactButtons } from "@/components/SellerContactButtons";
-import { ShareButton } from "@/components/ShareButton";
+import { ShareModal } from "@/components/ShareModal";
 import { StarRating } from "@/components/StarRating";
 import { VehicleCard } from "@/components/VehicleCard";
+import { legacyAppUrl } from "@/lib/app-links";
+import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerReviews, getUserProfile, getVehiclesBySeller } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
@@ -11,17 +13,26 @@ const APP_BASE_URL = "https://matchcars.app";
 
 type PageData =
   | { kind: "redirect"; to: string }
-  | { kind: "profile"; profile: Awaited<ReturnType<typeof getUserProfile>> & object; vehicles: Awaited<ReturnType<typeof getVehiclesBySeller>>; reviews: Awaited<ReturnType<typeof getSellerReviews>> };
+  | {
+      kind: "profile";
+      profile: Awaited<ReturnType<typeof getUserProfile>> & object;
+      vehicles: Awaited<ReturnType<typeof getVehiclesBySeller>>;
+      reviews: Awaited<ReturnType<typeof getSellerReviews>>;
+      profileUrl: string;
+      qrSvg: string;
+    };
 
 async function loadPageData(uid: string): Promise<PageData | null> {
   const profile = await getUserProfile(uid);
   if (!profile) return null;
   if (profile.isDealer) return { kind: "redirect", to: `/agencia/${profile.slug ?? profile.id}` };
-  const [vehicles, reviews] = await Promise.all([
+  const profileUrl = `${APP_BASE_URL}/user-profile/${profile.id}`;
+  const [vehicles, reviews, qrSvg] = await Promise.all([
     getVehiclesBySeller(profile.id, false, null),
     getSellerReviews(profile.id),
+    generateQrSvg(profileUrl),
   ]);
-  return { kind: "profile", profile, vehicles, reviews };
+  return { kind: "profile", profile, vehicles, reviews, profileUrl, qrSvg };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ uid: string }> }): Promise<Metadata> {
@@ -48,9 +59,9 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
   const data = await loadPageData(uid);
   if (!data) notFound();
   if (data.kind === "redirect") redirect(data.to);
-  const { profile, vehicles, reviews } = data;
+  const { profile, vehicles, reviews, profileUrl, qrSvg } = data;
 
-  const appUrl = `${APP_BASE_URL}/app/user-profile/${profile.id}`;
+  const appUrl = legacyAppUrl(`/user-profile/${profile.id}`);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -76,7 +87,7 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
             </div>
           )}
         </div>
-        <ShareButton url={`${APP_BASE_URL}/user-profile/${profile.id}`} title={profile.displayName} />
+        <ShareModal url={profileUrl} title={profile.displayName} qrSvg={qrSvg} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">

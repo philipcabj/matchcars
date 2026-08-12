@@ -3,6 +3,7 @@ import { PhotoGallery } from "@/components/Lightbox";
 import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareButton } from "@/components/ShareButton";
 import { VehicleCard } from "@/components/VehicleCard";
+import { legacyAppUrl } from "@/lib/app-links";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
@@ -70,9 +71,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   };
 
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean);
-  // La app transaccional (Expo web) vive bajo /app — /car/{id} sin prefijo
-  // ahora es la ficha propia de este marketplace, no la SPA.
-  const appUrl = `${APP_BASE_URL}/app/car/${vehicle.id}`;
+  const appUrl = legacyAppUrl(`/car/${vehicle.id}`);
   const sellerLink = seller
     ? seller.isDealer
       ? `${APP_BASE_URL}/agencia/${seller.slug || vehicle.userId}`
