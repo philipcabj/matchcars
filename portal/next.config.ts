@@ -8,11 +8,12 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname),
   },
-  // El portal vive en matchcars.app/portal (proxeado desde marketplace/,
-  // que es dueño exclusivo del dominio en App Hosting) — basePath hace que
-  // Next.js arme todas sus rutas y assets con ese prefijo automáticamente,
-  // sin necesitar dominio/subdominio propio.
-  basePath: "/portal",
+  // El portal vive en su propio subdominio (portal.matchcars.app) — se
+  // probó primero como matchcars.app/portal proxeado desde marketplace/,
+  // pero las llamadas servidor-a-servidor entre dos backends de App Hosting
+  // chocan con un chequeo de identidad interno de Google Cloud (401,
+  // "access token could not be verified") que no se pudo resolver sin
+  // acceso a la consola de IAM. Subdominio propio lo evita del todo.
 };
 
 export default nextConfig;

@@ -59,7 +59,7 @@ export default function AgencyProfilePage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const res = await fetch("/portal/api/agency/profile", { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch("/api/agency/profile", { headers: { Authorization: `Bearer ${token}` } });
         const data = await parseJsonResponse<{ profile: AgencyProfileFields; canUseWatermark: boolean }>(res);
         setValues({ ...EMPTY_AGENCY_PROFILE, ...data.profile });
         setCanWatermark(data.canUseWatermark);
@@ -108,7 +108,7 @@ export default function AgencyProfilePage() {
     setSuccess(false);
     try {
       const token = await getIdToken();
-      const res = await fetch("/portal/api/agency/profile", {
+      const res = await fetch("/api/agency/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(values),

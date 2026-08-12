@@ -25,7 +25,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
   useEffect(() => {
     (async () => {
       const token = await getIdToken();
-      const res = await fetch("/portal/api/agency/vehicles", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/api/agency/vehicles", { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setVehicles((await parseJsonResponse<{ vehicles: VehicleListItem[] }>(res)).vehicles);
     })();
   }, [getIdToken]);
@@ -40,7 +40,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch("/portal/api/agency/leads", {
+      const res = await fetch("/api/agency/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name, phone, email, vehicleId: vehicleId || undefined, notes }),

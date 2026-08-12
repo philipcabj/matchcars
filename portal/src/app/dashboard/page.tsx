@@ -120,13 +120,13 @@ export default function DashboardPage() {
       const token = await getIdToken();
       const headers = { Authorization: `Bearer ${token}` };
       if (data.myPermissions.viewStats) {
-        fetch("/portal/api/agency/reports", { headers })
+        fetch("/api/agency/reports", { headers })
           .then((res) => parseJsonResponse<AgencyReports>(res))
           .then(setReports)
           .catch(() => {});
       }
       if (data.myPermissions.manageLeads) {
-        fetch("/portal/api/agency/leads", { headers })
+        fetch("/api/agency/leads", { headers })
           .then((res) => parseJsonResponse<{ leads: LeadListItem[]; stats: LeadStats; salesByMonth: SalesByMonth[] }>(res))
           .then(setLeads)
           .catch(() => {});

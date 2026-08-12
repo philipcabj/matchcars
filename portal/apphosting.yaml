@@ -1,6 +1,5 @@
-# Config de Firebase App Hosting para portal/ — vive en matchcars.app/portal
-# (basePath en next.config.ts), proxeado desde marketplace/. Ver el plan de
-# deploy para el resto del contexto.
+# Config de Firebase App Hosting para portal/ — vive en su propio subdominio
+# (portal.matchcars.app), no proxeado desde marketplace/ (ver next.config.ts).
 env:
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: AIzaSyCd4KkX_631fNBA7yaPowzCJpNOem12-sw
@@ -33,7 +32,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_SITE_URL
-    value: https://matchcars.app/portal
+    value: https://portal.matchcars.app
     availability:
       - BUILD
       - RUNTIME

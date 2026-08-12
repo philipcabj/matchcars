@@ -24,7 +24,7 @@ export default function EditVehiclePage() {
     (async () => {
       try {
         const token = await getIdToken();
-        const vehicleRes = await fetch(`/portal/api/agency/vehicles/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+        const vehicleRes = await fetch(`/api/agency/vehicles/${id}`, { headers: { Authorization: `Bearer ${token}` } });
         const data = await parseJsonResponse<VehicleFormValues>(vehicleRes);
         setInitialValues({ ...EMPTY_VEHICLE_FORM, ...data });
       } catch (e) {
@@ -38,7 +38,7 @@ export default function EditVehiclePage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/portal/api/agency/vehicles/${id}`, {
+      const res = await fetch(`/api/agency/vehicles/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(values),

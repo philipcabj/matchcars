@@ -11,11 +11,12 @@ import path from "node:path";
 // no garantizaba pasar el User-Agent real a la función ogPreview.)
 const LEGACY_SITE = "https://matchcars-a7847.web.app";
 
-// URL default de App Hosting del backend del portal — igual que LEGACY_SITE,
-// es estable (no depende de si matchcars.app/portal ya está migrado o no).
-// El portal ya tiene basePath: "/portal" en su propio next.config.ts, así
-// que espera el prefijo en la URL — por eso queda en origen y destino acá.
-const PORTAL_SITE = "https://matchcars-portal--matchcars-a7847.us-central1.hosted.app";
+// El portal vive en su propio subdominio (portal.matchcars.app), no
+// proxeado desde acá — se probó como /portal primero, pero las llamadas
+// servidor-a-servidor entre dos backends de App Hosting chocan con un
+// chequeo de identidad interno de Google Cloud (401) que no se pudo
+// resolver sin acceso a la consola de IAM. Ver NavBar.tsx / Sidebar.tsx del
+// portal para el link cruzado.
 
 const nextConfig: NextConfig = {
   // El repo raíz también tiene su propio package-lock.json (la app Expo) y
@@ -25,11 +26,7 @@ const nextConfig: NextConfig = {
     root: path.join(__dirname),
   },
   async rewrites() {
-    return [
-      { source: "/app/:path*", destination: `${LEGACY_SITE}/:path*` },
-      { source: "/portal", destination: `${PORTAL_SITE}/portal` },
-      { source: "/portal/:path*", destination: `${PORTAL_SITE}/portal/:path*` },
-    ];
+    return [{ source: "/app/:path*", destination: `${LEGACY_SITE}/:path*` }];
   },
   images: {
     // Las fotos de autos viven en Firebase Storage (uploads/{uid}/...) —

@@ -16,7 +16,7 @@ env:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_PORTAL_URL
-    value: https://matchcars.app/portal
+    value: https://portal.matchcars.app
     availability:
       - BUILD
       - RUNTIME

@@ -21,7 +21,7 @@ export default function NewVehiclePage() {
     setError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch("/portal/api/agency/vehicles", {
+      const res = await fetch("/api/agency/vehicles", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(values),

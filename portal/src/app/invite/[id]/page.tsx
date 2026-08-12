@@ -36,7 +36,7 @@ export default function InvitePage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/portal/api/invite/${id}`);
+        const res = await fetch(`/api/invite/${id}`);
         const data = await parseJsonResponse<InviteInfo>(res);
         setInvite(data);
       } catch (e) {
@@ -50,7 +50,7 @@ export default function InvitePage() {
     setFormError(null);
     try {
       const token = await getIdToken();
-      const res = await fetch(`/portal/api/invite/${id}/accept`, {
+      const res = await fetch(`/api/invite/${id}/accept`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
