@@ -48,16 +48,23 @@ export function SellerContactButtons({
       <p className="text-center text-[11px] text-muted-foreground">
         {waLink || mailLink ? "Para ofertas formales y seguimiento del chat, abrí la app." : "Se abre en la app de Matchcars para continuar."}
       </p>
-      <p className="rounded-lg border border-border bg-background px-3 py-2 text-center text-[11px] text-muted-foreground">
-        Para mensajes privados dentro de la app, descargá MatchCars:{" "}
-        <a href={APPLE_URL} className="font-semibold text-accent">
-          App Store
-        </a>{" "}
-        ·{" "}
-        <a href={PLAY_URL} className="font-semibold text-accent">
-          Google Play
-        </a>
-      </p>
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
+        <p className="text-center text-[11px] text-muted-foreground">Para mensajes privados, descargá MatchCars</p>
+        <div className="flex gap-2">
+          <a
+            href={APPLE_URL}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-xs font-bold text-background transition hover:opacity-90"
+          >
+            🍏 App Store
+          </a>
+          <a
+            href={PLAY_URL}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-xs font-bold text-background transition hover:opacity-90"
+          >
+            🤖 Google Play
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
