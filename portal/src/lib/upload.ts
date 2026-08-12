@@ -30,3 +30,10 @@ export async function uploadAgencyLogo(userId: string, file: File): Promise<stri
   await uploadBytes(storageRef, file, { contentType: file.type || "image/png" });
   return getDownloadURL(storageRef);
 }
+
+// Mismo path que ya usa edit-profile.tsx de la app (`banners/${uid}_${ts}.jpg`).
+export async function uploadAgencyBanner(userId: string, file: File): Promise<string> {
+  const storageRef = ref(storage, `banners/${userId}_${Date.now()}.jpg`);
+  await uploadBytes(storageRef, file, { contentType: file.type || "image/jpeg" });
+  return getDownloadURL(storageRef);
+}

@@ -3,9 +3,10 @@
 // PATCH -> los actualiza en users/{agencyId}. Whitelist explícita de campos:
 //          nunca se puede tocar plan/role/email desde acá, a propósito.
 //
-// El logo se sube directo a Storage desde el cliente (logos/{agencyId}_...),
-// mismo path que ya usa edit-profile.tsx de la app — no hizo falta tocar
-// storage.rules (cae en la regla catch-all existente).
+// El logo/banner se suben directo a Storage desde el cliente
+// (logos|banners/{agencyId}_...), mismos paths que ya usa edit-profile.tsx
+// de la app — no hizo falta tocar storage.rules (cae en la regla catch-all
+// existente).
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -13,19 +14,32 @@ import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canUseWatermark } from "@/lib/plans";
 import { AgencyProfileFields } from "@/lib/agency-profile";
 
-const EDITABLE_FIELDS: (keyof AgencyProfileFields)[] = [
+const STRING_FIELDS: (keyof AgencyProfileFields)[] = [
   "agencyName",
   "description",
   "phone",
   "whatsapp",
   "website",
   "instagram",
-  "address",
+  "businessAddress",
   "province",
   "city",
   "businessHours",
   "logoUrl",
+  "bannerUrl",
+  "foundedYear",
 ];
+
+function slugify(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // sin acentos (marcas diacríticas tras NFD)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
@@ -41,11 +55,15 @@ export const GET = withApiErrors(async (request) => {
     whatsapp: data.whatsapp || "",
     website: data.website || "",
     instagram: data.instagram || "",
-    address: data.address || data.businessAddress || "",
+    businessAddress: data.businessAddress || data.address || "",
     province: data.province || "",
     city: data.city || "",
     businessHours: data.businessHours || "",
     logoUrl: data.logoUrl || "",
+    bannerUrl: data.bannerUrl || "",
+    slug: data.slug || "",
+    foundedYear: data.foundedYear ? String(data.foundedYear) : "",
+    brandSpecialties: Array.isArray(data.brandSpecialties) ? data.brandSpecialties : [],
     watermarkEnabled: !!data.watermarkEnabled,
   };
 
@@ -61,8 +79,26 @@ export const PATCH = withApiErrors(async (request) => {
 
   const body = await request.json();
   const update: Record<string, unknown> = {};
-  for (const field of EDITABLE_FIELDS) {
+  for (const field of STRING_FIELDS) {
     if (typeof body[field] === "string") update[field] = body[field].trim();
+  }
+  if (Array.isArray(body.brandSpecialties)) {
+    update.brandSpecialties = body.brandSpecialties.filter((b: unknown) => typeof b === "string" && b.trim()).map((b: string) => b.trim());
+  }
+  if (update.foundedYear !== undefined) {
+    const year = Number(update.foundedYear);
+    update.foundedYear = update.foundedYear && !Number.isNaN(year) ? year : null;
+  }
+
+  if (typeof body.slug === "string") {
+    const slug = slugify(body.slug);
+    if (slug) {
+      const existing = await adminDb.collection("users").where("slug", "==", slug).limit(1).get();
+      if (!existing.empty && existing.docs[0].id !== agencyId) {
+        return Response.json({ error: "Ese link ya está en uso por otra agencia." }, { status: 409 });
+      }
+    }
+    update.slug = slug || null;
   }
 
   // watermarkEnabled: nunca confiar en el cliente — igual que hace la Cloud

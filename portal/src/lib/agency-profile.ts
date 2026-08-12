@@ -6,11 +6,15 @@ export interface AgencyProfileFields {
   whatsapp: string;
   website: string;
   instagram: string;
-  address: string;
+  businessAddress: string;
   province: string;
   city: string;
   businessHours: string;
   logoUrl: string;
+  bannerUrl: string;
+  slug: string;
+  foundedYear: string;
+  brandSpecialties: string[];
   watermarkEnabled: boolean;
 }
 
@@ -21,10 +25,14 @@ export const EMPTY_AGENCY_PROFILE: AgencyProfileFields = {
   whatsapp: "",
   website: "",
   instagram: "",
-  address: "",
+  businessAddress: "",
   province: "",
   city: "",
   businessHours: "",
   logoUrl: "",
+  bannerUrl: "",
+  slug: "",
+  foundedYear: "",
+  brandSpecialties: [],
   watermarkEnabled: false,
 };

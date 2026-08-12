@@ -11,7 +11,7 @@ const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://local
 
 const NAV_ITEMS = [
   { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true },
-  { label: "Perfil", href: "/dashboard/profile", icon: "🏷️", enabled: true },
+  { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true },
   { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true },
   { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true },
   { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true },

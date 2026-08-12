@@ -1,16 +1,28 @@
 // portal/src/app/dashboard/profile/page.tsx
-// Perfil de agencia: logo, marca de agua y datos públicos (nombre, contacto,
-// ubicación, horario). Hoy esto SOLO se podía editar desde edit-profile.tsx
-// de la app — es la pieza que faltaba para que "marca de agua con tu logo"
-// (prometida por el plan) se pueda activar sin abrir la app.
+// Configuración de agencia: logo, banner, marca de agua y datos públicos
+// (nombre, contacto, ubicación, horario, link personalizado, especialidades).
+// Antes esto solo se podía editar desde edit-profile.tsx de la app —
+// paridad completa con esos campos para que un dealer pueda manejar todo
+// desde acá sin necesitar la app.
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { PROVINCES, CITY_OPTIONS_BY_PROVINCE } from "@/lib/locations";
 import { AgencyProfileFields, EMPTY_AGENCY_PROFILE } from "@/lib/agency-profile";
 import { parseJsonResponse } from "@/lib/api-client";
-import { uploadAgencyLogo } from "@/lib/upload";
+import { uploadAgencyBanner, uploadAgencyLogo } from "@/lib/upload";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+
+function slugify(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
 
 const inputClass =
   "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -29,6 +41,7 @@ export default function AgencyProfilePage() {
   const [values, setValues] = useState<AgencyProfileFields | null>(null);
   const [canWatermark, setCanWatermark] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -65,6 +78,19 @@ export default function AgencyProfilePage() {
     }
   };
 
+  const handleBannerChange = async (file: File | undefined) => {
+    if (!file || !user) return;
+    setBannerUploading(true);
+    try {
+      const url = await uploadAgencyBanner(user.uid, file);
+      set("bannerUrl", url);
+    } catch {
+      setError("No se pudo subir el banner.");
+    } finally {
+      setBannerUploading(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!values) return;
@@ -91,12 +117,27 @@ export default function AgencyProfilePage() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="mb-1 text-xl font-bold">Perfil de agencia</h1>
+      <h1 className="mb-1 text-xl font-bold">Configurar agencia</h1>
       <p className="mb-6 text-sm text-muted-foreground">
-        Estos datos se usan en tu perfil público y, el logo, para estampar tus fotos automáticamente.
+        Estos datos se usan en tu perfil público (matchcars.app/agencia/…) y, el logo, para estampar tus fotos automáticamente.
       </p>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <div>
+          <p className="mb-2 text-sm font-semibold">Banner de portada</p>
+          <label className="flex h-28 w-full cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-card text-xs text-muted-foreground">
+            {bannerUploading ? (
+              "Subiendo…"
+            ) : values.bannerUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={values.bannerUrl} alt="Banner" className="h-full w-full object-cover" />
+            ) : (
+              "Subir banner (recomendado 1200×400)"
+            )}
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleBannerChange(e.target.files?.[0])} />
+          </label>
+        </div>
+
         <div>
           <p className="mb-2 text-sm font-semibold">Logo / Marca de agua</p>
           <div className="flex items-center gap-4">
@@ -133,6 +174,18 @@ export default function AgencyProfilePage() {
           <input className={inputClass} value={values.agencyName} onChange={(e) => set("agencyName", e.target.value)} />
         </Field>
 
+        <Field label="Tu link personalizado (Vidriera Digital)">
+          <div className="flex items-center overflow-hidden rounded-lg border border-border bg-background">
+            <span className="shrink-0 pl-3 text-sm text-muted-foreground">matchcars.app/agencia/</span>
+            <input
+              className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none"
+              value={values.slug}
+              onChange={(e) => set("slug", slugify(e.target.value))}
+              placeholder="mi-agencia"
+            />
+          </div>
+        </Field>
+
         <Field label="Descripción">
           <textarea className={`${inputClass} min-h-20`} value={values.description} onChange={(e) => set("description", e.target.value)} />
         </Field>
@@ -153,7 +206,7 @@ export default function AgencyProfilePage() {
         </div>
 
         <Field label="Dirección">
-          <input className={inputClass} value={values.address} onChange={(e) => set("address", e.target.value)} />
+          <input className={inputClass} value={values.businessAddress} onChange={(e) => set("businessAddress", e.target.value)} />
         </Field>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -179,8 +232,29 @@ export default function AgencyProfilePage() {
           </Field>
         </div>
 
-        <Field label="Horario de atención">
-          <input className={inputClass} value={values.businessHours} onChange={(e) => set("businessHours", e.target.value)} placeholder="Lun a vie 9 a 18hs" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Horario de atención">
+            <input className={inputClass} value={values.businessHours} onChange={(e) => set("businessHours", e.target.value)} placeholder="Lun a vie 9 a 18hs" />
+          </Field>
+          <Field label="Año de fundación">
+            <input
+              className={inputClass}
+              value={values.foundedYear}
+              onChange={(e) => set("foundedYear", e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="2005"
+              inputMode="numeric"
+            />
+          </Field>
+        </div>
+
+        <Field label="Marcas en las que te especializás">
+          <input
+            className={inputClass}
+            value={values.brandSpecialties.join(", ")}
+            onChange={(e) => set("brandSpecialties", e.target.value.split(",").map((b) => b.trim()).filter(Boolean))}
+            placeholder="Toyota, Ford, Volkswagen"
+          />
+          <span className="text-xs text-muted-foreground">Separadas por coma.</span>
         </Field>
 
         {error && <p className="text-sm text-error">{error}</p>}
@@ -188,7 +262,7 @@ export default function AgencyProfilePage() {
 
         <button
           type="submit"
-          disabled={saving || logoUploading}
+          disabled={saving || logoUploading || bannerUploading}
           className="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-60"
         >
           {saving ? "Guardando…" : "Guardar cambios"}
