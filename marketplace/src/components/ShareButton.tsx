@@ -27,9 +27,12 @@ export function ShareButton({ url, title }: { url: string; title: string }) {
     <button
       type="button"
       onClick={handleShare}
-      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition hover:border-accent hover:text-accent"
+      className="flex shrink-0 items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-bold text-accent-foreground shadow transition hover:bg-accent/90"
     >
-      {copied ? "¡Copiado!" : "↗ Compartir publicación"}
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M4 8v5.5a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V8M8 1v9M8 1L5 4M8 1l3 3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      {copied ? "¡Copiado!" : "Compartir"}
     </button>
   );
 }

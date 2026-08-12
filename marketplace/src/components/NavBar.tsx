@@ -21,9 +21,8 @@ export function NavBar() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2 text-lg font-extrabold">
-          <Image src="/brand/logo-icon.png" alt="" width={28} height={28} className="rounded-lg" />
-          Match<span className="text-accent">Cars</span>
+        <Link href="/" className="flex items-center">
+          <Image src="/brand/logo-icon.png" alt="MatchCars" width={44} height={44} className="rounded-xl" priority />
         </Link>
 
         <nav className="hidden items-center gap-5 md:flex">
