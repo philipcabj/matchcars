@@ -41,3 +41,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # Google Maps JavaScript API — picker de ubicación de agencia
+  # (LocationPicker.tsx). Restringida en Google Cloud a
+  # localhost:3000/* y portal.matchcars.app/*, solo Maps JavaScript API.
+  - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    value: AIzaSyBW0goyLrBb7BGJ1SVjnhMns0yMmjvXPFs
+    availability:
+      - BUILD
+      - RUNTIME
