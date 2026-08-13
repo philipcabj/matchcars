@@ -1,9 +1,9 @@
 import { CarDetailTabs } from "@/components/CarDetailTabs";
 import { PhotoGallery } from "@/components/Lightbox";
 import { SellerContactButtons } from "@/components/SellerContactButtons";
-import { ShareButton } from "@/components/ShareButton";
+import { ShareModal } from "@/components/ShareModal";
 import { VehicleCard } from "@/components/VehicleCard";
-import { legacyAppUrl } from "@/lib/app-links";
+import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
@@ -18,12 +18,13 @@ const APP_BASE_URL = "https://matchcars.app";
 async function loadPageData(id: string) {
   const vehicle = await getVehicle(id);
   if (!vehicle) return null;
-  const [seller, similar, reviews] = await Promise.all([
+  const [seller, similar, reviews, qrSvg] = await Promise.all([
     getSellerProfile(vehicle.userId),
     getSimilarVehicles(vehicle),
     getSellerReviews(vehicle.userId),
+    generateQrSvg(`${APP_BASE_URL}/car/${vehicle.id}`),
   ]);
-  return { vehicle, seller, similar, reviews };
+  return { vehicle, seller, similar, reviews, qrSvg };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -52,7 +53,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   const { id } = await params;
   const data = await loadPageData(id);
   if (!data) notFound();
-  const { vehicle, seller, similar, reviews } = data;
+  const { vehicle, seller, similar, reviews, qrSvg } = data;
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -71,7 +72,6 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   };
 
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean);
-  const appUrl = legacyAppUrl(`/car/${vehicle.id}`);
   const sellerLink = seller
     ? seller.isDealer
       ? `${APP_BASE_URL}/agencia/${seller.slug || vehicle.userId}`
@@ -97,11 +97,13 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
               </h1>
               <p className="text-sm text-muted-foreground">
                 {vehicle.year} · {[vehicle.city, vehicle.province].filter(Boolean).join(", ")}
+                {vehicle.publicationCode && <span className="ml-2 font-mono text-xs text-muted-foreground/70">#{vehicle.publicationCode}</span>}
               </p>
             </div>
-            <ShareButton
+            <ShareModal
               url={`${APP_BASE_URL}/car/${vehicle.id}`}
               title={`${vehicle.brand} ${vehicle.model} ${vehicle.version}`.trim()}
+              qrSvg={qrSvg}
             />
           </div>
 
@@ -120,7 +122,6 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
               <SellerContactButtons
                 whatsapp={seller?.whatsapp ?? ""}
                 email={seller?.email ?? ""}
-                appUrl={appUrl}
                 waMessage={`Hola! Vi tu ${vehicle.brand} ${vehicle.model} en MatchCars y quería consultarte.`}
               />
             </div>

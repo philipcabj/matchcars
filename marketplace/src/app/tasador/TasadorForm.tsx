@@ -83,6 +83,9 @@ export function TasadorForm() {
         <p className="mt-1 text-sm text-muted-foreground">
           Elegí marca, modelo y año para ver un rango de precio estimado, basado en una guía de precios de mercado y en publicaciones de Matchcars.
         </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Esta estimación es gratis y no requiere cuenta. Para publicar tu auto necesitás la app de MatchCars.
+        </p>
       </div>
 
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">

@@ -2,7 +2,6 @@ import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareModal } from "@/components/ShareModal";
 import { StarRating } from "@/components/StarRating";
 import { VehicleCard } from "@/components/VehicleCard";
-import { legacyAppUrl } from "@/lib/app-links";
 import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerReviews, getUserProfile, getVehiclesBySeller } from "@/lib/vehicles";
 import type { Metadata } from "next";
@@ -60,8 +59,6 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
   if (!data) notFound();
   if (data.kind === "redirect") redirect(data.to);
   const { profile, vehicles, reviews, profileUrl, qrSvg } = data;
-
-  const appUrl = legacyAppUrl(`/user-profile/${profile.id}`);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
@@ -136,7 +133,6 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
           <SellerContactButtons
             whatsapp={profile.whatsapp}
             email={profile.email}
-            appUrl={appUrl}
             waMessage={`Hola! Vi tu perfil en MatchCars y quería consultarte.`}
           />
         </div>

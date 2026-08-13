@@ -151,28 +151,40 @@ export default function StockPage() {
         {filtered.map((v) => {
           const statusInfo = STATUS_LABELS[v.status ?? "available"] ?? { label: v.status, className: "bg-muted/20 text-muted-foreground" };
           return (
-            <Link
+            <div
               key={v.id}
-              href={`/dashboard/stock/${v.id}`}
               className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 transition hover:border-accent"
             >
-              <div className="h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-background">
-                {v.coverImage && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={v.coverImage} alt="" className="h-full w-full object-cover" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">
-                  {v.brand} {v.model} {v.year}
-                </p>
-                <p className="text-sm font-bold text-accent">
-                  {v.currency} {v.price?.toLocaleString("es-AR")}
-                </p>
-                {v.createdAt && <p className="text-xs text-muted-foreground">{fmtDate(v.createdAt)}</p>}
-              </div>
+              <Link href={`/dashboard/stock/${v.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+                <div className="flex w-12 shrink-0 items-center justify-center font-mono text-base font-extrabold text-muted-foreground">
+                  {v.publicationCode ? `#${v.publicationCode}` : "—"}
+                </div>
+                <div className="h-16 w-24 shrink-0 overflow-hidden rounded-lg bg-background">
+                  {v.coverImage && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={v.coverImage} alt="" className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {v.brand} {v.model} {v.year}
+                  </p>
+                  <p className="text-sm font-bold text-accent">
+                    {v.currency} {v.price?.toLocaleString("es-AR")}
+                  </p>
+                  {v.createdAt && <p className="text-xs text-muted-foreground">{fmtDate(v.createdAt)}</p>}
+                </div>
+              </Link>
+              <Link
+                href={`/ficha/${v.id}`}
+                target="_blank"
+                title="Ficha PDF"
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground transition hover:border-accent"
+              >
+                📄 Ficha
+              </Link>
               <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${statusInfo.className}`}>{statusInfo.label}</span>
-            </Link>
+            </div>
           );
         })}
       </div>

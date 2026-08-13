@@ -95,7 +95,7 @@ export default function VehicleDetailPage() {
 
   const statusInfo = STATUS_LABELS[vehicle.status] ?? { label: vehicle.status, className: "bg-muted/20 text-muted-foreground" };
   const activeToggles = TOGGLE_FIELDS.filter((t) => vehicle.toggles[t.key]);
-  const isRejected = ["rejected", "rejected_limit", "blocked"].includes(vehicle.status);
+  const isRejected = ["rejected", "rejected_limit", "blocked", "deleted"].includes(vehicle.status);
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean) as string[];
 
   return (
@@ -104,12 +104,21 @@ export default function VehicleDetailPage() {
         <Link href="/dashboard/stock" className="text-xs font-semibold text-accent">
           ← Volver a Stock
         </Link>
-        <Link
-          href={`/dashboard/stock/${id}/edit`}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
-        >
-          Editar
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href={`/ficha/${id}`}
+            target="_blank"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground"
+          >
+            Ficha PDF
+          </Link>
+          <Link
+            href={`/dashboard/stock/${id}/edit`}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+          >
+            Editar
+          </Link>
+        </div>
       </div>
 
       <div>
@@ -117,6 +126,7 @@ export default function VehicleDetailPage() {
           <h1 className="text-xl font-bold">
             {vehicle.brand} {vehicle.model} {vehicle.year}
           </h1>
+          {vehicle.publicationCode && <span className="font-mono text-xs text-muted-foreground">#{vehicle.publicationCode}</span>}
           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusInfo.className}`}>{statusInfo.label}</span>
         </div>
         {vehicle.version && <p className="text-sm text-muted-foreground">{vehicle.version}</p>}
@@ -124,7 +134,7 @@ export default function VehicleDetailPage() {
 
       {isRejected && vehicle.rejectionReason && (
         <div className="rounded-xl border border-error/30 bg-error/10 p-4">
-          <p className="text-sm font-semibold text-error">Motivo del rechazo</p>
+          <p className="text-sm font-semibold text-error">{vehicle.status === "deleted" ? "Motivo de la eliminación" : "Motivo del rechazo"}</p>
           <p className="mt-1 text-sm text-error">{vehicle.rejectionReason}</p>
         </div>
       )}

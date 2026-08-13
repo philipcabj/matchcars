@@ -14,7 +14,7 @@ import { uploadAgencyBanner, uploadAgencyLogo } from "@/lib/upload";
 import dynamic from "next/dynamic";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-// Leaflet toca `window` al importarse — no puede renderizarse en el server.
+// Google Maps JS API toca `window`/`document` al cargar su script — no puede renderizarse en el server.
 const LocationPicker = dynamic(() => import("@/components/LocationPicker").then((m) => m.LocationPicker), {
   ssr: false,
   loading: () => <div className="h-56 w-full animate-pulse rounded-lg border border-border bg-card" />,
@@ -227,7 +227,11 @@ export default function AgencyProfilePage() {
 
         <div>
           <p className="mb-2 text-sm font-medium">Ubicación en el mapa</p>
-          <LocationPicker value={values.businessCoordinates} onChange={(c) => set("businessCoordinates", c)} />
+          <LocationPicker
+            value={values.businessCoordinates}
+            onChange={(c) => set("businessCoordinates", c)}
+            onAddressChange={(addr) => set("businessAddress", addr)}
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

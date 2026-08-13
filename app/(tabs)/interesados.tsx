@@ -324,25 +324,30 @@ export default function InteresadosTab() {
                       const remaining = Math.max(0, (vehicles.length - thumbs.length));
                       return (
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
-                          {thumbs.map((v) => (
-                            <TouchableOpacity key={v.id} onPress={() => router.push(`/car/${v.id}` as any)}>
-                              <View style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden" }}>
-                                <Image
-                                  source={{ uri: v.coverImage || (v as any).images?.cover || (v as any).images?.gallery?.[0] || "https://placehold.co/64" }}
-                                  style={{ width: 32, height: 32, borderRadius: 6, opacity: v.status === 'sold' ? 0.5 : 1 }}
-                                  contentFit="cover"
-                                />
-                                {v.status === 'sold' && (
-                                  <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.15)" }} />
-                                )}
-                                {v.status === 'sold' && (
-                                  <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.35)", paddingVertical: 2 }}>
-                                    <Text style={{ color: "#fff", fontSize: 8, textAlign: "center", fontWeight: "700" }}>VENDIDO</Text>
-                                  </View>
-                                )}
-                              </View>
-                            </TouchableOpacity>
-                          ))}
+                          {thumbs.map((v) => {
+                            const isSold = v.status === 'sold';
+                            const isDeleted = v.status === 'deleted';
+                            const badgeLabel = isSold ? 'VENDIDO' : isDeleted ? 'ELIMINADO' : null;
+                            return (
+                              <TouchableOpacity key={v.id} onPress={() => router.push(`/car/${v.id}` as any)}>
+                                <View style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden" }}>
+                                  <Image
+                                    source={{ uri: v.coverImage || (v as any).images?.cover || (v as any).images?.gallery?.[0] || "https://placehold.co/64" }}
+                                    style={{ width: 32, height: 32, borderRadius: 6, opacity: badgeLabel ? 0.5 : 1 }}
+                                    contentFit="cover"
+                                  />
+                                  {badgeLabel && (
+                                    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.15)" }} />
+                                  )}
+                                  {badgeLabel && (
+                                    <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.35)", paddingVertical: 2 }}>
+                                      <Text style={{ color: "#fff", fontSize: 8, textAlign: "center", fontWeight: "700" }}>{badgeLabel}</Text>
+                                    </View>
+                                  )}
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
                           {remaining > 0 && (
                             <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
                               <Text style={{ color: theme.text, fontSize: 12, fontWeight: "700" }}>+{remaining}</Text>

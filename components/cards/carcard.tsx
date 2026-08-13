@@ -282,6 +282,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             {renderTrustBadge()}
             <Text style={{ color: theme.textMuted, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.year ?? ""} • {(vehicle.km != null ? vehicle.km.toLocaleString("es-AR") : "0")} km • {vehicle.fuelType || (vehicle as any).fuel || "Nafta"}
+              {vehicle.publicationCode ? ` • #${vehicle.publicationCode}` : ""}
             </Text>
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}
@@ -521,6 +522,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
             {renderTrustBadge()}
             <Text style={{ color: theme.textMuted, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.year ?? ""} • {(vehicle.km != null ? vehicle.km.toLocaleString("es-AR") : "0")} km • {vehicle.fuelType || (vehicle as any).fuel || "Nafta"}
+              {vehicle.publicationCode ? ` • #${vehicle.publicationCode}` : ""}
             </Text>
             <Text style={{ color: theme.subtext, marginTop: compact ? 2 : 4, fontSize: compact ? 12 : 14 }}>
               {vehicle.location?.province || vehicle.province || "Ubicación no disponible"}{timeAgo ? ` • ${timeAgo}` : ""}

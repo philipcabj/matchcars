@@ -99,7 +99,9 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         >
           <p className="text-sm">
             <span className="font-bold">¿Cuánto vale tu auto?</span>{" "}
-            <span className="text-muted-foreground">Estimá un precio de mercado en segundos, sin registrarte.</span>
+            <span className="text-muted-foreground">
+              Estimá un precio de mercado en segundos, sin registrarte. Para publicarlo, lo hacés desde la app.
+            </span>
           </p>
           <span className="shrink-0 text-xs font-semibold text-accent">Calcular ahora →</span>
         </Link>

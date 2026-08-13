@@ -56,6 +56,9 @@ export interface PublicVehicle {
   views: number;
   likesCount: number;
   createdAt: string | null;
+  // Código corto de publicación (#4821, asignado por assignPublicationCode
+  // en functions/src/index.ts) — autos viejos sin backfill pueden no tenerlo.
+  publicationCode: number | null;
   // Ficha técnica ampliada (paridad con la app, types/vehicle.ts).
   engine: string;
   wheelType: string;
@@ -107,6 +110,7 @@ function mapVehicleDoc(id: string, data: FirebaseFirestore.DocumentData): Public
     vtvValid: !!data.vtvValid,
     papersUpToDate: !!data.papersUpToDate,
     warranty: !!data.warranty,
+    publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
     priceHistory: Array.isArray(data.priceHistory)
       ? data.priceHistory.map((h: { price: number; currency: string; changedAt?: unknown }) => ({
           price: h.price,
@@ -370,6 +374,20 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 export async function getVehiclesBySeller(userId: string, sellerIsDealer: boolean, sellerLogoUrl: string | null): Promise<PublicVehicle[]> {
   const vehicles = await fetchPublishedVehicles();
   return vehicles.filter((v) => v.userId === userId).map((v) => ({ ...v, sellerIsDealer, sellerLogoUrl }));
+}
+
+// Autos vendidos de un vendedor — para la tab "Vendidos" de la ficha de
+// agencia. Consulta aparte (no viene en fetchPublishedVehicles, que solo
+// trae `published == true`): mismo criterio de status que ya usa
+// getAgencyProfile para el conteo (`soldCount`), pero acá trayendo los docs
+// completos en vez de solo el count().
+export async function getSoldVehiclesBySeller(
+  userId: string,
+  sellerIsDealer: boolean,
+  sellerLogoUrl: string | null
+): Promise<PublicVehicle[]> {
+  const snap = await adminDb.collection("vehicles").where("userId", "==", userId).where("status", "==", "sold").limit(60).get();
+  return snap.docs.map((d) => ({ ...mapVehicleDoc(d.id, d.data()), sellerIsDealer, sellerLogoUrl }));
 }
 
 // Cantidad de autos publicados por vendedor — para el directorio de agencias.

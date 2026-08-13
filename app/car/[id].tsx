@@ -1862,7 +1862,12 @@ export default function CarDetailsScreen() {
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text style={styles.carTitle}>{displayTitle}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.carTitle}>{displayTitle}</Text>
+          {vehicle?.publicationCode && (
+            <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>#{vehicle.publicationCode}</Text>
+          )}
+        </View>
       </View>
 
       <View style={{ marginBottom: 16 }}>
@@ -3091,6 +3096,7 @@ export default function CarDetailsScreen() {
                   <div class="logo">MatchCars</div>
                   <div class="header">
                     <div class="title">${vehicle.brand} ${vehicle.model} ${vehicle.year}</div>
+                    ${vehicle.publicationCode ? `<div style="color:#999;font-size:14px;">Publicación #${vehicle.publicationCode}</div>` : ""}
                     <div class="price">${vehicle.currency} ${Number(vehicle.price).toLocaleString("es-AR")}</div>
                   </div>
                   

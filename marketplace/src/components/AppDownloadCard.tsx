@@ -10,7 +10,7 @@ export function AppDownloadCard() {
         📲 Llevá Match<span className="text-accent">Cars</span> en el bolsillo
       </p>
       <p className="text-xs leading-relaxed text-white/70">
-        Chateá con vendedores, recibí notificaciones al instante y publicá tu auto gratis desde la app.
+        Ofertar, mensajear con vendedores, guardar favoritos y publicar tu auto gratis: todo eso es exclusivo de la app.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
         <a

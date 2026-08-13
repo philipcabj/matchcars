@@ -6,17 +6,20 @@ import { PublicVehicle } from "@/lib/vehicles";
 import Image from "next/image";
 import Link from "next/link";
 
-export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
+// `sold`: para la tab "Vendidos" de la ficha de agencia — esos autos ya no
+// tienen ficha propia navegable (getVehicle() en el server devuelve null
+// para status "sold", así que /car/{id} daría 404), por eso acá se renderiza
+// como div en vez de Link, con un ribbon "Vendido" y menos énfasis visual.
+export function VehicleCard({ vehicle, sold = false }: { vehicle: PublicVehicle; sold?: boolean }) {
   const { isSelected } = useCompare();
   const selected = isSelected(vehicle.id);
 
-  return (
-    <Link
-      href={`/car/${vehicle.id}`}
-      className={`group flex flex-col overflow-hidden rounded-2xl border bg-card transition hover:-translate-y-0.5 hover:shadow-lg ${
-        selected ? "border-primary ring-2 ring-primary" : "border-border"
-      }`}
-    >
+  const className = `group flex flex-col overflow-hidden rounded-2xl border bg-card transition ${
+    sold ? "opacity-70" : "hover:-translate-y-0.5 hover:shadow-lg"
+  } ${selected ? "border-primary ring-2 ring-primary" : "border-border"}`;
+
+  const content = (
+    <>
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-background">
         {vehicle.coverImage ? (
           <Image
@@ -24,12 +27,15 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
             alt={`${vehicle.brand} ${vehicle.model}`}
             fill
             sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 100vw"
-            className="object-cover transition duration-300 group-hover:scale-105"
+            className={`object-cover transition duration-300 ${sold ? "grayscale" : "group-hover:scale-105"}`}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sin foto</div>
         )}
-        {vehicle.isFeatured && (
+        {sold && (
+          <span className="absolute left-3 top-3 rounded-full bg-foreground px-2.5 py-1 text-xs font-bold text-background shadow">Vendido</span>
+        )}
+        {!sold && vehicle.isFeatured && (
           <span className="absolute left-3 top-3 rounded-full bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground shadow">
             Destacado
           </span>
@@ -39,7 +45,7 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
             <Image src={vehicle.sellerLogoUrl} alt="" fill sizes="32px" className="object-cover" />
           </div>
         )}
-        <CompareCheckbox vehicleId={vehicle.id} className="absolute right-3 top-3 bg-card/95 shadow" />
+        {!sold && <CompareCheckbox vehicleId={vehicle.id} className="absolute right-3 top-3 bg-card/95 shadow" />}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-4">
         <p className="truncate text-sm font-semibold text-foreground">
@@ -47,6 +53,7 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
         </p>
         <p className="text-xs text-muted-foreground">
           {vehicle.year || "—"} · {vehicle.km ? `${vehicle.km.toLocaleString("es-AR")} km` : "0 km"}
+          {vehicle.publicationCode && <span className="ml-1 font-mono opacity-70">· #{vehicle.publicationCode}</span>}
         </p>
         <p className="mt-1 text-lg font-extrabold text-accent">
           {vehicle.currency} {vehicle.price.toLocaleString("es-AR")}
@@ -73,6 +80,14 @@ export function VehicleCard({ vehicle }: { vehicle: PublicVehicle }) {
           )}
         </div>
       </div>
+    </>
+  );
+
+  if (sold) return <div className={className}>{content}</div>;
+
+  return (
+    <Link href={`/car/${vehicle.id}`} className={className}>
+      {content}
     </Link>
   );
 }

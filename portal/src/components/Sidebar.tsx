@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Avatar } from "@/components/Avatar";
+import { useAdminRole } from "@/hooks/useAdminRole";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
@@ -16,13 +17,18 @@ const NAV_ITEMS = [
   { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true },
   { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true },
   { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true },
+  { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true },
 ];
+
+const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true };
 
 export function Sidebar() {
   const { user, logout } = useAuth();
   const { data: agency } = useAgencyMe();
+  const { isModerator } = useAdminRole();
   const router = useRouter();
   const pathname = usePathname();
+  const navItems = isModerator ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   const handleLogout = async () => {
     await logout();
@@ -50,7 +56,7 @@ export function Sidebar() {
       </a>
 
       <nav className="flex flex-1 flex-col gap-1">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = item.href === "/dashboard" ? pathname === item.href : pathname?.startsWith(item.href);
           const unread = item.href === "/dashboard/leads" ? agency?.unreadLeadsCount ?? 0 : 0;
           const className = `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${

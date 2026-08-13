@@ -190,10 +190,15 @@ export default function MessagesTab() {
     fetchProfiles();
   }, [chats, profiles]);
 
-  // Auto-fetch missing vehicle data for chats that have vehicleId but no vehicleData
+  // Auto-fetch missing vehicle data for chats that have vehicleId but no
+  // vehicleData. También re-chequea el status de los que YA tienen
+  // vehicleData cacheado (pero no "deleted" todavía) — sin esto, un auto
+  // eliminado después de que el chat ya cacheó sus datos seguiría
+  // mostrándose como si siguiera activo, sin ningún aviso.
   useEffect(() => {
     const missingVehicles = chats.filter(c => c.vehicleId && !c.vehicleData);
-    if (missingVehicles.length === 0) return;
+    const staleStatusVehicles = chats.filter(c => c.vehicleId && c.vehicleData && c.vehicleData.status !== "deleted");
+    if (missingVehicles.length === 0 && staleStatusVehicles.length === 0) return;
 
     const fetchVehicles = async () => {
       await Promise.all(missingVehicles.map(async (chat) => {
@@ -209,7 +214,8 @@ export default function MessagesTab() {
                 year: v.year,
                 price: v.price,
                 currency: v.currency,
-                cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? ""
+                cover: v.coverImage ?? v.images?.cover ?? v.images?.gallery?.[0] ?? v.cover ?? "",
+                status: v.status || "available"
             };
             // Update conversation to cache this data
             const cRef = doc(db, "conversations", chat.id);
@@ -219,8 +225,22 @@ export default function MessagesTab() {
           logger.log("Error fetching vehicle for chat", chat.id, e);
         }
       }));
+
+      await Promise.all(staleStatusVehicles.map(async (chat) => {
+        try {
+          const vRef = doc(db, "vehicles", chat.vehicleId);
+          const vSnap = await getDoc(vRef);
+          const newStatus = vSnap.exists() ? (vSnap.data() as any).status || "available" : "deleted";
+          if (newStatus !== chat.vehicleData.status) {
+            const cRef = doc(db, "conversations", chat.id);
+            await updateDoc(cRef, { "vehicleData.status": newStatus });
+          }
+        } catch (e) {
+          logger.log("Error refreshing vehicle status for chat", chat.id, e);
+        }
+      }));
     };
-    
+
     fetchVehicles();
   }, [chats]);
 
@@ -320,6 +340,7 @@ export default function MessagesTab() {
     // Handle vehicle context
     const vehicleName = item.vehicleData ? `${item.vehicleData.brand} ${item.vehicleData.model}` : null;
     const vehicleCover = item.vehicleData?.cover || null;
+    const vehicleDeleted = item.vehicleData?.status === "deleted";
     
       const isUnread = user && item.lastSenderId !== user.uid && (!item.readBy || !Array.isArray(item.readBy) || !item.readBy.includes(user.uid));
       const lastSeenMap = item.lastSeen || {};
@@ -391,14 +412,27 @@ export default function MessagesTab() {
                     {vehicleCover ? (
                       <Image
                         source={{ uri: vehicleCover }}
-                        style={{ width: 24, height: 24, borderRadius: 4, marginRight: 6 }}
+                        style={{ width: 24, height: 24, borderRadius: 4, marginRight: 6, opacity: vehicleDeleted ? 0.4 : 1 }}
                         cachePolicy="memory-disk"
                         transition={150}
                       />
                     ) : (
                       <Ionicons name="car-sport-outline" size={12} color={theme.accent} style={{ marginRight: 4 }} />
                     )}
-                    <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "600", marginRight: 8 }}>{vehicleName}</Text>
+                    <Text
+                      style={{
+                        color: vehicleDeleted ? theme.textMuted : theme.accent,
+                        fontSize: 12,
+                        fontWeight: "600",
+                        marginRight: 8,
+                        textDecorationLine: vehicleDeleted ? "line-through" : "none",
+                      }}
+                    >
+                      {vehicleName}
+                    </Text>
+                    {vehicleDeleted && (
+                      <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: "600", marginRight: 8 }}>(Eliminado)</Text>
+                    )}
                     {item.vehicleId && (
                       <TouchableOpacity
                         onPress={() => router.push(`/car/${item.vehicleId}` as any)}
@@ -526,14 +560,27 @@ export default function MessagesTab() {
                     {vehicleCover ? (
                       <Image
                         source={{ uri: vehicleCover }}
-                        style={{ width: 24, height: 24, borderRadius: 4, marginRight: 6 }}
+                        style={{ width: 24, height: 24, borderRadius: 4, marginRight: 6, opacity: vehicleDeleted ? 0.4 : 1 }}
                         cachePolicy="memory-disk"
                         transition={150}
                       />
                     ) : (
                       <Ionicons name="car-sport-outline" size={12} color={theme.accent} style={{ marginRight: 4 }} />
                     )}
-                    <Text style={{ color: theme.accent, fontSize: 12, fontWeight: "600", marginRight: 8 }}>{vehicleName}</Text>
+                    <Text
+                      style={{
+                        color: vehicleDeleted ? theme.textMuted : theme.accent,
+                        fontSize: 12,
+                        fontWeight: "600",
+                        marginRight: 8,
+                        textDecorationLine: vehicleDeleted ? "line-through" : "none",
+                      }}
+                    >
+                      {vehicleName}
+                    </Text>
+                    {vehicleDeleted && (
+                      <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: "600", marginRight: 8 }}>(Eliminado)</Text>
+                    )}
                     {item.vehicleId && (
                       <TouchableOpacity
                         onPress={() => router.push(`/car/${item.vehicleId}` as any)}

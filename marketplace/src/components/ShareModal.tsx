@@ -11,6 +11,7 @@ export function ShareModal({ url, title, qrSvg }: { url: string; title: string; 
   const [copied, setCopied] = useState(false);
 
   const waLink = `https://wa.me/?text=${encodeURIComponent(`${title} — ${url}`)}`;
+  const mailLink = `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(`${title}\n${url}`)}`;
 
   const handleCopy = async () => {
     try {
@@ -20,6 +21,33 @@ export function ShareModal({ url, title, qrSvg }: { url: string; title: string; 
     } catch {
       // clipboard puede fallar (permisos) — sin fallback ulterior, no es crítico.
     }
+  };
+
+  // Convierte el SVG (generado server-side) a PNG en el browser vía canvas —
+  // así se puede descargar/mandar por WhatsApp como imagen, no solo escanear
+  // en pantalla. No hay forma de descargar un <img> con dangerouslySetInnerHTML
+  // directo, por eso el paso por canvas.
+  const handleDownloadQr = () => {
+    const svgBlob = new Blob([qrSvg], { type: "image/svg+xml;charset=utf-8" });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const size = 512;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      URL.revokeObjectURL(svgUrl);
+      const link = document.createElement("a");
+      link.download = `qr-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    };
+    img.src = svgUrl;
   };
 
   const handleNativeShare = async () => {
@@ -73,6 +101,9 @@ export function ShareModal({ url, title, qrSvg }: { url: string; title: string; 
               className="h-40 w-40 rounded-xl bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
               dangerouslySetInnerHTML={{ __html: qrSvg }}
             />
+            <button type="button" onClick={handleDownloadQr} className="-mt-2 text-xs font-semibold text-accent">
+              Descargar QR
+            </button>
 
             <div className="flex w-full items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
               <p className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground">{url}</p>
@@ -92,6 +123,13 @@ export function ShareModal({ url, title, qrSvg }: { url: string; title: string; 
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white"
             >
               Compartir por WhatsApp
+            </a>
+
+            <a
+              href={mailLink}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2.5 text-sm font-semibold text-foreground"
+            >
+              Compartir por email
             </a>
           </div>
         </div>

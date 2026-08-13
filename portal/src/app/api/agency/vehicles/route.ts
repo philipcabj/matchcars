@@ -33,6 +33,7 @@ export const GET = withApiErrors(async (request) => {
         status: data.status ?? "available",
         coverImage: data.images?.cover ?? data.coverImage ?? null,
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
+        publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
       };
     })
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));

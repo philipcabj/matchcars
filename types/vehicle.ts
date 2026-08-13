@@ -101,6 +101,9 @@ export interface Vehicle {
   featuredAt?: any;
   riskFlags?: string[];
   riskScore?: number;
+  // Código corto de publicación (#4821) — asignado por la Cloud Function
+  // assignPublicationCode al crear el auto, no editable a mano.
+  publicationCode?: number;
   // Métricas
   views?: number;
   likesCount?: number;

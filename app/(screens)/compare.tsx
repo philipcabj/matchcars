@@ -1,8 +1,10 @@
 import { useCompare } from '@/contexts/CompareContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { db } from '@/lib/firebase';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { doc, getDoc } from 'firebase/firestore';
 import React from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +18,32 @@ export default function CompareScreen() {
   const { selectedVehicles, toggleVehicle, clearSelection } = useCompare();
   const { theme, themeName } = useTheme();
   const router = useRouter();
+
+  // Selección en memoria, sin listener en vivo (ver CompareContext) — si un
+  // auto se elimina mientras está en el comparador, seguiría mostrando sus
+  // datos viejos como si nada sin este chequeo. Solo un getDoc puntual al
+  // entrar a la pantalla, no hace falta algo más pesado acá.
+  const [deletedIds, setDeletedIds] = React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        selectedVehicles.map(async (v) => {
+          try {
+            const snap = await getDoc(doc(db, "vehicles", v.id));
+            const status = snap.exists() ? (snap.data() as any).status : "deleted";
+            return status === "deleted" ? v.id : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (!cancelled) setDeletedIds(new Set(results.filter((id): id is string => !!id)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVehicles]);
 
   // Calculate Best Values
   const bestValues = React.useMemo(() => {
@@ -180,8 +208,9 @@ export default function CompareScreen() {
                   const pricePerKm = (vehicle.price && vehicle.km && Number(vehicle.km) > 0)
                       ? Number(vehicle.price) / Number(vehicle.km)
                       : null;
+                  const isDeleted = deletedIds.has(vehicle.id);
                   return (
-                      <View key={vehicle.id}>
+                      <View key={vehicle.id} style={{ opacity: isDeleted ? 0.5 : 1 }}>
                           {/* Header */}
                           {renderDataCell(
                               <View style={{ alignItems: 'center', width: '100%' }}>
@@ -202,6 +231,9 @@ export default function CompareScreen() {
                                       {vehicle.brand} {vehicle.model}
                                   </Text>
                                   <Text style={{ fontSize: 11, color: theme.textMuted }}>{vehicle.version}</Text>
+                                  {isDeleted && (
+                                      <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '700', marginTop: 2 }}>Eliminado</Text>
+                                  )}
                                   <TouchableOpacity
                                       style={{ marginTop: 6, backgroundColor: theme.accent, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 }}
                                       onPress={() => router.push(`/car/${vehicle.id}`)}

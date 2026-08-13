@@ -4,6 +4,56 @@ Este documento contiene sugerencias de mejoras para el proyecto, organizadas por
 
 ---
 
+## ⏳ Pendientes de la sesión del 2026-08-12 (para retomar)
+
+Estado real al cierre de esta sesión — no son "mejoras", son bloqueos concretos
+sobre la migración a producción del marketplace/portal nuevos.
+
+1. ~~Deploy del portal roto en Cloud Build~~ **RESUELTO.** Era el mismo bug
+   del lockfile (ver más abajo): había instalado leaflet/react-leaflet de
+   forma incremental sobre el lockfile viejo, y quedaron faltando entradas
+   `@emnapi/*` de plataforma (Linux) que Cloud Build necesita — localmente en
+   Windows `npm ci` pasaba igual, por eso no se veía ahí. Se arregló
+   regenerando `package-lock.json` de cero (`rm package-lock.json && npm
+   install`). Deployado y verificado en
+   `matchcars-portal--matchcars-a7847.us-central1.hosted.app`.
+
+2. **`portal.matchcars.app` no resuelve — DNS roto.** Confirmado con `nslookup`
+   contra 8.8.8.8 y 1.1.1.1: `NXDOMAIN`, a pesar de que en su momento se
+   habían cargado los registros A/TXT/CNAME. Hay que entrar al proveedor de
+   DNS y verificar que esos tres registros sigan ahí (puede que se hayan
+   borrado o haya un typo).
+
+3. **`matchcars.app` (dominio raíz) todavía no está conectado al backend
+   `matchcars-marketplace` de App Hosting.** Ese paso solo existe como
+   asistente en Firebase Console (no hay comando de CLI): Firebase Console →
+   proyecto `matchcars-a7847` → App Hosting → backend `matchcars-marketplace`
+   → pestaña Dominios → "Agregar dominio personalizado" → `matchcars.app`.
+   Esto genera registros DNS nuevos (distintos a los de `portal.matchcars.app`)
+   que hay que cargar y esperar a que propaguen + el certificado se
+   provisione (puede tardar horas) — conviene arrancarlo apenas se pueda,
+   sin esperar a tener todo lo demás resuelto, porque no rompe nada de lo que
+   está en vivo hoy.
+
+4. **El build clásico (`matchcars-a7847.web.app`, lo que hoy sirve
+   `matchcars.app`) nunca se reconstruyó con `baseUrl:"/app"`** (el cambio en
+   `app.json` está commiteado hace días, pero `dist/` sigue siendo el build
+   viejo — confirmado mirando los paths de los JS servidos en producción).
+   **Importante:** reconstruir y desplegar esto HOY, antes de que el punto 3
+   esté listo, rompería la app en vivo para todos los usuarios ahora mismo
+   (porque `matchcars.app` todavía apunta a ese sitio). Este paso tiene que
+   pasar en el mismo momento que el corte de DNS del punto 3, no antes —
+   migración coordinada/atómica, ya charlada con el usuario.
+
+**Ya resuelto y en producción esta sesión (no repetir):** módulo de
+compartir con QR, estadísticas (publicados/vendidos/reseñas) y mapa en el
+perfil de agencia del marketplace; fix de los links "ver/hacer oferta en la
+app" (apuntaban a una ruta rota); botones de App Store/Google Play más
+visibles. Todo deployado y verificado en
+`matchcars-marketplace--matchcars-a7847.us-central1.hosted.app`.
+
+---
+
 ## 🔴 Prioridad Alta (Seguridad y Rendimiento)
 
 ### 1. Sistema de Logging Profesional

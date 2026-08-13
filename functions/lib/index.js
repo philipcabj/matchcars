@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.enforceVehicleLimit = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -114,6 +114,33 @@ exports.enforceVehicleLimit = (0, firestore_1.onDocumentCreated)("vehicles/{vehi
             rejectedReason: `Límite del plan alcanzado. Tu plan permite hasta ${limit} auto${limit === 1 ? "" : "s"} activo${limit === 1 ? "" : "s"}.`,
         });
     }
+});
+// ─── assignPublicationCode ───────────────────────────────────────────────────
+// Número secuencial corto (#4821) para que dueños/soporte/admin puedan
+// referenciar una publicación sin usar el ID largo de Firestore — no lo
+// reemplaza, es un campo adicional (`publicationCode`). Server-side (Cloud
+// Function, no client-side) a propósito: hay varios lugares que crean un
+// vehicles/{id} (add-car de la app, alta desde el portal, carga masiva del
+// portal) y así se garantiza un único punto que asigna el número, sin
+// duplicar la lógica de transacción en cada uno ni exponer el contador a
+// escritura directa del cliente. Contador en counters/vehicles.value,
+// incrementado atómicamente en una transacción para que altas concurrentes
+// nunca choquen el mismo número.
+exports.assignPublicationCode = (0, firestore_1.onDocumentCreated)("vehicles/{vehicleId}", async (event) => {
+    const snap = event.data;
+    if (!snap)
+        return;
+    if (snap.data().publicationCode)
+        return; // ya lo tiene (backfill manual, reintento, etc.)
+    const counterRef = db.doc("counters/vehicles");
+    const code = await db.runTransaction(async (tx) => {
+        var _a;
+        const counterSnap = await tx.get(counterRef);
+        const next = (((_a = counterSnap.data()) === null || _a === void 0 ? void 0 : _a.value) || 0) + 1;
+        tx.set(counterRef, { value: next }, { merge: true });
+        return next;
+    });
+    await snap.ref.update({ publicationCode: code });
 });
 // ─── expireFeaturedListings ──────────────────────────────────────────────────
 exports.expireFeaturedListings = (0, scheduler_1.onSchedule)("every 6 hours", async () => {

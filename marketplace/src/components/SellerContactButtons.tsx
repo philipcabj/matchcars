@@ -1,17 +1,19 @@
 import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
 
 // Compartido entre la ficha del auto y el perfil de agencia — mismo patrón
-// de contacto: WhatsApp directo si el vendedor lo cargó, si no mail, y
-// siempre la opción de seguir por la app (para ofertas formales/chat).
+// de contacto: WhatsApp directo si el vendedor lo cargó, si no mail. El botón
+// "Ver/Hacer una oferta en la app" que había acá se sacó por redundante: ya
+// están los botones de tienda debajo con el mismo destino, y duplicaba texto
+// sin agregar nada. Lo que sí queda siempre visible es la aclaración de que
+// ofertar, mensajear en privado y guardar favoritos son exclusivos de la app
+// — no depende de si hay WhatsApp/email cargado.
 export function SellerContactButtons({
   whatsapp,
   email,
-  appUrl,
   waMessage,
 }: {
   whatsapp: string;
   email: string;
-  appUrl: string;
   waMessage: string;
 }) {
   const waDigits = whatsapp ? whatsapp.replace(/\D/g, "") : "";
@@ -35,21 +37,10 @@ export function SellerContactButtons({
           Enviar email
         </a>
       )}
-      <a
-        href={appUrl}
-        className={
-          waLink || mailLink
-            ? "rounded-lg border border-border px-4 py-2.5 text-center text-sm font-semibold text-foreground"
-            : "rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground"
-        }
-      >
-        {waLink || mailLink ? "Hacer una oferta en la app" : "Ver en la app"}
-      </a>
-      <p className="text-center text-[11px] text-muted-foreground">
-        {waLink || mailLink ? "Para ofertas formales y seguimiento del chat, abrí la app." : "Se abre en la app de Matchcars para continuar."}
-      </p>
       <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
-        <p className="text-center text-[11px] text-muted-foreground">Para mensajes privados, descargá MatchCars</p>
+        <p className="text-center text-[11px] text-muted-foreground">
+          Para hacer una oferta, mensajear en privado o guardar en favoritos, descargá la app de MatchCars
+        </p>
         <div className="flex gap-2">
           <a
             href={APPLE_URL}

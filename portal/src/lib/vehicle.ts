@@ -70,6 +70,7 @@ export interface VehicleListItem {
   status?: string;
   coverImage?: string;
   createdAt?: string | null;
+  publicationCode?: number | null;
 }
 
 // Superset de VehicleFormValues (mismos campos, mismo shape string-based que
@@ -83,6 +84,7 @@ export interface VehicleDetail extends VehicleFormValues {
   likesCount: number;
   createdAt: string | null;
   priceHistory: { price: number; currency: string; changedAt: string | null }[];
+  publicationCode: number | null;
 }
 
 // Color sólido por estado, para barras/gráficos (a diferencia de STATUS_LABELS.className,

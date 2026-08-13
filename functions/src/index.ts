@@ -88,6 +88,36 @@ export const enforceVehicleLimit = onDocumentCreated(
   }
 );
 
+// ─── assignPublicationCode ───────────────────────────────────────────────────
+// Número secuencial corto (#4821) para que dueños/soporte/admin puedan
+// referenciar una publicación sin usar el ID largo de Firestore — no lo
+// reemplaza, es un campo adicional (`publicationCode`). Server-side (Cloud
+// Function, no client-side) a propósito: hay varios lugares que crean un
+// vehicles/{id} (add-car de la app, alta desde el portal, carga masiva del
+// portal) y así se garantiza un único punto que asigna el número, sin
+// duplicar la lógica de transacción en cada uno ni exponer el contador a
+// escritura directa del cliente. Contador en counters/vehicles.value,
+// incrementado atómicamente en una transacción para que altas concurrentes
+// nunca choquen el mismo número.
+export const assignPublicationCode = onDocumentCreated(
+  "vehicles/{vehicleId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    if (snap.data().publicationCode) return; // ya lo tiene (backfill manual, reintento, etc.)
+
+    const counterRef = db.doc("counters/vehicles");
+    const code = await db.runTransaction(async (tx) => {
+      const counterSnap = await tx.get(counterRef);
+      const next = (counterSnap.data()?.value || 0) + 1;
+      tx.set(counterRef, { value: next }, { merge: true });
+      return next;
+    });
+
+    await snap.ref.update({ publicationCode: code });
+  }
+);
+
 // ─── expireFeaturedListings ──────────────────────────────────────────────────
 
 export const expireFeaturedListings = onSchedule("every 6 hours", async () => {

@@ -7,7 +7,15 @@ import "server-only";
 
 import { adminDb } from "@/lib/firebase-admin";
 
-export type PortalEmailType = "offer_accepted" | "counter_received" | "deal_canceled" | "vehicle_sold" | "team_invite";
+export type PortalEmailType =
+  | "offer_accepted"
+  | "counter_received"
+  | "deal_canceled"
+  | "vehicle_sold"
+  | "team_invite"
+  | "vehicle_approved"
+  | "moderation_rejected"
+  | "vehicle_deleted_by_admin";
 
 interface EmailData {
   // Uno de los dos: recipientUid (busca el email en users/{uid}, para
@@ -22,6 +30,7 @@ interface EmailData {
   ctaLink?: string;
   agencyName?: string;
   roleLabel?: string;
+  messagePreview?: string;
 }
 
 function escapeHtml(str: string): string {
@@ -161,6 +170,48 @@ export async function sendNotificationEmail(type: PortalEmailType, data: EmailDa
           "Confirmá tu compra",
           `El vendedor marcó el <strong>${car}</strong> como entregado.<br/>Entrá a la app y confirmá que lo recibiste para cerrar la venta y calificar al vendedor.`,
           "Confirmar en la app",
+          ctaLink
+        );
+        break;
+      }
+      case "vehicle_approved": {
+        const car = escapeHtml(data.carModel || "Tu publicación");
+        subject = subject || "¡Tu publicación ya está activa!";
+        html = buildTemplate(
+          "✅",
+          "¡Tu publicación ya está activa!",
+          `<strong>${car}</strong> ya está visible para todos los compradores en MatchCars.`,
+          "Ver publicación",
+          ctaLink
+        );
+        break;
+      }
+      case "moderation_rejected": {
+        const car = escapeHtml(data.carModel || "Tu publicación");
+        const reason = data.messagePreview ? escapeHtml(data.messagePreview) : "";
+        subject = subject || "Tu publicación fue rechazada para corrección";
+        html = buildTemplate(
+          "⚠️",
+          "Tu publicación necesita cambios",
+          `<strong>${car}</strong> fue rechazada por moderación${
+            reason ? `:<br/><em>"${reason}"</em>` : "."
+          }<br/>Corregila y volvé a publicarla desde la app.`,
+          "Ir a la app",
+          ctaLink
+        );
+        break;
+      }
+      case "vehicle_deleted_by_admin": {
+        const car = escapeHtml(data.carModel || "Tu publicación");
+        const reason = data.messagePreview ? escapeHtml(data.messagePreview) : "";
+        subject = subject || "Tu publicación fue eliminada";
+        html = buildTemplate(
+          "🚫",
+          "Tu publicación fue eliminada",
+          `<strong>${car}</strong> fue eliminada por el equipo de MatchCars${
+            reason ? `:<br/><em>"${reason}"</em>` : "."
+          }<br/>Si creés que fue un error, contactanos.`,
+          "Ir a la app",
           ctaLink
         );
         break;

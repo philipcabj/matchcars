@@ -1,49 +1,40 @@
 "use client";
 
-import "leaflet/dist/leaflet.css";
-
-import L from "leaflet";
+import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from "react-leaflet";
 
 // Mismo formato que guarda la app (Location.geocodeAsync de expo-location) —
 // { latitude, longitude } — para que el dato sea intercambiable sin importar
-// desde dónde lo cargó la agencia. Acá, en vez del geocoder nativo del OS, se
-// usa Nominatim (OpenStreetMap) para buscar direcciones y un mapa Leaflet
-// (con tiles de OSM) para ajustar el pin a mano — sin API key ni facturación.
+// desde dónde lo cargó la agencia.
+//
+// La búsqueda de direcciones sigue yendo por Nominatim (OpenStreetMap, vía
+// /api/geocode — gratis, sin key) sin cambios; lo que se reemplazó acá es
+// solo el mapa visual/interactivo (antes Leaflet+OSM, ahora Google Maps JS
+// API) para que se vea igual que el embed de la ficha pública del
+// marketplace. Requiere NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (Maps JavaScript API
+// habilitada + facturación activa en Google Cloud).
 type Coords = { latitude: number; longitude: number };
 
-const DEFAULT_CENTER: [number, number] = [-34.603722, -58.381592]; // Buenos Aires
+const DEFAULT_CENTER = { lat: -34.603722, lng: -58.381592 }; // Buenos Aires
+const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const MAP_OPTIONS = { streetViewControl: false, mapTypeControl: false, fullscreenControl: false };
 
-// Los íconos default de Leaflet rompen con bundlers modernos si no se
-// reapuntan a mano — se usan los mismos assets servidos desde unpkg (imágenes
-// estáticas del propio paquete, no un servicio de terceros con datos).
-delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
+export function LocationPicker({
+  value,
+  onChange,
+  onAddressChange,
+}: {
+  value: Coords | null;
+  onChange: (c: Coords | null) => void;
+  // Para que el campo "Dirección" del form nunca quede desincronizado del
+  // pin: se llama tanto al elegir un resultado de búsqueda (ya trae el
+  // texto) como al marcar/arrastrar el pin a mano (ahí se resuelve con
+  // reverse geocoding). Opcional para no romper otros usos del picker.
+  onAddressChange?: (address: string) => void;
+}) {
+  const { isLoaded } = useJsApiLoader({ googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+  const mapRef = useRef<google.maps.Map | null>(null);
 
-function ClickToPlace({ onPlace }: { onPlace: (c: Coords) => void }) {
-  useMapEvents({
-    click(e) {
-      onPlace({ latitude: e.latlng.lat, longitude: e.latlng.lng });
-    },
-  });
-  return null;
-}
-
-function RecenterOnChange({ coords }: { coords: Coords }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView([coords.latitude, coords.longitude], 15);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coords.latitude, coords.longitude]);
-  return null;
-}
-
-export function LocationPicker({ value, onChange }: { value: Coords | null; onChange: (c: Coords | null) => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ label: string; lat: number; lon: number }[]>([]);
   const [searching, setSearching] = useState(false);
@@ -54,12 +45,13 @@ export function LocationPicker({ value, onChange }: { value: Coords | null; onCh
     setSearching(true);
     const seq = ++searchSeq.current;
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ar&q=${encodeURIComponent(query)}`
-      );
-      const data: { display_name: string; lat: string; lon: string }[] = await res.json();
+      // Vía nuestro propio proxy (/api/geocode), no directo a Nominatim — su
+      // respuesta no trae cabeceras CORS, así que un fetch directo desde acá
+      // rechaza en silencio (ver comentario en route.ts).
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+      const data: { label: string; lat: number; lon: number }[] = await res.json();
       if (seq !== searchSeq.current) return; // respuesta vieja, ya se disparó otra búsqueda
-      setResults(data.map((r) => ({ label: r.display_name, lat: Number(r.lat), lon: Number(r.lon) })));
+      setResults(res.ok ? data : []);
     } catch {
       setResults([]);
     } finally {
@@ -69,11 +61,44 @@ export function LocationPicker({ value, onChange }: { value: Coords | null; onCh
 
   const pickResult = (r: { label: string; lat: number; lon: number }) => {
     onChange({ latitude: r.lat, longitude: r.lon });
+    onAddressChange?.(r.label);
     setResults([]);
     setQuery(r.label);
   };
 
-  const center: [number, number] = value ? [value.latitude, value.longitude] : DEFAULT_CENTER;
+  // Click en el mapa o arrastre del pin: no hay texto de dirección todavía,
+  // hay que resolverlo (reverse geocoding) para mantener el campo en sync.
+  const placeSeq = useRef(0);
+  const handlePlace = async (c: Coords) => {
+    onChange(c);
+    if (!onAddressChange) return;
+    const seq = ++placeSeq.current;
+    try {
+      const res = await fetch(`/api/geocode?lat=${c.latitude}&lon=${c.longitude}`);
+      const data: { label: string | null } = await res.json();
+      if (seq !== placeSeq.current) return; // se movió el pin de nuevo antes de que responda
+      if (res.ok && data.label) {
+        onAddressChange(data.label);
+        setQuery(data.label);
+      }
+    } catch {
+      // Sin conexión/Nominatim caído: el pin igual queda bien puesto, solo
+      // no se autocompleta el texto — no es bloqueante.
+    }
+  };
+
+  // A diferencia de Leaflet, el `center` de <GoogleMap> solo se usa en la
+  // creación inicial del mapa — cambios posteriores no lo re-centran solos,
+  // hay que llamar panTo/setZoom a mano sobre la instancia (capturada en
+  // onLoad) cuando cambia `value` (ej. al elegir un resultado de búsqueda).
+  useEffect(() => {
+    if (value && mapRef.current) {
+      mapRef.current.panTo({ lat: value.latitude, lng: value.longitude });
+      mapRef.current.setZoom(15);
+    }
+  }, [value?.latitude, value?.longitude]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const center = value ? { lat: value.latitude, lng: value.longitude } : DEFAULT_CENTER;
 
   return (
     <div className="flex flex-col gap-2">
@@ -115,26 +140,40 @@ export function LocationPicker({ value, onChange }: { value: Coords | null; onCh
       </div>
 
       <div className="h-56 w-full overflow-hidden rounded-lg border border-border">
-        <MapContainer center={center} zoom={value ? 15 : 11} className="h-full w-full">
-          <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          <ClickToPlace onPlace={onChange} />
-          {value && <RecenterOnChange coords={value} />}
-          {value && (
-            <Marker
-              position={[value.latitude, value.longitude]}
-              draggable
-              eventHandlers={{
-                dragend: (e) => {
-                  const pos = e.target.getLatLng();
-                  onChange({ latitude: pos.lat, longitude: pos.lng });
-                },
-              }}
-            />
-          )}
-        </MapContainer>
+        {!GOOGLE_MAPS_API_KEY ? (
+          <div className="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+            Falta configurar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.
+          </div>
+        ) : !isLoaded ? (
+          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Cargando mapa…</div>
+        ) : (
+          <GoogleMap
+            center={center}
+            zoom={value ? 15 : 11}
+            mapContainerClassName="h-full w-full"
+            options={MAP_OPTIONS}
+            onLoad={(map) => {
+              mapRef.current = map;
+            }}
+            onClick={(e) => {
+              if (e.latLng) handlePlace({ latitude: e.latLng.lat(), longitude: e.latLng.lng() });
+            }}
+          >
+            {value && (
+              <MarkerF
+                position={{ lat: value.latitude, lng: value.longitude }}
+                draggable
+                onDragEnd={(e) => {
+                  if (e.latLng) handlePlace({ latitude: e.latLng.lat(), longitude: e.latLng.lng() });
+                }}
+              />
+            )}
+          </GoogleMap>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Buscá tu dirección o hacé clic en el mapa para marcarla — arrastrá el pin para ajustarla.
+        Buscá tu dirección o hacé clic en el mapa para marcarla — arrastrá el pin para ajustarla. El campo Dirección se
+        actualiza solo con lo que quede marcado acá.
         {value && (
           <>
             {" "}
