@@ -9,6 +9,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
+import { canAccessCRM, isDealerPlan } from "@/lib/planChecks";
 import { fetchDealerReportData, generateCSV, generatePDF, shareFile } from "@/lib/reporting";
 import { TrustLevel } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
@@ -1015,6 +1016,33 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+          )}
+
+          {/* CRM personal — Pro Plus lo tiene sin ser agencia (sin el resto
+              del Dealer Dashboard: sin inventario/reportes, eso sigue siendo
+              exclusivo Dealer). El bloque de arriba ya cubre a los dealers. */}
+          {profile?.plan && canAccessCRM(profile.plan) && !isDealerPlan(profile.plan) && (
+            <TouchableOpacity
+              onPress={() => router.push("/(screens)/leads" as any)}
+              style={{
+                marginTop: 12,
+                backgroundColor: theme.card,
+                borderRadius: 12,
+                padding: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
+              <Ionicons name="chatbubbles-outline" size={20} color={theme.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 14 }}>Mis consultas (CRM)</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Organizá y seguí las consultas de tus autos.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            </TouchableOpacity>
           )}
 
           {(profile?.role === 'admin' || profile?.role === 'moderator') && (

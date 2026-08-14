@@ -4,6 +4,7 @@ import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db } from "@/lib/firebase";
+import { canAccessCRM } from "@/lib/planChecks";
 import { sendNotificationEmail } from "@/lib/mail";
 import { Lead, LeadStatus, Offer, OfferSummary } from "@/types/commerce";
 import { formatTimeAgo } from "@/utils/dateUtils";
@@ -69,6 +70,36 @@ export default function LeadsScreen() {
   }
 
   const isDealer = !!profile?.plan && (profile.plan.includes("pro_dealer") || profile.plan.includes("dealer_pro_plus"));
+  // El CRM (esta pantalla entera: ver/gestionar leads, ofertas, marcar
+  // vendido) es una feature de plan desde Pro Plus — antes esto solo
+  // gateaba el header con KPIs de acá abajo, así que cualquier usuario
+  // (incluso free) con un lead propio podía ver y operar todo sin
+  // restricción si llegaba a esta pantalla. Mismo gap que se encontró y
+  // arregló en el portal — se cierra acá también.
+  const hasCRM = !!profile?.plan && canAccessCRM(profile.plan);
+
+  if (!hasCRM) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <Header title="Leads" showBack />
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <Ionicons name="lock-closed-outline" size={40} color={theme.textMuted} style={{ marginBottom: 12, opacity: 0.6 }} />
+          <Text style={{ color: theme.text, fontSize: 16, fontWeight: "700", textAlign: "center", marginBottom: 6 }}>
+            Función exclusiva de planes pagos
+          </Text>
+          <Text style={{ color: theme.textMuted, fontSize: 13, textAlign: "center", lineHeight: 20 }}>
+            El CRM de Leads está disponible desde el plan Pro Plus.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.push("/(screens)/subscribe" as any)}
+            style={{ marginTop: 16, backgroundColor: theme.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999 }}
+          >
+            <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>Ver planes</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const statusOrder: LeadStatus[] = ["new", "contacted", "negotiation", "won", "lost"];
 
@@ -651,12 +682,12 @@ export default function LeadsScreen() {
     <>
       <Header title="Leads" showBack />
       <View style={{ flex: 1 }}>
-        {isDealer && (
+        {hasCRM && (
           <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
             {/* Title + Share */}
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <View>
-                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 16 }}>CRM de Agencia</Text>
+                <Text style={{ color: theme.text, fontWeight: "700", fontSize: 16 }}>{isDealer ? "CRM de Agencia" : "Mis consultas"}</Text>
                 <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
                   Organizá las consultas por tus autos.
                 </Text>
