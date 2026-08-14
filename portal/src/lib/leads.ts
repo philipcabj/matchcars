@@ -45,6 +45,9 @@ export interface LeadListItem {
   dealPrice?: number;
   dealCurrency?: string;
   createdAt?: string | null;
+  // uid de un miembro del equipo (o null = sin asignar) — para agencias con
+  // varios vendedores, saber quién sigue cada lead.
+  assignedTo?: string | null;
 }
 
 // Estado de una oferta formal (types/commerce.ts OfferSummary en la raíz) —
@@ -82,6 +85,7 @@ export interface LeadDetail {
   reasonLost?: string | null;
   offer?: PortalOffer | null;
   createdAt?: string | null;
+  assignedTo?: string | null;
 }
 
 export interface CreateManualLeadInput {
@@ -102,6 +106,13 @@ export interface LeadStats {
   conversionRate: number;
   arsTotal: number;
   usdTotal: number;
+  // Comparación mes actual vs. anterior — a diferencia de vistas/likes (que
+  // son un total corriente sin historial), leads y ventas sí tienen
+  // createdAt/wonAt reales, así que esta comparación no inventa datos.
+  leadsThisMonth: number;
+  leadsLastMonth: number;
+  salesThisMonth: number;
+  salesLastMonth: number;
 }
 
 export interface SalesByMonth {

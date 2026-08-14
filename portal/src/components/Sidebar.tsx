@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Avatar } from "@/components/Avatar";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useAdminRole } from "@/hooks/useAdminRole";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 
@@ -44,16 +45,19 @@ export function Sidebar() {
         <span className="text-sm font-bold">Portal Agencias</span>
       </div>
 
-      <a
-        href={MARKETPLACE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mb-4 flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:border-accent hover:text-accent"
-      >
-        <span>🌐</span>
-        <span>Ver sitio web</span>
-        <span className="ml-auto">↗</span>
-      </a>
+      <div className="mb-4 flex flex-col gap-2">
+        <NotificationBell />
+        <a
+          href={MARKETPLACE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:border-accent hover:text-accent"
+        >
+          <span>🌐</span>
+          <span>Ver sitio web</span>
+          <span className="ml-auto">↗</span>
+        </a>
+      </div>
 
       <nav className="flex flex-1 flex-col gap-1">
         {navItems.map((item) => {

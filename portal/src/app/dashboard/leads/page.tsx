@@ -2,11 +2,22 @@
 "use client";
 
 import { AddLeadForm } from "@/components/AddLeadForm";
+import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { LEAD_STATUS_LABELS, LeadListItem, LeadStats, LeadStatus } from "@/lib/leads";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+
+// Un lead "contactado"/"en negociación" sin ningún mensaje nuevo hace más de
+// esto se resalta — evita que se enfríe una consulta por olvido.
+const STALE_FOLLOWUP_DAYS = 3;
+
+function daysSince(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
+}
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
   new: "bg-blue-500/15 text-blue-600",
@@ -15,6 +26,20 @@ const STATUS_COLORS: Record<LeadStatus, string> = {
   won: "bg-success/15 text-success",
   lost: "bg-error/15 text-error",
 };
+
+function TrendBadge({ current, previous }: { current: number; previous: number }) {
+  if (previous === 0 && current === 0) return null;
+  const diff = current - previous;
+  const pct = previous > 0 ? Math.round((diff / previous) * 100) : null;
+  const color = diff > 0 ? "text-success" : diff < 0 ? "text-error" : "text-muted-foreground";
+  const arrow = diff > 0 ? "↑" : diff < 0 ? "↓" : "→";
+  const label = pct !== null ? `${arrow} ${Math.abs(pct)}%` : diff > 0 ? "nuevo" : "→";
+  return (
+    <span className={`text-xs font-semibold ${color}`}>
+      {label} <span className="font-normal text-muted-foreground">vs. mes pasado ({previous})</span>
+    </span>
+  );
+}
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "";
@@ -27,6 +52,7 @@ function fmtDate(iso: string | null | undefined) {
 
 export default function LeadsPage() {
   const { getIdToken } = useAuth();
+  const { data: agency } = useAgencyMe();
   const [leads, setLeads] = useState<LeadListItem[] | null>(null);
   const [stats, setStats] = useState<LeadStats | null>(null);
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
@@ -105,6 +131,9 @@ export default function LeadsPage() {
           <div className="rounded-xl border border-border bg-card p-3">
             <p className="text-xl font-extrabold">{stats.total}</p>
             <p className="text-xs text-muted-foreground">Total</p>
+            <div className="mt-1">
+              <TrendBadge current={stats.leadsThisMonth} previous={stats.leadsLastMonth} />
+            </div>
           </div>
           <div className="rounded-xl bg-blue-500/10 p-3">
             <p className="text-xl font-extrabold text-blue-600">{stats.newCount}</p>
@@ -133,6 +162,9 @@ export default function LeadsPage() {
           <div className="text-right">
             <p className="text-lg font-extrabold">{stats.conversionRate}%</p>
             <p className="text-xs text-muted-foreground">conversión</p>
+            <div className="mt-1">
+              <TrendBadge current={stats.salesThisMonth} previous={stats.salesLastMonth} />
+            </div>
           </div>
         </div>
       )}
@@ -169,6 +201,8 @@ export default function LeadsPage() {
             const buyerName = manual?.name || (buyer?.firstName || buyer?.lastName ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim() : "Comprador");
             const contactLine = manual ? [manual.phone, manual.email].filter(Boolean).join(" · ") : "";
             const canAct = lead.status !== "won" && lead.status !== "lost";
+            const days = daysSince(lead.lastMessageAt);
+            const isStale = (lead.status === "contacted" || lead.status === "negotiation") && days !== null && days >= STALE_FOLLOWUP_DAYS;
             return (
               <Link
                 key={lead.id}
@@ -184,7 +218,17 @@ export default function LeadsPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="truncate text-sm font-semibold">{title}</p>
-                    {lead.lastMessageAt && <span className="shrink-0 text-xs text-muted-foreground">{fmtDate(lead.lastMessageAt)}</span>}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {isStale && (
+                        <span
+                          className="rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-bold text-error"
+                          title={`Sin seguimiento hace ${days} días`}
+                        >
+                          ⏰ {days}d sin seguir
+                        </span>
+                      )}
+                      {lead.lastMessageAt && <span className="text-xs text-muted-foreground">{fmtDate(lead.lastMessageAt)}</span>}
+                    </div>
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {buyerName}
@@ -206,6 +250,16 @@ export default function LeadsPage() {
                   {lead.lastMessage && <p className="truncate text-xs text-muted-foreground">{lead.lastMessage}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {agency && agency.members.length > 1 && (
+                    <AssigneeSelect
+                      leadId={lead.id}
+                      assignedTo={lead.assignedTo}
+                      members={agency.members}
+                      onAssigned={(uid) =>
+                        setLeads((prev) => prev && prev.map((l) => (l.id === lead.id ? { ...l, assignedTo: uid } : l)))
+                      }
+                    />
+                  )}
                   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[lead.status]}`}>
                     {LEAD_STATUS_LABELS[lead.status]}
                   </span>

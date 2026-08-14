@@ -8,6 +8,10 @@ import { STATUS_BAR_COLOR as BAR_COLOR } from "@/lib/vehicle";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+// Mismo valor que STALE_DAYS_THRESHOLD en api/agency/reports/route.ts — solo
+// para el texto explicativo, no cambia el cálculo (ese es 100% server-side).
+const STALE_DAYS = 30;
+
 function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
@@ -70,6 +74,43 @@ export default function ReportsPage() {
           ))}
         </div>
       </div>
+
+      {data.needsAttention.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-5">
+          <p className="mb-1 text-sm font-semibold">⚠️ Necesitan atención</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Autos activos que nunca generaron un lead — o tienen bastantes vistas y ninguna consulta (puede ser precio
+            o fotos), o llevan más de {STALE_DAYS} días publicados sin movimiento.
+          </p>
+          <div className="flex flex-col gap-2">
+            {data.needsAttention.map((v) => (
+              <Link
+                key={v.id}
+                href={`/dashboard/stock/${v.id}`}
+                className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-background"
+              >
+                <div className="h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-background">
+                  {v.coverImage && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={v.coverImage} alt="" className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {v.brand} {v.model} {v.year}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {v.currency} {v.price?.toLocaleString("es-AR")}
+                  </p>
+                </div>
+                <p className="shrink-0 text-xs font-semibold text-amber-600">
+                  {v.reason === "no_leads_high_views" ? `👁 ${v.views} vistas, 0 leads` : `${v.daysInStock} días sin leads`}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-border bg-card p-5">
         <p className="mb-3 text-sm font-semibold">Más vistos</p>

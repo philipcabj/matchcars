@@ -6,8 +6,10 @@
 // datos de contacto/notas (no hay chat que mostrar).
 "use client";
 
+import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { LEAD_STATUS_LABELS, LeadDetail, LeadMessage, LeadStatus } from "@/lib/leads";
 import Link from "next/link";
@@ -30,6 +32,7 @@ function fmtDateTime(iso: string | null | undefined) {
 export default function LeadDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { getIdToken } = useAuth();
+  const { data: agency } = useAgencyMe();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [messages, setMessages] = useState<LeadMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -216,6 +219,14 @@ export default function LeadDetailPage() {
           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[lead.status]}`}>
             {LEAD_STATUS_LABELS[lead.status]}
           </span>
+          {agency && agency.members.length > 1 && (
+            <AssigneeSelect
+              leadId={lead.id}
+              assignedTo={lead.assignedTo}
+              members={agency.members}
+              onAssigned={(uid) => setLead((prev) => (prev ? { ...prev, assignedTo: uid } : prev))}
+            />
+          )}
           {canAct && (
             <div className="flex gap-2">
               {lead.status !== "negotiation" && (

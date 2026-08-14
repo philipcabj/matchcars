@@ -66,6 +66,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     reasonLost: data.reasonLost ?? null,
     offer: data.offer ?? null,
     createdAt: toIso(data.createdAt),
+    assignedTo: data.assignedTo ?? null,
   });
 });
 
@@ -84,8 +85,23 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (lead.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
 
   const body = await request.json();
-  const action = body.action as "advance" | "lost" | "mark_won" | "mark_vehicle_sold";
+  const action = body.action as "advance" | "lost" | "mark_won" | "mark_vehicle_sold" | "assign";
   const current = lead.status || "new";
+
+  if (action === "assign") {
+    const assignedTo = typeof body.assignedTo === "string" && body.assignedTo ? body.assignedTo : null;
+    if (assignedTo) {
+      // Solo se puede asignar a alguien que realmente sea miembro de la
+      // agencia — evita asignar a un uid arbitrario mandado por el cliente.
+      const memberSnap = await adminDb.doc(`agencies/${agencyId}/members/${assignedTo}`).get();
+      const isOwner = assignedTo === agencyId;
+      if (!isOwner && !memberSnap.exists) {
+        return Response.json({ error: "Ese usuario no es parte de tu equipo." }, { status: 400 });
+      }
+    }
+    await ref.update({ assignedTo });
+    return Response.json({ ok: true });
+  }
 
   if (action === "lost") {
     if (current === "won" || current === "lost") {

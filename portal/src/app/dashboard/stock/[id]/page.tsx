@@ -4,6 +4,7 @@
 // /stock/[id]/edit.
 "use client";
 
+import { FlyerButton } from "@/components/FlyerButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
 import { STATUS_LABELS, TOGGLE_FIELDS, VehicleDetail } from "@/lib/vehicle";
@@ -105,6 +106,7 @@ export default function VehicleDetailPage() {
           ← Volver a Stock
         </Link>
         <div className="flex gap-2">
+          <FlyerButton vehicle={vehicle} />
           <Link
             href={`/ficha/${id}`}
             target="_blank"

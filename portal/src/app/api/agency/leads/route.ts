@@ -51,6 +51,22 @@ function toIso(ts: unknown): string | null {
   return null;
 }
 
+function toDate(ts: unknown): Date | null {
+  if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate();
+  return null;
+}
+
+// Cuenta docs cuyo `field` (timestamp) cae en el mes de `monthDate` — mismo
+// criterio de "mes calendario" que buildSalesByMonth de acá abajo.
+function countInMonth(docs: FirebaseFirestore.DocumentData[], field: string, monthDate: Date): number {
+  const y = monthDate.getFullYear();
+  const m = monthDate.getMonth();
+  return docs.filter((d) => {
+    const date = toDate(d[field]);
+    return date && date.getFullYear() === y && date.getMonth() === m;
+  }).length;
+}
+
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
   const { agencyId, role } = await resolveMembership(uid);
@@ -75,6 +91,7 @@ export const GET = withApiErrors(async (request) => {
         dealPrice: data.dealPrice ?? null,
         dealCurrency: data.dealCurrency ?? null,
         createdAt: toIso(data.createdAt),
+        assignedTo: data.assignedTo ?? null,
       };
     })
     .sort((a, b) => (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? ""));
@@ -90,13 +107,35 @@ export const GET = withApiErrors(async (request) => {
   const usdTotal = wonLeads.filter((l) => l.dealCurrency === "USD").reduce((s, l) => s + (l.dealPrice || 0), 0);
   const conversionRate = total > 0 ? Math.round((wonCount / total) * 100) : 0;
 
-  const salesByMonth = buildSalesByMonth(
-    snap.docs.filter((d) => d.data().status === "won").map((d) => d.data() as { wonAt: unknown; dealPrice?: number; dealCurrency?: string })
-  );
+  const allDocsData = snap.docs.map((d) => d.data());
+  const wonDocsData = allDocsData.filter((d) => d.status === "won");
+  const salesByMonth = buildSalesByMonth(wonDocsData as { wonAt: unknown; dealPrice?: number; dealCurrency?: string }[]);
+
+  const now = new Date();
+  const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const leadsThisMonth = countInMonth(allDocsData, "createdAt", thisMonth);
+  const leadsLastMonth = countInMonth(allDocsData, "createdAt", lastMonth);
+  const salesThisMonth = countInMonth(wonDocsData, "wonAt", thisMonth);
+  const salesLastMonth = countInMonth(wonDocsData, "wonAt", lastMonth);
 
   return Response.json({
     leads,
-    stats: { total, newCount, contactedCount, negotiationCount, wonCount, lostCount, conversionRate, arsTotal, usdTotal },
+    stats: {
+      total,
+      newCount,
+      contactedCount,
+      negotiationCount,
+      wonCount,
+      lostCount,
+      conversionRate,
+      arsTotal,
+      usdTotal,
+      leadsThisMonth,
+      leadsLastMonth,
+      salesThisMonth,
+      salesLastMonth,
+    },
     salesByMonth,
   });
 });
