@@ -35,6 +35,11 @@ export const GET = withApiErrors(async (request) => {
   // "Leads" en el sidebar (Sidebar.tsx ya llama a este endpoint vía
   // useAgencyMe, así que no hace falta un fetch aparte).
   const unreadLeadsCount = leadsSnap.docs.reduce((sum, d) => sum + (d.data().unreadCount || 0), 0);
+  // Cantidad total (no el detalle) — se muestra igual sin CRM, como gancho
+  // de upgrade ("tenés 3 consultas esperando") en vez de una sección vacía
+  // que no explica por qué no hay nada. Es la misma query de arriba, ya
+  // corre para cualquier plan — no cuesta nada extra exponer el total.
+  const leadsCount = leadsSnap.docs.length;
 
   const pendingInvites = pendingInvitesSnap.docs.map((d) => {
     const data = d.data();
@@ -96,6 +101,7 @@ export const GET = withApiErrors(async (request) => {
     members,
     pendingInvites,
     unreadLeadsCount,
+    leadsCount,
     myUid: uid,
     myRole,
     myPermissions: AGENCY_ROLE_PERMISSIONS[myRole],

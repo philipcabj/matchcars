@@ -125,7 +125,8 @@ export default function DashboardPage() {
           .then(setReports)
           .catch(() => {});
       }
-      if (data.myPermissions.manageLeads) {
+      // hasCRM primero: sin acceso al CRM, ni vale la pena pedirlo (daría 403).
+      if (data.hasCRM && data.myPermissions.manageLeads) {
         fetch("/api/agency/leads", { headers })
           .then((res) => parseJsonResponse<{ leads: LeadListItem[]; stats: LeadStats; salesByMonth: SalesByMonth[] }>(res))
           .then(setLeads)
@@ -268,7 +269,7 @@ export default function DashboardPage() {
         />
       )}
 
-      {data.myPermissions.manageLeads && (
+      {data.myPermissions.manageLeads && data.hasCRM && (
         <>
           <BarList
             title="Leads por etapa"
@@ -279,6 +280,26 @@ export default function DashboardPage() {
           />
           {leads && <SalesByMonthChart data={leads.salesByMonth} />}
         </>
+      )}
+
+      {data.myPermissions.manageLeads && !data.hasCRM && (
+        <Link
+          href="/dashboard/plans"
+          className="flex items-center gap-3 rounded-2xl border border-accent/40 bg-accent/5 p-5 transition hover:border-accent"
+        >
+          <span className="text-2xl">🔒</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold">
+              {data.leadsCount > 0
+                ? `Tenés ${data.leadsCount} consulta${data.leadsCount === 1 ? "" : "s"} esperando`
+                : "CRM de Leads"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Organizá y respondé tus consultas desde acá — disponible desde el plan Pro Plus.
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-semibold text-accent">Ver planes →</span>
+        </Link>
       )}
     </div>
   );

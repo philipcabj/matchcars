@@ -35,6 +35,9 @@ export interface AgencyMe {
   members: AgencyMember[];
   pendingInvites: PendingInvite[];
   unreadLeadsCount: number;
+  // Total de leads (sin CRM no se puede ver el detalle, pero sí el conteo —
+  // se usa como teaser de upgrade en el dashboard).
+  leadsCount: number;
   myUid: string;
   myRole: AgencyRole;
   myPermissions: AgencyRolePermissions;
