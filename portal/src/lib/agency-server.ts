@@ -12,7 +12,7 @@ import "server-only";
 
 import { ApiAuthError } from "@/lib/api-auth";
 import { adminDb } from "@/lib/firebase-admin";
-import { AgencyRole, isDealerPlan } from "@/lib/plans";
+import { AgencyRole, canAccessCRM } from "@/lib/plans";
 
 export interface AgencyMembership {
   agencyId: string;
@@ -28,17 +28,17 @@ export async function resolveMembership(uid: string): Promise<AgencyMembership> 
   return { agencyId: uid, role: "owner" };
 }
 
-// El CRM de Leads es una feature de plan (canAccessCRM en plans.ts), no de
-// rol — AGENCY_ROLE_PERMISSIONS.manageLeads solo dice QUIÉN dentro de la
-// agencia puede usarlo, no SI la agencia lo tiene contratado. Sin este
-// chequeo, cualquier plan (incluido gratis) podía usar el CRM completo desde
-// el portal aunque getPlanFeatures() lo muestre como exclusivo de planes
-// Dealer — gap real, no a propósito.
-export async function requireDealerPlan(agencyId: string): Promise<string> {
+// El CRM de Leads es una feature de plan (canAccessCRM en plans.ts: Pro Plus
+// en adelante), no de rol — AGENCY_ROLE_PERMISSIONS.manageLeads solo dice
+// QUIÉN dentro de la agencia puede usarlo, no SI la agencia lo tiene
+// contratado. Sin este chequeo, cualquier plan (incluido gratis) podía usar
+// el CRM completo desde el portal aunque getPlanFeatures() lo muestre como
+// exclusivo — gap real, no a propósito.
+export async function requireCRMAccess(agencyId: string): Promise<string> {
   const snap = await adminDb.doc(`users/${agencyId}`).get();
   const plan: string = snap.data()?.plan || "free";
-  if (!isDealerPlan(plan)) {
-    throw new ApiAuthError("El CRM de Leads está disponible en los planes Dealer.", 403);
+  if (!canAccessCRM(plan)) {
+    throw new ApiAuthError("El CRM de Leads está disponible desde el plan Pro Plus.", 403);
   }
   return plan;
 }

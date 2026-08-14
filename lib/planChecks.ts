@@ -78,11 +78,14 @@ export function canBulkImport(plan: SubscriptionPlan | string): boolean {
 }
 
 /**
- * Check if plan has access to CRM/Leads
+ * Check if plan has access to CRM/Leads. Desde Pro Plus es un CRM personal
+ * (sin equipo — getIncludedSeats da 1 asiento para planes no-dealer, así que
+ * no hay a quién asignarle un lead); desde Pro Dealer se suma la asignación
+ * entre vendedores del equipo.
  */
 export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return isDealerPlan(plan);
+  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
 }
 
 /**

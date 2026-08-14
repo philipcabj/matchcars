@@ -95,11 +95,11 @@ export default function LeadsPage() {
     }
   };
 
-  if (agency && !agency.isDealerPlan) {
+  if (agency && !agency.hasCRM) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
-        <p className="font-semibold">Función exclusiva para agencias</p>
-        <p className="mt-2 text-sm text-muted-foreground">El CRM de Leads está disponible en los planes Dealer.</p>
+        <p className="font-semibold">Función exclusiva de planes pagos</p>
+        <p className="mt-2 text-sm text-muted-foreground">El CRM de Leads está disponible desde el plan Pro Plus.</p>
       </div>
     );
   }

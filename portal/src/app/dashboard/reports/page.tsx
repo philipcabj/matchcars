@@ -21,6 +21,21 @@ function StatTile({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function PeerStat({ label, you, avg, lowerIsBetter }: { label: string; you: number; avg: number; lowerIsBetter?: boolean }) {
+  const diff = you - avg;
+  const better = lowerIsBetter ? diff < 0 : diff > 0;
+  const isEqual = Math.abs(diff) < 0.05;
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-xl font-extrabold">{you.toLocaleString("es-AR")}</p>
+      <p className={`text-xs font-semibold ${isEqual ? "text-muted-foreground" : better ? "text-success" : "text-error"}`}>
+        Promedio: {avg.toLocaleString("es-AR")}
+      </p>
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const { getIdToken } = useAuth();
   const [data, setData] = useState<AgencyReports | null>(null);
@@ -75,7 +90,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {data.needsAttention.length > 0 && (
+      {data.needsAttention && data.needsAttention.length > 0 && (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-5">
           <p className="mb-1 text-sm font-semibold">⚠️ Necesitan atención</p>
           <p className="mb-3 text-xs text-muted-foreground">
@@ -108,6 +123,27 @@ export default function ReportsPage() {
                 </p>
               </Link>
             ))}
+          </div>
+        </div>
+      )}
+
+      {data.peerComparison && (
+        <div className="rounded-2xl border border-accent/40 bg-accent/5 p-5">
+          <p className="mb-1 text-sm font-semibold">📈 Vos vs. el promedio</p>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Comparado contra el promedio de otras {data.peerComparison.peerCount} agencias en planes Dealer.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <PeerStat label="Autos activos" you={data.peerComparison.yourActiveCars} avg={data.peerComparison.avgActiveCars} />
+            <PeerStat label="Vistas por auto" you={data.peerComparison.yourAvgViewsPerCar} avg={data.peerComparison.avgAvgViewsPerCar} />
+            {data.peerComparison.yourAvgDaysInStock !== null && data.peerComparison.avgAvgDaysInStock !== null && (
+              <PeerStat
+                label="Días en stock"
+                you={data.peerComparison.yourAvgDaysInStock}
+                avg={data.peerComparison.avgAvgDaysInStock}
+                lowerIsBetter
+              />
+            )}
           </div>
         </div>
       )}

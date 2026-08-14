@@ -11,7 +11,7 @@
 // eso queda ligado al flujo de venta de la app (mycars.tsx), no portado.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
-import { requireDealerPlan, resolveMembership } from "@/lib/agency-server";
+import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { CreateManualLeadInput, SalesByMonth } from "@/lib/leads";
@@ -73,7 +73,7 @@ export const GET = withApiErrors(async (request) => {
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para ver los leads." }, { status: 403 });
   }
-  await requireDealerPlan(agencyId);
+  await requireCRMAccess(agencyId);
 
   const snap = await adminDb.collection("leads").where("sellerId", "==", agencyId).get();
 
@@ -147,7 +147,7 @@ export const POST = withApiErrors(async (request) => {
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
-  await requireDealerPlan(agencyId);
+  await requireCRMAccess(agencyId);
 
   const body = (await request.json()) as Partial<CreateManualLeadInput>;
   const name = body.name?.trim();

@@ -80,7 +80,7 @@ export function can(role: AgencyRole, permission: keyof AgencyRolePermissions): 
 export function getIncludedSeats(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
   if (plan.includes("dealer_pro_plus")) return 5;
-  if (plan.includes("pro_dealer")) return 2;
+  if (plan.includes("pro_dealer")) return 3;
   return 1; // Planes no-dealer: solo el dueño de la cuenta, sin equipo.
 }
 
@@ -104,8 +104,25 @@ export function canBulkImport(plan: SubscriptionPlan | string): boolean {
   return isDealerPlan(plan);
 }
 
+// Desde Pro Plus es un CRM personal (sin equipo — getIncludedSeats da 1
+// asiento para planes no-dealer, así que no hay a quién asignarle un lead);
+// desde Pro Dealer se suma la asignación entre vendedores.
 export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+}
+
+// "Reportes avanzados" (sección "necesitan atención") — exclusivo Dealer+,
+// a diferencia de las métricas básicas que ve cualquier plan pago.
+export function hasAdvancedReports(plan: SubscriptionPlan | string): boolean {
   return isDealerPlan(plan);
+}
+
+// Panel comparativo (tu agencia vs. el promedio de otras agencias Dealer) —
+// exclusivo de Dealer Pro Plus, el escalón de tope.
+export function hasPeerComparison(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return plan.includes("dealer_pro_plus");
 }
 
 export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
@@ -153,11 +170,13 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
 
   if (canUploadVideo(plan)) features.push("📹 Video Walkaround");
   if (canExportPDF(plan)) features.push("📄 Ficha PDF con QR");
-  if (canAccessCRM(plan)) features.push("📞 CRM de Leads");
-  if (canBulkImport(plan)) features.push("💻 Carga Masiva (CSV)");
 
   const seats = getIncludedSeats(plan);
-  if (seats > 1) features.push(`👥 Hasta ${seats} usuarios de equipo`);
+  if (canAccessCRM(plan)) features.push(seats > 1 ? "📞 CRM de Leads con equipo" : "📞 CRM personal de consultas");
+  if (canBulkImport(plan)) features.push("💻 Carga Masiva (CSV)");
+  if (seats > 1) features.push(`👥 Hasta ${seats} usuarios de portal`);
+  if (hasAdvancedReports(plan)) features.push("📊 Reportes avanzados");
+  if (hasPeerComparison(plan)) features.push("📈 Panel comparativo vs. otras agencias");
 
   return features;
 }

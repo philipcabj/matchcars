@@ -24,6 +24,9 @@ export interface AgencyMe {
   plan: string;
   planLabel: string;
   isDealerPlan: boolean;
+  // Desde Pro Plus (CRM personal, sin equipo); Pro Dealer+ suma asignación
+  // entre vendedores — ver canAccessCRM en lib/plans.ts.
+  hasCRM: boolean;
   features: string[];
   usage: {
     vehicles: { used: number; limit: number | null };

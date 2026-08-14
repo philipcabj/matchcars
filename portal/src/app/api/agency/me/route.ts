@@ -6,7 +6,7 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS, getIncludedSeats, getMaxCars, getPlanFeatures, getPlanLabel } from "@/lib/plans";
+import { AGENCY_ROLE_PERMISSIONS, canAccessCRM, getIncludedSeats, getMaxCars, getPlanFeatures, getPlanLabel } from "@/lib/plans";
 
 const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold"];
 
@@ -87,6 +87,7 @@ export const GET = withApiErrors(async (request) => {
     plan,
     planLabel: getPlanLabel(plan),
     isDealerPlan: /pro_dealer|dealer_pro_plus/.test(plan),
+    hasCRM: canAccessCRM(plan),
     features: getPlanFeatures(plan),
     usage: {
       vehicles: { used: activeVehicles, limit: Number.isFinite(maxCars) ? maxCars : null },
