@@ -7,7 +7,7 @@
 // (la rama "counter_accepted" es para cuando el que acepta es el comprador).
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
-import { resolveMembership } from "@/lib/agency-server";
+import { requireDealerPlan, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
@@ -28,6 +28,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
+  await requireDealerPlan(agencyId);
 
   const { id } = await ctx.params;
   const ref = adminDb.doc(`leads/${id}`);

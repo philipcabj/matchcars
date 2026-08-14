@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { LEAD_STATUS_LABELS, LeadListItem, LeadStats, LeadStatus } from "@/lib/leads";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 // Un lead "contactado"/"en negociación" sin ningún mensaje nuevo hace más de
@@ -51,6 +51,7 @@ function fmtDate(iso: string | null | undefined) {
 }
 
 export default function LeadsPage() {
+  const router = useRouter();
   const { getIdToken } = useAuth();
   const { data: agency } = useAgencyMe();
   const [leads, setLeads] = useState<LeadListItem[] | null>(null);
@@ -94,6 +95,14 @@ export default function LeadsPage() {
     }
   };
 
+  if (agency && !agency.isDealerPlan) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
+        <p className="font-semibold">Función exclusiva para agencias</p>
+        <p className="mt-2 text-sm text-muted-foreground">El CRM de Leads está disponible en los planes Dealer.</p>
+      </div>
+    );
+  }
   if (error && !leads) return <p className="text-sm text-error">No pudimos cargar los leads: {error}</p>;
   if (!leads || !stats) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
@@ -204,10 +213,15 @@ export default function LeadsPage() {
             const days = daysSince(lead.lastMessageAt);
             const isStale = (lead.status === "contacted" || lead.status === "negotiation") && days !== null && days >= STALE_FOLLOWUP_DAYS;
             return (
-              <Link
+              // No es un <Link> a propósito: la fila tiene un <select> (asignar)
+              // adentro, y un <select> dentro de un <a> es HTML inválido — los
+              // navegadores manejan mal el click ahí (se navegaba en vez de
+              // abrir el desplegable). Con un <div> + navegación programática,
+              // los controles internos solo necesitan stopPropagation.
+              <div
                 key={lead.id}
-                href={`/dashboard/leads/${lead.id}`}
-                className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 transition hover:border-accent sm:flex-row sm:items-center"
+                onClick={() => router.push(`/dashboard/leads/${lead.id}`)}
+                className="flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-card p-3 transition hover:border-accent sm:flex-row sm:items-center"
               >
                 <div
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
@@ -267,7 +281,7 @@ export default function LeadsPage() {
                     <button
                       disabled={busyId === lead.id}
                       onClick={(e) => {
-                        e.preventDefault();
+                        e.stopPropagation();
                         runAction(lead.id, "advance");
                       }}
                       className="rounded-full border border-border px-2.5 py-1 text-xs font-semibold disabled:opacity-50"
@@ -276,7 +290,7 @@ export default function LeadsPage() {
                     </button>
                   )}
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>

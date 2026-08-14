@@ -60,7 +60,15 @@ export const GET = withApiErrors(async (request) => {
           uid: agencyId,
           role: "owner",
           email: ownerData.email ?? null,
-          name: ownerData.agencyName || ownerData.displayName || ownerData.email || "Dueño/a",
+          // Nombre y apellido de la persona, no el nombre comercial de la
+          // agencia (ese ya se ve arriba, en el header) — importante sobre
+          // todo para el selector de "quién sigue este lead".
+          name:
+            `${ownerData.firstName ?? ""} ${ownerData.lastName ?? ""}`.trim() ||
+            ownerData.displayName ||
+            ownerData.agencyName ||
+            ownerData.email ||
+            "Dueño/a",
           isImplicitOwner: true, // Todavía no tiene doc propio en /members — es normal en v1.
         },
         ...explicitMembers,

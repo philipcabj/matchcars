@@ -173,6 +173,14 @@ export default function LeadDetailPage() {
     }
   };
 
+  if (agency && !agency.isDealerPlan) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
+        <p className="font-semibold">Función exclusiva para agencias</p>
+        <p className="mt-2 text-sm text-muted-foreground">El CRM de Leads está disponible en los planes Dealer.</p>
+      </div>
+    );
+  }
   if (error && !lead) return <p className="text-sm text-error">No pudimos abrir este lead: {error}</p>;
   if (!lead) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 

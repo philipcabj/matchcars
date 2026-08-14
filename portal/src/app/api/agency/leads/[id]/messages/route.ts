@@ -12,7 +12,7 @@
 // hilo de chat — no aplica.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
-import { resolveMembership } from "@/lib/agency-server";
+import { requireDealerPlan, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
@@ -37,6 +37,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para ver los leads." }, { status: 403 });
   }
+  await requireDealerPlan(agencyId);
 
   const { id } = await ctx.params;
   const { lead } = await loadOwnedLead(agencyId, id);
@@ -68,6 +69,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
+  await requireDealerPlan(agencyId);
 
   const { id } = await ctx.params;
   const { ref, lead } = await loadOwnedLead(agencyId, id);

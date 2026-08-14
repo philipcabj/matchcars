@@ -7,7 +7,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { AGENCY_ROLE_PERMISSIONS, canUploadVideo } from "@/lib/plans";
 import { FieldValue, type DocumentReference, type DocumentSnapshot } from "firebase-admin/firestore";
 
 async function loadOwnedVehicle(
@@ -93,6 +93,11 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   const toggles = body.toggles ?? {};
   const priceChanged = priceNum !== existing.price || currency !== existing.currency;
 
+  // Plan actual (no el que tenía al publicar — puede haber bajado de plan
+  // desde entonces) para no dejar guardar un campo que ya no le corresponde.
+  const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+  const plan: string = ownerSnap.data()?.plan || "free";
+
   const update: Record<string, unknown> = {
     brand: body.brand.trim(),
     model: body.model.trim(),
@@ -111,7 +116,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     warranty: !!toggles.warranty,
     location: { province: body.province || null, city: body.city || null },
     images: { cover: body.coverImage, gallery: body.gallery ?? [] },
-    video: body.video || null,
+    video: canUploadVideo(plan) ? body.video || null : null,
     acceptsFinancing: !!toggles.acceptsFinancing,
     negotiablePrice: !!toggles.negotiablePrice,
     immediateDelivery: !!toggles.immediateDelivery,

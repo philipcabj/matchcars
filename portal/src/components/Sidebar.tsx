@@ -12,16 +12,16 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
 
 const NAV_ITEMS = [
-  { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true },
-  { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true },
-  { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true },
-  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true },
-  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true },
-  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true },
-  { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true },
+  { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true, dealerOnly: false },
+  { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true, dealerOnly: false },
+  { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true, dealerOnly: false },
+  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, dealerOnly: false },
+  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, dealerOnly: true },
+  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, dealerOnly: false },
+  { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, dealerOnly: false },
 ];
 
-const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true };
+const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true, dealerOnly: false };
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -63,6 +63,7 @@ export function Sidebar() {
         {navItems.map((item) => {
           const active = item.href === "/dashboard" ? pathname === item.href : pathname?.startsWith(item.href);
           const unread = item.href === "/dashboard/leads" ? agency?.unreadLeadsCount ?? 0 : 0;
+          const locked = item.dealerOnly && !!agency && !agency.isDealerPlan;
           const className = `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
             active ? "bg-accent/10 text-accent" : item.enabled ? "text-foreground hover:bg-background" : "cursor-default text-muted-foreground/60"
           }`;
@@ -75,7 +76,15 @@ export function Sidebar() {
                   pronto
                 </span>
               )}
-              {unread > 0 && (
+              {item.enabled && locked && (
+                <span
+                  className="ml-auto rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                  title="Exclusivo de planes Dealer"
+                >
+                  🔒 Dealer
+                </span>
+              )}
+              {!locked && unread > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[10px] font-bold text-white">
                   {unread > 99 ? "99+" : unread}
                 </span>

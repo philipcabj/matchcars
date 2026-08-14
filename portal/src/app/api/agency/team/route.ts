@@ -67,7 +67,13 @@ export const POST = withApiErrors(async (request) => {
     const memberData = {
       role,
       email,
-      name: targetData.agencyName || targetData.displayName || `${targetData.firstName ?? ""} ${targetData.lastName ?? ""}`.trim() || email,
+      // Nombre y apellido de la persona primero — agencyName es su nombre
+      // comercial (si lo tiene), no quién es, y confunde en listas de equipo.
+      name:
+        `${targetData.firstName ?? ""} ${targetData.lastName ?? ""}`.trim() ||
+        targetData.displayName ||
+        targetData.agencyName ||
+        email,
       addedAt: FieldValue.serverTimestamp(),
       addedBy: uid,
     };

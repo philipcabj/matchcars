@@ -54,10 +54,12 @@ export function NotificationBell() {
                 >
                   <span className="shrink-0 text-base">{TYPE_ICON[item.type]}</span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-semibold">{item.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-semibold">{item.title}</p>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{fmtRelative(item.at)}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{item.subtitle}</p>
                   </div>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">{fmtRelative(item.at)}</span>
                 </Link>
               ))
             )}

@@ -12,7 +12,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS, getMaxCars } from "@/lib/plans";
+import { AGENCY_ROLE_PERMISSIONS, canUploadVideo, getMaxCars } from "@/lib/plans";
 import { EXCLUDED_STATUSES, VehicleFormValues } from "@/lib/vehicle";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -117,7 +117,9 @@ export const POST = withApiErrors(async (request) => {
       cover: body.coverImage,
       gallery: body.gallery ?? [],
     },
-    video: body.video || null,
+    // El form ya oculta este campo si el plan no incluye video (VehicleForm.tsx),
+    // pero eso es solo UI — sin este chequeo, un POST directo lo podía saltear.
+    video: canUploadVideo(plan) ? body.video || null : null,
     acceptsFinancing: !!toggles.acceptsFinancing,
     negotiablePrice: !!toggles.negotiablePrice,
     immediateDelivery: !!toggles.immediateDelivery,

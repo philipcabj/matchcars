@@ -11,7 +11,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { NotificationItem } from "@/lib/notifications";
-import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { AGENCY_ROLE_PERMISSIONS, isDealerPlan } from "@/lib/plans";
 
 function toIso(ts: unknown): string | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
@@ -26,6 +26,13 @@ export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
   const { agencyId, role } = await resolveMembership(uid);
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+    return Response.json({ items: [] });
+  }
+  // Silencioso a propósito (a diferencia de requireDealerPlan, que tira
+  // error): esto es un poll de fondo para la campanita, no una página — un
+  // plan sin CRM simplemente no tiene nada de leads/ofertas que mostrar acá.
+  const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+  if (!isDealerPlan(ownerSnap.data()?.plan || "free")) {
     return Response.json({ items: [] });
   }
 
