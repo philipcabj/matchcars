@@ -62,14 +62,6 @@ export function canExportPDF(plan: SubscriptionPlan | string): boolean {
 }
 
 /**
- * Check if plan allows market price analysis
- */
-export function canViewPriceAnalysis(plan: SubscriptionPlan | string): boolean {
-  if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
-}
-
-/**
  * Check if plan has access to dealer/agency tools
  */
 export function isDealerPlan(plan: SubscriptionPlan | string): boolean {
@@ -203,10 +195,10 @@ export function getPlanBadgeInfo(plan: SubscriptionPlan | string): {
  */
 export function shouldPromptUpgrade(
   plan: SubscriptionPlan | string,
-  feature: "video" | "ai" | "pdf" | "crm" | "price_analysis"
+  feature: "video" | "ai" | "pdf" | "crm"
 ): boolean {
   if (!plan || plan === "free") return false; // Can ask for any feature if free
-  
+
   switch (feature) {
     case "video":
     case "ai":
@@ -215,8 +207,6 @@ export function shouldPromptUpgrade(
       return !canExportPDF(plan);
     case "crm":
       return !canAccessCRM(plan);
-    case "price_analysis":
-      return !canViewPriceAnalysis(plan);
     default:
       return false;
   }
@@ -280,11 +270,7 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
   if (hasWeekendBoost(plan)) {
     features.push("🚀 Boost fines de semana");
   }
-  
-  if (canViewPriceAnalysis(plan)) {
-    features.push("📈 Análisis de Precio de Mercado");
-  }
-  
+
   if (canExportPDF(plan)) {
     features.push("📄 Ficha PDF con QR");
   }

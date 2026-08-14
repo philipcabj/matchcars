@@ -113,11 +113,6 @@ export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
   return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
 }
 
-export function canViewPriceAnalysis(plan: SubscriptionPlan | string): boolean {
-  if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
-}
-
 export function canExportPDF(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
   return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
@@ -157,7 +152,6 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
   else if (featured > 0) features.push(`⭐ ${featured} destacados/mes`);
 
   if (canUploadVideo(plan)) features.push("📹 Video Walkaround");
-  if (canViewPriceAnalysis(plan)) features.push("📈 Análisis de Precio de Mercado");
   if (canExportPDF(plan)) features.push("📄 Ficha PDF con QR");
   if (canAccessCRM(plan)) features.push("📞 CRM de Leads");
   if (canBulkImport(plan)) features.push("💻 Carga Masiva (CSV)");

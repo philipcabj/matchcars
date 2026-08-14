@@ -55,7 +55,6 @@ export const PLAN_PRICING: PlanPricing[] = [
       "🚗 Hasta 7 autos activos",
       "⭐ 5 destacados por mes",
       "🚀 Boost automático fines de semana",
-      "📈 Análisis de Precio de Mercado",
       "📄 Ficha PDF con QR",
       "📹 Video Walkaround",
       "🏷️ Badge PRO Plus",
