@@ -140,6 +140,19 @@ export function canUseWatermark(plan: SubscriptionPlan | string): boolean {
   return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
 }
 
+// Gastos por unidad / margen — útil incluso para un vendedor solo (Pro+),
+// no requiere equipo. Free queda afuera, es una herramienta de gestión.
+export function canTrackExpenses(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return plan !== "free";
+}
+
+// Comisiones — a diferencia de gastos/margen, no tiene sentido sin equipo a
+// quien pagarle (getIncludedSeats da 1 asiento para planes no-dealer).
+export function canManageCommissions(plan: SubscriptionPlan | string): boolean {
+  return isDealerPlan(plan);
+}
+
 export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): number {
   if (!plan) return 0;
   if (plan.includes("dealer_pro_plus")) return Infinity;

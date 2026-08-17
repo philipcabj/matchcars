@@ -322,7 +322,7 @@ export function WebDealerAddCarForm() {
       try {
         const qAll = query(collection(db, "vehicles"), where("userId", "==", userId));
         const snapshot = await getDocs(qAll);
-        const EXCLUDED_STATUSES = ["deleted", "rejected", "blocked", "sold"];
+        const EXCLUDED_STATUSES = ["deleted", "rejected", "blocked", "sold", "a_preparar"];
         const activeCount = snapshot.docs.filter((d) => {
           const status = (d.data().status as string) || "available";
           return !EXCLUDED_STATUSES.includes(status);

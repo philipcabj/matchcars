@@ -3,7 +3,7 @@
 // en la raíz). No es una copia completa del tipo original — solo los campos que
 // este formulario del portal realmente lee/escribe — pero el shape del documento
 // que se guarda en Firestore es 100% compatible con lo que la app ya renderiza.
-export const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold"];
+export const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold", "a_preparar"];
 
 export const FUEL_OPTIONS = ["Nafta", "Diésel", "Híbrido", "Eléctrico", "GNC"];
 export const GEARBOX_OPTIONS = ["Manual", "Automática"];
@@ -85,6 +85,8 @@ export interface VehicleDetail extends VehicleFormValues {
   createdAt: string | null;
   priceHistory: { price: number; currency: string; changedAt: string | null }[];
   publicationCode: number | null;
+  purchasePrice: number | null;
+  expensesTotal: number;
 }
 
 // Color sólido por estado, para barras/gráficos (a diferencia de STATUS_LABELS.className,
@@ -95,6 +97,7 @@ export const STATUS_BAR_COLOR: Record<string, string> = {
   pending_review: "bg-accent",
   sold: "bg-muted-foreground",
   reserved: "bg-cyan-500",
+  a_preparar: "bg-amber-500",
   rejected: "bg-error",
   rejected_limit: "bg-error",
   blocked: "bg-error",
@@ -106,6 +109,10 @@ export const STATUS_LABELS: Record<string, { label: string; className: string }>
   pending_review: { label: "En revisión", className: "bg-accent/15 text-accent" },
   sold: { label: "Vendido", className: "bg-muted/20 text-muted-foreground" },
   reserved: { label: "Reservado", className: "bg-cyan-500/15 text-cyan-600" },
+  // Auto que entró como parte de pago en una operación de venta — no está
+  // publicado hasta que la agencia lo revise/complete (ver Módulo A,
+  // saleOperations.parteDePago.agregadoAlStock).
+  a_preparar: { label: "A preparar", className: "bg-amber-500/15 text-amber-600" },
   rejected: { label: "Rechazado", className: "bg-error/15 text-error" },
   rejected_limit: { label: "Rechazado (límite de plan)", className: "bg-error/15 text-error" },
   blocked: { label: "Bloqueado", className: "bg-error/15 text-error" },

@@ -8,7 +8,7 @@ import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canAccessCRM, getIncludedSeats, getMaxCars, getPlanFeatures, getPlanLabel } from "@/lib/plans";
 
-const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold"];
+const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold", "a_preparar"];
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);

@@ -4,9 +4,12 @@
 // /stock/[id]/edit.
 "use client";
 
+import { CostsCard } from "@/components/CostsCard";
 import { FlyerButton } from "@/components/FlyerButton";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
+import { canTrackExpenses } from "@/lib/plans";
 import { STATUS_LABELS, TOGGLE_FIELDS, VehicleDetail } from "@/lib/vehicle";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -75,6 +78,7 @@ function Lightbox({ photos, index, onClose, onNavigate }: { photos: string[]; in
 export default function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { getIdToken } = useAuth();
+  const { data: agency } = useAgencyMe();
   const [vehicle, setVehicle] = useState<VehicleDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -225,6 +229,16 @@ export default function VehicleDetailPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {agency && canTrackExpenses(agency.plan) && (
+        <CostsCard
+          vehicleId={id}
+          price={Number(vehicle.price)}
+          currency={vehicle.currency}
+          purchasePrice={vehicle.purchasePrice}
+          expensesTotal={vehicle.expensesTotal}
+        />
       )}
 
       {vehicle.priceHistory.length > 1 && (

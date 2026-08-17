@@ -8,7 +8,7 @@ import { STATUS_LABELS, VehicleListItem } from "@/lib/vehicle";
 import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
 
-type StatusFilter = "all" | "available" | "pending_review" | "reserved" | "sold" | "rejected" | "deleted";
+type StatusFilter = "all" | "available" | "pending_review" | "reserved" | "a_preparar" | "sold" | "rejected" | "deleted";
 type SortOption = "recent" | "price_desc" | "price_asc" | "name";
 
 const FILTER_DEFS: { key: StatusFilter; label: string }[] = [
@@ -16,6 +16,7 @@ const FILTER_DEFS: { key: StatusFilter; label: string }[] = [
   { key: "available", label: "Publicados" },
   { key: "pending_review", label: "En revisión" },
   { key: "reserved", label: "Reservados" },
+  { key: "a_preparar", label: "A preparar" },
   { key: "sold", label: "Vendidos" },
   { key: "rejected", label: "Rechazados" },
   { key: "deleted", label: "Eliminados" },

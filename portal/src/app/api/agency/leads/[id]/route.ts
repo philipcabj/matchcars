@@ -17,10 +17,11 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
+import { calculateCommission, CommissionRule, DEFAULT_COMMISSION_RULE } from "@/lib/commissions";
 import { LEAD_STATUS_LABELS, LeadStatus } from "@/lib/leads";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
-import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { AGENCY_ROLE_PERMISSIONS, canManageCommissions } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
 
 const TERMINAL_OFFER_STATUSES = ["rejected", "withdrawn", "expired"];
@@ -176,6 +177,35 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     const pendingConfirmation = !!lead.buyerId;
     const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
+    // Comisión (Módulo C) — solo si hay un vendedor asignado distinto del
+    // dueño (el dueño no se paga comisión a sí mismo) y el plan la incluye.
+    // Se calcula acá, no después, para que quede una foto fija de la regla
+    // vigente al momento del cierre — si la agencia cambia la regla más
+    // adelante, no debería recalcular ventas ya cerradas.
+    const dealPrice = lead.dealPrice || 0;
+    const dealCurrency = lead.dealCurrency || "ARS";
+    let commission: { sellerUid: string; amount: number; currency: string; margin: number | null; rule: CommissionRule } | null = null;
+    if (lead.assignedTo && lead.assignedTo !== agencyId) {
+      const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+      if (canManageCommissions(ownerSnap.data()?.plan || "free")) {
+        const ruleSnap = await adminDb.doc(`agencies/${agencyId}/settings/commissionRule`).get();
+        const rule: CommissionRule = ruleSnap.exists ? (ruleSnap.data() as CommissionRule) : DEFAULT_COMMISSION_RULE;
+        // margin en null si no se cargó costo de compra — no se asume 0 de
+        // costo (sobreestimaría el margen), simplemente esa regla no aplica.
+        const vehicleForMargin = await vehicleRef.get();
+        const purchasePrice = vehicleForMargin.data()?.purchasePrice;
+        const expensesTotal = vehicleForMargin.data()?.expensesTotal || 0;
+        const margin = typeof purchasePrice === "number" ? dealPrice - purchasePrice - expensesTotal : null;
+        commission = {
+          sellerUid: lead.assignedTo,
+          amount: calculateCommission(rule, dealPrice, margin),
+          currency: dealCurrency,
+          margin,
+          rule,
+        };
+      }
+    }
+
     await adminDb.runTransaction(async (t) => {
       const vehicleSnap = await t.get(vehicleRef);
       if (!vehicleSnap.exists) throw new Error("El auto ya no existe.");
@@ -193,13 +223,14 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
           vehicleId: lead.vehicleId,
           sellerId: agencyId,
           buyerId: lead.buyerId || "",
-          finalPrice: lead.dealPrice || 0,
-          currency: lead.dealCurrency || "ARS",
+          finalPrice: dealPrice,
+          currency: dealCurrency,
           soldAt: FieldValue.serverTimestamp(),
           source: "matchcars",
           vehicleSnapshot: lead.vehicleSnapshot ?? {},
           confirmedByBuyer: pendingConfirmation ? null : true,
           ...(pendingConfirmation ? { buyerConfirmDeadline: deadline } : { confirmedAt: FieldValue.serverTimestamp() }),
+          ...(commission ? { commission } : {}),
         },
         { merge: true }
       );

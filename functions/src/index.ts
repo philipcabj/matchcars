@@ -27,6 +27,7 @@ const EXCLUDED_STATUSES = [
   "rejected_limit",
   "blocked",
   "sold",
+  "a_preparar",
 ];
 
 const FEATURED_DURATION_DAYS = 7;

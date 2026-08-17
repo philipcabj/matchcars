@@ -11,17 +11,21 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
 
-const NAV_ITEMS = [
-  { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true, crmOnly: false },
-  { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true, crmOnly: false },
-  { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true, crmOnly: false },
-  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, crmOnly: false },
-  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, crmOnly: true },
-  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, crmOnly: false },
-  { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, crmOnly: false },
+type Gate = "none" | "crm" | "dealer";
+
+const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; gate: Gate }[] = [
+  { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true, gate: "none" },
+  { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true, gate: "none" },
+  { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true, gate: "none" },
+  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, gate: "none" },
+  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm" },
+  { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "dealer" },
+  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none" },
+  { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
 ];
 
-const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true, crmOnly: false };
+const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true, gate: "none" as Gate };
+const GATE_LABEL: Record<Gate, string> = { none: "", crm: "🔒 Pro Plus", dealer: "🔒 Dealer" };
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -63,7 +67,9 @@ export function Sidebar() {
         {navItems.map((item) => {
           const active = item.href === "/dashboard" ? pathname === item.href : pathname?.startsWith(item.href);
           const unread = item.href === "/dashboard/leads" ? agency?.unreadLeadsCount ?? 0 : 0;
-          const locked = item.crmOnly && !!agency && !agency.hasCRM;
+          const locked =
+            !!agency &&
+            ((item.gate === "crm" && !agency.hasCRM) || (item.gate === "dealer" && !agency.isDealerPlan));
           const className = `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
             active ? "bg-accent/10 text-accent" : item.enabled ? "text-foreground hover:bg-background" : "cursor-default text-muted-foreground/60"
           }`;
@@ -77,11 +83,8 @@ export function Sidebar() {
                 </span>
               )}
               {item.enabled && locked && (
-                <span
-                  className="ml-auto rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
-                  title="Exclusivo desde el plan Pro Plus"
-                >
-                  🔒 Pro Plus
+                <span className="ml-auto rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {GATE_LABEL[item.gate]}
                 </span>
               )}
               {!locked && unread > 0 && (

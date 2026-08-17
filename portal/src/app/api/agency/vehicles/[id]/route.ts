@@ -63,6 +63,8 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     likesCount: data.likesCount ?? 0,
     createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
     publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
+    purchasePrice: typeof data.purchasePrice === "number" ? data.purchasePrice : null,
+    expensesTotal: typeof data.expensesTotal === "number" ? data.expensesTotal : 0,
     priceHistory: (data.priceHistory ?? []).map((h: { price: number; currency: string; changedAt?: { toDate?: () => Date } }) => ({
       price: h.price,
       currency: h.currency,

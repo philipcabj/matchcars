@@ -19,7 +19,7 @@ import { AttentionItem, PeerComparison } from "@/lib/reports";
 import { AGENCY_ROLE_PERMISSIONS, hasAdvancedReports, hasPeerComparison } from "@/lib/plans";
 import { STATUS_LABELS } from "@/lib/vehicle";
 
-const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold"];
+const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold", "a_preparar"];
 const HIGH_VIEWS_THRESHOLD = 15;
 const STALE_DAYS_THRESHOLD = 30;
 const MAX_ATTENTION_ITEMS = 6;
