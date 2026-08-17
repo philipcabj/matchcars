@@ -23,17 +23,22 @@ export const GET = withApiErrors(async (request) => {
   const vehicles = snap.docs
     .map((d) => {
       const data = d.data();
+      const margin = typeof data.purchasePrice === "number" ? (data.price ?? 0) - data.purchasePrice - (data.expensesTotal || 0) : null;
       return {
         id: d.id,
         brand: data.brand ?? null,
         model: data.model ?? null,
+        version: data.version ?? null,
+        licensePlate: data.licensePlate ?? null,
         year: data.year ?? null,
         price: data.price ?? null,
         currency: data.currency ?? null,
+        km: data.km ?? null,
         status: data.status ?? "available",
         coverImage: data.images?.cover ?? data.coverImage ?? null,
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
         publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
+        margin,
       };
     })
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
@@ -101,6 +106,7 @@ export const POST = withApiErrors(async (request) => {
     km: kmNum,
     fuelType: body.fuelType || null,
     gearbox: body.gearbox || null,
+    licensePlate: body.licensePlate ? body.licensePlate.trim().toUpperCase() : null,
     description: body.description || null,
 
     singleOwner: !!toggles.singleOwner,

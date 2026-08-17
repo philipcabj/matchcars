@@ -12,7 +12,7 @@ import { parseJsonResponse } from "@/lib/api-client";
 import { canTrackExpenses } from "@/lib/plans";
 import { STATUS_LABELS, TOGGLE_FIELDS, VehicleDetail } from "@/lib/vehicle";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 function Lightbox({ photos, index, onClose, onNavigate }: { photos: string[]; index: number; onClose: () => void; onNavigate: (i: number) => void }) {
@@ -77,11 +77,28 @@ function Lightbox({ photos, index, onClose, onNavigate }: { photos: string[]; in
 
 export default function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { getIdToken } = useAuth();
   const { data: agency } = useAgencyMe();
   const [vehicle, setVehicle] = useState<VehicleDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/vehicles/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      await parseJsonResponse(res);
+      router.replace("/dashboard/stock");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -124,8 +141,39 @@ export default function VehicleDetailPage() {
           >
             Editar
           </Link>
+          {vehicle.status !== "deleted" && (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="rounded-lg border border-error/40 px-4 py-2 text-sm font-semibold text-error"
+            >
+              Eliminar
+            </button>
+          )}
         </div>
       </div>
+
+      {confirmingDelete && (
+        <div className="rounded-xl border border-error/40 bg-error/5 p-4">
+          <p className="text-sm font-semibold text-error">¿Eliminar esta publicación?</p>
+          <p className="mt-1 text-xs text-muted-foreground">Esta acción no se puede deshacer.</p>
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {deleting ? "Eliminando…" : "Sí, eliminar"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div>
         <div className="flex flex-wrap items-center gap-2">
@@ -208,6 +256,10 @@ export default function VehicleDetailPage() {
         <div>
           <p className="text-xs text-muted-foreground">Ubicación</p>
           <p className="text-sm font-semibold">{[vehicle.city, vehicle.province].filter(Boolean).join(", ") || "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Patente / Dominio</p>
+          <p className="font-mono text-sm font-semibold">{vehicle.licensePlate || "—"}</p>
         </div>
       </div>
 

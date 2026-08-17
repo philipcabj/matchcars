@@ -32,6 +32,10 @@ export interface VehicleFormValues {
   km: string;
   fuelType: string;
   gearbox: string;
+  // Patente/dominio — identificador único del auto físico, no existía en
+  // ningún lado del modelo hasta ahora. Sin formato forzado a propósito: hay
+  // patentes viejas (ABC123) y Mercosur (AB123CD) en circulación.
+  licensePlate: string;
   description: string;
   province: string;
   city: string;
@@ -51,6 +55,7 @@ export const EMPTY_VEHICLE_FORM: VehicleFormValues = {
   km: "",
   fuelType: "",
   gearbox: "",
+  licensePlate: "",
   description: "",
   province: "",
   city: "",
@@ -63,14 +68,20 @@ export const EMPTY_VEHICLE_FORM: VehicleFormValues = {
 export interface VehicleListItem {
   id: string;
   brand?: string;
+  licensePlate?: string;
   model?: string;
+  version?: string;
   year?: number;
   price?: number;
   currency?: string;
+  km?: number;
   status?: string;
   coverImage?: string;
   createdAt?: string | null;
   publicationCode?: number | null;
+  // margin es null si nunca se cargó el costo de compra — no se muestra
+  // "$0 de margen", se oculta el dato (ver CostsCard/Módulo C).
+  margin?: number | null;
 }
 
 // Superset de VehicleFormValues (mismos campos, mismo shape string-based que

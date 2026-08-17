@@ -40,6 +40,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     km: data.km ? String(data.km) : "",
     fuelType: data.fuelType ?? "",
     gearbox: data.gearbox ?? "",
+    licensePlate: data.licensePlate ?? "",
     description: data.description ?? "",
     province: data.location?.province ?? "",
     city: data.location?.city ?? "",
@@ -110,6 +111,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     km: body.km ? Number(body.km) : 0,
     fuelType: body.fuelType || null,
     gearbox: body.gearbox || null,
+    licensePlate: body.licensePlate ? String(body.licensePlate).trim().toUpperCase() : null,
     description: body.description || null,
     singleOwner: !!toggles.singleOwner,
     serviceRecords: !!toggles.serviceRecords,
@@ -132,5 +134,24 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
 
   await ref.update(update);
   await ensureCatalogEntry(body.brand.trim(), body.model.trim(), body.version || null);
+  return Response.json({ ok: true });
+});
+
+// Baja de una publicación — no existía ninguna forma de hacer esto desde el
+// portal hasta ahora (solo desde la app, handleDeleteVehicle en
+// app/car/[id].tsx). Mismo criterio exacto: soft-delete permanente, sin
+// deshacer — status:"deleted" ya está en EXCLUDED_STATUSES en todos lados.
+export const DELETE = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]">) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+    return Response.json({ error: "Tu rol no tiene permiso para eliminar autos." }, { status: 403 });
+  }
+
+  const { id } = await ctx.params;
+  const { ref, snap } = await loadOwnedVehicle(agencyId, id);
+  if (snap.data()?.status === "deleted") return Response.json({ ok: true });
+
+  await ref.update({ status: "deleted", published: false, updatedAt: FieldValue.serverTimestamp() });
   return Response.json({ ok: true });
 });

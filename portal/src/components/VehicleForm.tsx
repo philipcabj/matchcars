@@ -349,7 +349,7 @@ export function VehicleForm({
         </button>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Field label="Combustible">
           <select className={inputClass} value={values.fuelType} onChange={(e) => set("fuelType", e.target.value)}>
             <option value="">Seleccionar</option>
@@ -369,6 +369,15 @@ export function VehicleForm({
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Patente / Dominio">
+          <input
+            className={inputClass}
+            value={values.licensePlate}
+            onChange={(e) => set("licensePlate", e.target.value.toUpperCase())}
+            placeholder="AB123CD"
+            maxLength={10}
+          />
         </Field>
       </div>
 

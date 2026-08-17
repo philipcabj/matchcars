@@ -851,6 +851,7 @@ interface BulkImportRow {
   description: string;
   fuel: string;
   transmission: string;
+  licensePlate: string;
 }
 
 function mapCsvRow(row: Record<string, string>): BulkImportRow {
@@ -868,6 +869,9 @@ function mapCsvRow(row: Record<string, string>): BulkImportRow {
     description: row.description || row.descripcion || "",
     fuel: row.fuel || row.combustible || "",
     transmission: row.transmission || row.transmision || "",
+    // Patente/dominio — columna opcional nueva, sin relación con id/sku/vin
+    // (eso se usa para matchear fotos del ZIP, no es el campo del auto).
+    licensePlate: (row.patente || row.dominio || row.licensePlate || row.plate || "").toUpperCase(),
   };
 }
 
@@ -1001,6 +1005,7 @@ export const startBulkImport = onCall(
             km: Number(row.km) || 0,
             fuelType: row.fuel || null,
             gearbox: row.transmission || null,
+            licensePlate: row.licensePlate || null,
             description: row.description || null,
             location: {
               province: userData.province || null,
