@@ -135,6 +135,29 @@ function ChecklistSection({
   userId: string;
 }) {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [generatingKey, setGeneratingKey] = useState<string | null>(null);
+  const [senaPrompt, setSenaPrompt] = useState(false);
+  const [senaMonto, setSenaMonto] = useState("");
+  const { getIdToken } = useAuth();
+
+  const generateDocument = async (tipo: "boleto_compraventa" | "recibo_sena", key: string, monto?: number) => {
+    setGeneratingKey(key);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/sale-operations/${op.id}/document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tipo, monto }),
+      });
+      const data = await parseJsonResponse<{ url: string }>(res);
+      onChanged();
+      window.open(data.url, "_blank");
+    } finally {
+      setGeneratingKey(null);
+      setSenaPrompt(false);
+      setSenaMonto("");
+    }
+  };
 
   const toggleDone = async (item: ChecklistItem) => {
     await patch({ action: "update_checklist_item", key: item.key, status: item.status === "hecho" ? "pendiente" : "hecho" });
@@ -221,7 +244,48 @@ function ChecklistSection({
                         }}
                       />
                     </label>
+                    {item.key === "boleto_compraventa" && (
+                      <button
+                        onClick={() => generateDocument("boleto_compraventa", item.key)}
+                        disabled={generatingKey === item.key}
+                        className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                      >
+                        {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
+                      </button>
+                    )}
+                    {item.key === "sena" && (
+                      <button
+                        onClick={() => setSenaPrompt(true)}
+                        disabled={generatingKey === item.key}
+                        className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                      >
+                        {generatingKey === item.key ? "Generando…" : "📄 Generar recibo"}
+                      </button>
+                    )}
                   </div>
+
+                  {item.key === "sena" && senaPrompt && (
+                    <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
+                      <input
+                        type="number"
+                        autoFocus
+                        placeholder="Monto de la seña"
+                        value={senaMonto}
+                        onChange={(e) => setSenaMonto(e.target.value)}
+                        className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs"
+                      />
+                      <button
+                        onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto))}
+                        disabled={!senaMonto || Number(senaMonto) <= 0}
+                        className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+                      >
+                        Generar
+                      </button>
+                      <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
 
                   {item.adjuntos.length > 0 && (
                     <div className="mt-2 flex flex-col gap-1">

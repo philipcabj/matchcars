@@ -7,6 +7,7 @@ import "server-only";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -40,3 +41,7 @@ const adminApp = getApps().length ? getApps()[0] : createAdminApp();
 
 export const adminAuth = getAuth(adminApp);
 export const adminDb = getFirestore(adminApp);
+// Bucket explícito (no el default implícito) — mismo bucket que usa el resto
+// del proyecto (NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET). Usado para generar y
+// guardar los PDF de boleto/recibo (Módulo A, sale-operations).
+export const adminStorage = getStorage(adminApp).bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);

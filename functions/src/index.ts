@@ -1,4 +1,4 @@
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onCall, HttpsError, onRequest } from "firebase-functions/v2/https";
 import { onObjectFinalized } from "firebase-functions/v2/storage";
@@ -225,6 +225,91 @@ export const resolvePendingSaleConfirmations = onSchedule("every 24 hours", asyn
       ]);
     } catch (e) {
       console.error("[resolvePendingSaleConfirmations] error processing sale", saleSnap.id, e);
+    }
+  }
+});
+
+// ─── Postventa (Módulo B) ────────────────────────────────────────────────────
+// Motor de seguimientos automáticos tras una venta confirmada — dispara al
+// mismo evento que ya resuelve la venta (sales/{vehicleId}.confirmedByBuyer
+// pasando a true), sea que lo confirme el comprador desde el chat de la app
+// o que se cierre directo desde el portal (lead sin comprador real).
+
+type PostSaleTaskType = "encuesta" | "resena" | "service" | "recontacto";
+
+// Offsets en días desde la confirmación. "recontacto" es a propósito manual
+// (canal "manual", nunca se auto-envía nada) — es un gesto comercial de la
+// agencia, no un mensaje genérico; solo queda como recordatorio en el panel.
+const TASK_OFFSETS_DAYS: Record<PostSaleTaskType, number> = {
+  encuesta: 2,
+  resena: 7,
+  service: 30,
+  recontacto: 90,
+};
+
+export const onSaleConfirmed = onDocumentUpdated("sales/{vehicleId}", async (event) => {
+  const before = event.data?.before.data();
+  const after = event.data?.after.data();
+  if (!before || !after) return;
+  if (before.confirmedByBuyer === true || after.confirmedByBuyer !== true) return; // solo al pasar A true
+  if (!after.buyerId || !after.sellerId) return; // sin comprador real no hay a quién hacerle seguimiento
+
+  const vehicleId = event.params.vehicleId;
+  const now = Date.now();
+  const batch = db.batch();
+  for (const tipo of Object.keys(TASK_OFFSETS_DAYS) as PostSaleTaskType[]) {
+    const ref = db.collection("postSaleTasks").doc();
+    batch.set(ref, {
+      saleId: vehicleId,
+      vehicleId,
+      sellerId: after.sellerId,
+      buyerId: after.buyerId,
+      vehicleSnapshot: after.vehicleSnapshot ?? null,
+      tipo,
+      programadaPara: admin.firestore.Timestamp.fromMillis(now + TASK_OFFSETS_DAYS[tipo] * 24 * 60 * 60 * 1000),
+      estado: "pendiente",
+      canal: tipo === "recontacto" ? "manual" : "auto",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+});
+
+function postSaleMessage(tipo: PostSaleTaskType, carModel: string): { title: string; body: string } {
+  switch (tipo) {
+    case "encuesta":
+      return { title: "¿Cómo te fue con tu compra?", body: `Contanos cómo estuvo tu experiencia comprando ${carModel} — respondé este mensaje.` };
+    case "resena":
+      return { title: "¿Nos dejás una reseña?", body: `Si ${carModel} cumplió tus expectativas, una reseña ayuda a otros compradores.` };
+    case "service":
+      return { title: "Recordatorio de service", body: `Ya pasó un tiempo desde que retiraste ${carModel} — es un buen momento para el primer service.` };
+    default:
+      return { title: "", body: "" };
+  }
+}
+
+// Un solo where (estado == "pendiente") y el resto se filtra en memoria —
+// mismo criterio que resolvePendingSaleConfirmations, para no necesitar un
+// índice compuesto nuevo (equality + range en campos distintos sí lo pide).
+export const runPostSaleTasks = onSchedule("every 6 hours", async () => {
+  const now = Date.now();
+  const snap = await db.collection("postSaleTasks").where("estado", "==", "pendiente").get();
+
+  for (const taskSnap of snap.docs) {
+    const task = taskSnap.data();
+    if (task.canal === "manual") continue; // recontacto: lo maneja la agencia a mano, no se toca acá
+    const programadaPara: admin.firestore.Timestamp | undefined = task.programadaPara;
+    if (!programadaPara || programadaPara.toMillis() > now) continue;
+
+    try {
+      const carModel = `${task.vehicleSnapshot?.brand ?? ""} ${task.vehicleSnapshot?.model ?? ""}`.trim() || "tu auto";
+      const { title, body } = postSaleMessage(task.tipo, carModel);
+      if (title) {
+        await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body)]);
+      }
+      await taskSnap.ref.update({ estado: "enviada", sentAt: admin.firestore.FieldValue.serverTimestamp() });
+    } catch (e) {
+      console.error("[runPostSaleTasks] error processing task", taskSnap.id, e);
     }
   }
 });

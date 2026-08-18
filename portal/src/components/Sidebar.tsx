@@ -20,6 +20,7 @@ const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; 
   { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, gate: "none" },
   { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm" },
   { label: "Operaciones", href: "/dashboard/operaciones", icon: "📋", enabled: true, gate: "crm" },
+  { label: "Postventa", href: "/dashboard/postventa", icon: "🔄", enabled: true, gate: "crm" },
   { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "dealer" },
   { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none" },
   { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
