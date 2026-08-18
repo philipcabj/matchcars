@@ -69,6 +69,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     offer: data.offer ?? null,
     createdAt: toIso(data.createdAt),
     assignedTo: data.assignedTo ?? null,
+    saleOperationId: data.saleOperationId ?? null,
   });
 });
 

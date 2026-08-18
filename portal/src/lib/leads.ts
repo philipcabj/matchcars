@@ -86,6 +86,7 @@ export interface LeadDetail {
   offer?: PortalOffer | null;
   createdAt?: string | null;
   assignedTo?: string | null;
+  saleOperationId?: string | null;
 }
 
 export interface CreateManualLeadInput {

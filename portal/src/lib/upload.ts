@@ -37,3 +37,21 @@ export async function uploadAgencyBanner(userId: string, file: File): Promise<st
   await uploadBytes(storageRef, file, { contentType: file.type || "image/jpeg" });
   return getDownloadURL(storageRef);
 }
+
+// Documentos de una operación de venta (Módulo A) — bajo uploads/{userId}/...
+// como el resto, así no hace falta tocar storage.rules (cae en el mismo
+// catch-all que ya usa uploadVehicleVideo para paths anidados).
+export async function uploadOperationDocument(userId: string, operationId: string, file: File): Promise<string> {
+  const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const storageRef = ref(storage, `uploads/${userId}/operations/${operationId}/${filename}`);
+  await uploadBytes(storageRef, file, { contentType: file.type || "application/octet-stream" });
+  return getDownloadURL(storageRef);
+}
+
+// Fotos del auto recibido como parte de pago.
+export async function uploadTradeInPhoto(userId: string, operationId: string, file: File): Promise<string> {
+  const filename = `${Date.now()}_${Math.floor(Math.random() * 1e6)}.jpg`;
+  const storageRef = ref(storage, `uploads/${userId}/operations/${operationId}/tradein/${filename}`);
+  await uploadBytes(storageRef, file, { contentType: file.type || "image/jpeg" });
+  return getDownloadURL(storageRef);
+}

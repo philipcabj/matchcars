@@ -1,0 +1,57 @@
+// portal/src/app/api/agency/leads/[id]/operation/route.ts
+// POST -> crea la operación de venta de un lead (botón "Iniciar operación"
+// en el detalle del lead) — checklist con la plantilla default, sin
+// documentos ni parte de pago todavía. Un lead solo puede tener una
+// operación a la vez (lead.saleOperationId denormalizado para no tener que
+// buscarla por query cada vez que se abre el lead).
+import { requireUid } from "@/lib/api-auth";
+import { withApiErrors } from "@/lib/api-handler";
+import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
+import { adminDb } from "@/lib/firebase-admin";
+import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { buildDefaultChecklist } from "@/lib/sale-operations";
+import { FieldValue } from "firebase-admin/firestore";
+
+export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/operation">) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+    return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
+  }
+  await requireCRMAccess(agencyId);
+
+  const { id } = await ctx.params;
+  const leadRef = adminDb.doc(`leads/${id}`);
+  const leadSnap = await leadRef.get();
+  if (!leadSnap.exists) return Response.json({ error: "No encontrado" }, { status: 404 });
+  const lead = leadSnap.data()!;
+  if (lead.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
+  if (lead.status !== "negotiation" && lead.status !== "won") {
+    return Response.json({ error: "El lead tiene que estar en negociación o vendido para iniciar una operación." }, { status: 400 });
+  }
+  if (lead.saleOperationId) return Response.json({ id: lead.saleOperationId });
+
+  const buyer = lead.manualContact?.name || [lead.buyerSnapshot?.firstName, lead.buyerSnapshot?.lastName].filter(Boolean).join(" ") || "Comprador";
+
+  const opRef = adminDb.collection("saleOperations").doc();
+  await adminDb.runTransaction(async (t) => {
+    t.set(opRef, {
+      leadId: id,
+      vehicleId: lead.vehicleId || null,
+      sellerId: agencyId,
+      buyerId: lead.buyerId || null,
+      assignedTo: lead.assignedTo || null,
+      status: "en_curso",
+      vehicleSnapshot: lead.vehicleSnapshot ?? null,
+      buyerLabel: buyer,
+      checklist: buildDefaultChecklist(),
+      financiacion: null,
+      parteDePago: { incluye: false, marca: "", modelo: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    t.update(leadRef, { saleOperationId: opRef.id });
+  });
+
+  return Response.json({ id: opRef.id }, { status: 201 });
+});

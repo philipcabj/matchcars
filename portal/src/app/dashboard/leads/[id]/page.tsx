@@ -13,7 +13,7 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { LEAD_STATUS_LABELS, LeadDetail, LeadMessage, LeadStatus } from "@/lib/leads";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
@@ -43,7 +43,9 @@ export default function LeadDetailPage() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [startingOp, setStartingOp] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     (async () => {
@@ -173,6 +175,23 @@ export default function LeadDetailPage() {
     }
   };
 
+  const startOperation = async () => {
+    setStartingOp(true);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/leads/${id}/operation`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseJsonResponse<{ id: string }>(res);
+      router.push(`/dashboard/operaciones/${data.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+      setStartingOp(false);
+    }
+  };
+
   if (agency && !agency.hasCRM) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
@@ -257,6 +276,32 @@ export default function LeadDetailPage() {
           )}
         </div>
       </div>
+
+      {(lead.status === "negotiation" || lead.status === "won") &&
+        (lead.saleOperationId ? (
+          <Link
+            href={`/dashboard/operaciones/${lead.saleOperationId}`}
+            className="flex items-center justify-between rounded-2xl border border-accent/30 bg-accent/5 p-4 transition hover:border-accent"
+          >
+            <div>
+              <p className="text-sm font-semibold text-accent">📋 Operación de venta en curso</p>
+              <p className="text-xs text-muted-foreground">Checklist de trámites, financiación y parte de pago.</p>
+            </div>
+            <span className="text-xs font-semibold text-accent">Ver →</span>
+          </Link>
+        ) : (
+          <button
+            onClick={startOperation}
+            disabled={startingOp}
+            className="flex items-center justify-between rounded-2xl border border-dashed border-border bg-card p-4 text-left transition hover:border-accent disabled:opacity-50"
+          >
+            <div>
+              <p className="text-sm font-semibold">📋 Iniciar operación de venta</p>
+              <p className="text-xs text-muted-foreground">Checklist de trámites, financiación rápida y parte de pago.</p>
+            </div>
+            <span className="text-xs font-semibold text-accent">{startingOp ? "Creando…" : "Iniciar →"}</span>
+          </button>
+        ))}
 
       {prompt && (
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
