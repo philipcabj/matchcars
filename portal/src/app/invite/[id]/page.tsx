@@ -43,8 +43,10 @@ export default function InvitePage() {
     setGoogleBusy(true);
     try {
       await loginWithGoogle();
-    } catch {
-      setFormError("No pudimos continuar con Google. Probá de nuevo.");
+    } catch (e) {
+      console.error("[loginWithGoogle]", e);
+      const code = e && typeof e === "object" && "code" in e ? ` (${(e as { code: string }).code})` : "";
+      setFormError(`No pudimos continuar con Google. Probá de nuevo.${code}`);
     } finally {
       setGoogleBusy(false);
     }

@@ -36,8 +36,10 @@ export default function LoginPage() {
     try {
       await loginWithGoogle();
       router.replace("/dashboard");
-    } catch {
-      setError("No pudimos iniciar sesión con Google. Probá de nuevo.");
+    } catch (e) {
+      console.error("[loginWithGoogle]", e);
+      const code = e && typeof e === "object" && "code" in e ? ` (${(e as { code: string }).code})` : "";
+      setError(`No pudimos iniciar sesión con Google. Probá de nuevo.${code}`);
     } finally {
       setGoogleLoading(false);
     }
