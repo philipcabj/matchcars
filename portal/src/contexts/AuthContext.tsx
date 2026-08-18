@@ -6,11 +6,13 @@ import { auth, db } from "@/lib/firebase-client";
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
+  OAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   type User,
+  type UserCredential,
 } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { createContext, useContext, useEffect, useState } from "react";
@@ -43,6 +45,8 @@ interface AuthContextValue {
    * usa MatchCars en cualquier plataforma.
    */
   loginWithGoogle: () => Promise<void>;
+  /** Mismo criterio que loginWithGoogle, para quien se registró/logueó en la app con Apple. */
+  loginWithApple: () => Promise<void>;
   logout: () => Promise<void>;
   /** Firebase ID token del usuario actual, para llamar a /api/* del portal. */
   getIdToken: () => Promise<string | null>;
@@ -90,8 +94,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const loginWithGoogle = async () => {
-    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+  // Crea users/{uid} si es la primera vez que esta persona usa MatchCars en
+  // cualquier plataforma — si ya existe (login habitual con Google/Apple
+  // desde la app) no se toca nada.
+  const createUserDocIfMissing = async (cred: UserCredential, provider: "google" | "apple") => {
     const uid = cred.user.uid;
     const userRef = doc(db, "users", uid);
     const snap = await getDoc(userRef);
@@ -115,8 +121,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       salesCount: 0,
       loginCount: 1,
       createdAt: serverTimestamp(),
-      provider: "google",
+      provider,
     });
+  };
+
+  const loginWithGoogle = async () => {
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+    await createUserDocIfMissing(cred, "google");
+  };
+
+  const loginWithApple = async () => {
+    const provider = new OAuthProvider("apple.com");
+    provider.addScope("email");
+    provider.addScope("name");
+    const cred = await signInWithPopup(auth, provider);
+    await createUserDocIfMissing(cred, "apple");
   };
 
   const logout = async () => {
@@ -129,7 +148,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, initializing, loginWithEmail, loginWithGoogle, registerWithEmail, logout, getIdToken }}>
+    <AuthContext.Provider
+      value={{ user, initializing, loginWithEmail, loginWithGoogle, loginWithApple, registerWithEmail, logout, getIdToken }}
+    >
       {children}
     </AuthContext.Provider>
   );

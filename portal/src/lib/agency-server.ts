@@ -25,6 +25,28 @@ export async function resolveMembership(uid: string): Promise<AgencyMembership> 
     const data = membershipSnap.data()!;
     return { agencyId: data.agencyId, role: data.role };
   }
+
+  // Sin invitación: solo entra como "dueño de su propia agencia" si tiene un
+  // plan pago. Antes esto no se chequeaba porque, en la práctica, nadie sin
+  // invitación llegaba hasta acá: el login del portal era solo email/
+  // contraseña, y esa cuenta recién existía si alguien la creó desde
+  // /invite/[id] (ya con una invitación real) — cualquier usuario free
+  // registrado en la app vía Google/Apple no tenía contraseña y no podía
+  // entrar. Al sumar "Continuar con Google/Apple" ese freno accidental
+  // desapareció, así que el chequeo de plan tiene que ser explícito acá.
+  const ownerSnap = await adminDb.doc(`users/${uid}`).get();
+  const ownerData = ownerSnap.data();
+  const plan: string = ownerData?.plan || "free";
+  // Staff de plataforma (moderador/admin, ver useAdminRole/PlatformRole) no
+  // necesariamente tiene un plan pago propio — usa /dashboard/admin, no la
+  // gestión de agencia, así que no lo bloqueamos acá.
+  const isPlatformStaff = ownerData?.role === "admin" || ownerData?.role === "moderator";
+  if (plan === "free" && !isPlatformStaff) {
+    throw new ApiAuthError(
+      "Tu cuenta no tiene acceso al Portal de Agencias. Necesitás un plan pago o una invitación de tu agencia.",
+      403
+    );
+  }
   return { agencyId: uid, role: "owner" };
 }
 
