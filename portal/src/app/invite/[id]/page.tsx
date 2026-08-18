@@ -20,7 +20,7 @@ interface InviteInfo {
 export default function InvitePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { user, initializing, getIdToken, loginWithEmail, loginWithGoogle, loginWithApple, registerWithEmail, logout } = useAuth();
+  const { user, initializing, getIdToken, loginWithEmail, loginWithGoogle, registerWithEmail, logout } = useAuth();
 
   const [invite, setInvite] = useState<InviteInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -33,9 +33,8 @@ export default function InvitePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [autoAccepting, setAutoAccepting] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
-  const [appleBusy, setAppleBusy] = useState(false);
 
-  // Para invitados con Gmail/Apple que ya usan la app con esos providers —
+  // Para invitados con Gmail que ya usan la app con "Continuar con Google" —
   // antes no tenían forma de entrar acá porque su cuenta no tiene contraseña.
   // signInWithPopup pega en la MISMA cuenta (mismo uid) si el email coincide,
   // así que sameEmailLoggedIn se dispara solo y acepta la invitación.
@@ -50,20 +49,6 @@ export default function InvitePage() {
       setFormError(`No pudimos continuar con Google. Probá de nuevo.${code}`);
     } finally {
       setGoogleBusy(false);
-    }
-  };
-
-  const handleApple = async () => {
-    setFormError(null);
-    setAppleBusy(true);
-    try {
-      await loginWithApple();
-    } catch (e) {
-      console.error("[loginWithApple]", e);
-      const code = e && typeof e === "object" && "code" in e ? ` (${(e as { code: string }).code})` : "";
-      setFormError(`No pudimos continuar con Apple. Probá de nuevo.${code}`);
-    } finally {
-      setAppleBusy(false);
     }
   };
 
@@ -201,18 +186,6 @@ export default function InvitePage() {
             <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
           </svg>
           {googleBusy ? "Un momento…" : "Continuar con Google"}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleApple}
-          disabled={appleBusy}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-        >
-          <svg width="16" height="16" viewBox="0 0 384 512" fill="white">
-            <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5c0 26.2 4.8 53.3 14.4 81.2 12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
-          </svg>
-          {appleBusy ? "Un momento…" : "Continuar con Apple"}
         </button>
 
         <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
