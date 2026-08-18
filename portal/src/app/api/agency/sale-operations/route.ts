@@ -3,7 +3,7 @@
 // /dashboard/operaciones (Kanban simple por estado del checklist).
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
-import { resolveMembership } from "@/lib/agency-server";
+import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 
@@ -18,6 +18,7 @@ export const GET = withApiErrors(async (request) => {
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ error: "Tu rol no tiene permiso para ver operaciones." }, { status: 403 });
   }
+  await requireCRMAccess(agencyId);
 
   const snap = await adminDb.collection("saleOperations").where("sellerId", "==", agencyId).get();
   const operations = snap.docs

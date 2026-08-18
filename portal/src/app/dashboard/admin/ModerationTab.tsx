@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 interface PendingVehicle {
@@ -20,7 +21,7 @@ interface PendingVehicle {
   publicationCode: number | null;
 }
 
-const FLAG_LABELS: Record<string, string> = {
+export const FLAG_LABELS: Record<string, string> = {
   price_outlier: "Precio muy por debajo del mercado",
   price_high_outlier: "Precio muy por encima del mercado",
   new_user_mass: "Usuario nuevo con muchas publicaciones recientes",
@@ -134,6 +135,9 @@ export function ModerationTab() {
               <p className="text-xs text-muted-foreground">
                 {v.currency} {v.price.toLocaleString("es-AR")} · Publicado por {v.userName || v.userId}
               </p>
+              <Link href={`/dashboard/admin/vehicles/${v.id}`} className="text-xs font-semibold text-accent">
+                Ver detalle completo →
+              </Link>
               {v.riskFlags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {v.riskFlags.map((flag) => (

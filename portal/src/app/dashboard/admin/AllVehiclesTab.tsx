@@ -3,6 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
 import { STATUS_LABELS } from "@/lib/vehicle";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 interface SearchVehicle {
@@ -263,7 +264,10 @@ export function AllVehiclesTab() {
                 </p>
                 <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusInfo.className}`}>
                   {statusInfo.label}
-                </span>
+                </span>{" "}
+                <Link href={`/dashboard/admin/vehicles/${v.id}`} className="text-[11px] font-semibold text-accent">
+                  Ver detalle →
+                </Link>
               </div>
 
               {isBulkEditingThis ? (

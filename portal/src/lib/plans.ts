@@ -74,13 +74,18 @@ export function can(role: AgencyRole, permission: keyof AgencyRolePermissions): 
 
 /**
  * Asientos de equipo incluidos por plan (cuántos usuarios puede tener la agencia).
- * Valores iniciales razonables para poder construir la pantalla de equipo — hay
- * que validarlos con el negocio antes de habilitar la función de invitar de verdad.
+ * Decisión de negocio (2026-08-17): no cobrar por asiento adicional — en vez
+ * de vender "+N usuarios" como add-on de tienda (mucho más trabajo de
+ * ingeniería/revisión de store), se compite en funcionalidad (Reportes
+ * avanzados, Comisiones, Panel comparativo) y se suben los topes incluidos
+ * para que la cantidad de gente deje de ser el techo real de una agencia
+ * grande. Pro/Pro Plus quedan en 1 a propósito: son planes individuales, sin
+ * equipo a quien asignarle un lead (ver canManageCommissions).
  */
 export function getIncludedSeats(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
-  if (plan.includes("dealer_pro_plus")) return 5;
-  if (plan.includes("pro_dealer")) return 3;
+  if (plan.includes("dealer_pro_plus")) return 10;
+  if (plan.includes("pro_dealer")) return 5;
   return 1; // Planes no-dealer: solo el dueño de la cuenta, sin equipo.
 }
 
@@ -185,11 +190,23 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
   if (canExportPDF(plan)) features.push("📄 Ficha PDF con QR");
 
   const seats = getIncludedSeats(plan);
+  // Portal ya es accesible para cualquier plan pago hoy (getIncludedSeats da
+  // 1 asiento incluso a Pro/Pro Plus) — antes no se comunicaba nada de esto
+  // en la lista, parecía exclusivo de Dealer. Para seats > 1 la línea de
+  // "Hasta N usuarios de portal" de más abajo ya lo deja claro, así que acá
+  // solo hace falta el caso de un solo asiento.
+  if (seats === 1) features.push("💻 Acceso al Portal de Agencias");
   if (canAccessCRM(plan)) features.push(seats > 1 ? "📞 CRM de Leads con equipo" : "📞 CRM personal de consultas");
   if (canBulkImport(plan)) features.push("💻 Carga Masiva (CSV)");
   if (seats > 1) features.push(`👥 Hasta ${seats} usuarios de portal`);
   if (hasAdvancedReports(plan)) features.push("📊 Reportes avanzados");
   if (hasPeerComparison(plan)) features.push("📈 Panel comparativo vs. otras agencias");
+  // Gestión de venta (checklist + documentos PDF + financiación + parte de
+  // pago) y postventa automática — mismo gate que el CRM, no tiene sentido
+  // gestionar operaciones sin poder cargar el lead que las origina.
+  if (canAccessCRM(plan)) features.push("📋 Gestión de venta: checklist, documentos PDF y postventa automática");
+  if (canTrackExpenses(plan)) features.push("💵 Control de gastos y margen por unidad");
+  if (canManageCommissions(plan)) features.push("🧮 Comisiones automáticas por vendedor");
 
   return features;
 }

@@ -15,6 +15,70 @@ import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
 
+// GET -> detalle completo de CUALQUIER publicación (no scopeado a agencia,
+// a diferencia de /api/agency/vehicles/[id]). No existía forma de ver el
+// detalle completo de un auto desde el panel de admin del portal — solo la
+// tarjeta resumida de ModerationTab/AllVehiclesTab. Espejo del GET de
+// /api/agency/vehicles/[id] + datos del dueño + señales de riesgo.
+export const GET = withApiErrors(async (request, { params }: { params: Promise<{ id: string }> }) => {
+  await requireAdminRole(request);
+  const { id } = await params;
+  const snap = await adminDb.doc(`vehicles/${id}`).get();
+  if (!snap.exists) return Response.json({ error: "Vehículo no encontrado" }, { status: 404 });
+  const data = snap.data()!;
+
+  let ownerEmail: string | null = null;
+  let ownerPlan: string | null = null;
+  if (data.userId) {
+    const ownerSnap = await adminDb.doc(`users/${data.userId}`).get();
+    ownerEmail = ownerSnap.data()?.email ?? null;
+    ownerPlan = ownerSnap.data()?.plan ?? null;
+  }
+
+  return Response.json({
+    id: snap.id,
+    brand: data.brand ?? "",
+    model: data.model ?? "",
+    version: data.version ?? "",
+    year: data.year ?? null,
+    price: data.price ?? 0,
+    currency: data.currency ?? "ARS",
+    km: data.km ?? 0,
+    fuelType: data.fuelType ?? "",
+    gearbox: data.gearbox ?? "",
+    licensePlate: data.licensePlate ?? "",
+    description: data.description ?? "",
+    province: data.location?.province ?? "",
+    city: data.location?.city ?? "",
+    coverImage: data.images?.cover ?? data.coverImage ?? data.cover ?? "",
+    gallery: data.images?.gallery ?? [],
+    video: data.video ?? "",
+    toggles: {
+      singleOwner: !!data.singleOwner,
+      serviceRecords: !!data.serviceRecords,
+      vtvValid: !!data.vtvValid,
+      papersUpToDate: !!data.papersUpToDate,
+      warranty: !!data.warranty,
+      acceptsTradeIn: !!data.flags?.tradeIn,
+      acceptsFinancing: !!data.acceptsFinancing,
+      negotiablePrice: !!data.negotiablePrice,
+      immediateDelivery: !!data.immediateDelivery,
+    },
+    status: data.status ?? "available",
+    rejectionReason: data.rejectionReason || data.rejectedReason || null,
+    riskScore: data.riskScore ?? 0,
+    riskFlags: Array.isArray(data.riskFlags) ? data.riskFlags : [],
+    views: data.views ?? 0,
+    likesCount: data.likesCount ?? 0,
+    createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
+    publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
+    userId: data.userId ?? "",
+    userName: data.userName ?? "",
+    userEmail: ownerEmail,
+    userPlan: ownerPlan,
+  });
+});
+
 export const PATCH = withApiErrors(async (request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await request.json();

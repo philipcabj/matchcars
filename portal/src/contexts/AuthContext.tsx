@@ -5,12 +5,14 @@ import { getAvatarColorFromEmail } from "@/lib/avatar-color";
 import { auth, db } from "@/lib/firebase-client";
 import {
   createUserWithEmailAndPassword,
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 interface RegisterParams {
@@ -32,6 +34,15 @@ interface AuthContextValue {
    * para no crear una cuenta "incompleta" a ojos del resto de la app.
    */
   registerWithEmail: (params: RegisterParams) => Promise<void>;
+  /**
+   * Mismo uid que la cuenta de la app si el usuario ya se registró/logueó ahí
+   * con Google — a diferencia de email/contraseña, acá no hay forma de que
+   * quede "sin cuenta" en el portal: agencias que invitan a alguien con Gmail
+   * no podían entrar antes porque no tenían contraseña seteada (su cuenta es
+   * 100% Google). Crea users/{uid} solo si es la primera vez que esa persona
+   * usa MatchCars en cualquier plataforma.
+   */
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   /** Firebase ID token del usuario actual, para llamar a /api/* del portal. */
   getIdToken: () => Promise<string | null>;
@@ -79,6 +90,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const loginWithGoogle = async () => {
+    const cred = await signInWithPopup(auth, new GoogleAuthProvider());
+    const uid = cred.user.uid;
+    const userRef = doc(db, "users", uid);
+    const snap = await getDoc(userRef);
+    if (snap.exists()) return;
+
+    const email = (cred.user.email ?? "").trim().toLowerCase();
+    const [firstName = "", lastName = ""] = (cred.user.displayName ?? "").split(" ");
+    const initials = `${firstName[0] ?? ""}${lastName[0] ?? ""}`.toUpperCase().trim() || email.slice(0, 2).toUpperCase() || "MC";
+
+    await setDoc(userRef, {
+      id: uid,
+      firstName,
+      lastName,
+      email,
+      role: "user",
+      plan: "free",
+      initials,
+      avatarColor: getAvatarColorFromEmail(email),
+      acceptedTerms: false,
+      trustLevel: "new",
+      salesCount: 0,
+      loginCount: 1,
+      createdAt: serverTimestamp(),
+      provider: "google",
+    });
+  };
+
   const logout = async () => {
     await signOut(auth);
   };
@@ -89,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, initializing, loginWithEmail, registerWithEmail, logout, getIdToken }}>
+    <AuthContext.Provider value={{ user, initializing, loginWithEmail, loginWithGoogle, registerWithEmail, logout, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );
