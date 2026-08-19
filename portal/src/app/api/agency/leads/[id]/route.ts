@@ -53,10 +53,21 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   }
 
   let vehicleStatus: string | null = null;
+  // Precio EN VIVO, no la foto vieja de vehicleSnapshot (tomada cuando se
+  // creó el lead) — para que "Cerrar acuerdo de precio" pueda pre-cargar el
+  // precio real de hoy en vez de arrancar en blanco y obligar a
+  // retipearlo a mano.
+  let liveVehicle: { price?: number; currency?: string } | null = null;
   if (data.vehicleId) {
     const vehicleSnap = await adminDb.doc(`vehicles/${data.vehicleId}`).get();
     vehicleStatus = vehicleSnap.exists ? vehicleSnap.data()?.status ?? "available" : null;
+    if (vehicleSnap.exists) {
+      liveVehicle = { price: vehicleSnap.data()?.price, currency: vehicleSnap.data()?.currency };
+    }
   }
+  const vehicleSnapshot = data.vehicleSnapshot
+    ? { ...data.vehicleSnapshot, ...(liveVehicle ?? {}) }
+    : liveVehicle;
 
   return Response.json({
     id: snap.id,
@@ -65,7 +76,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     vehicleId: data.vehicleId || null,
     buyerId: data.buyerId || null,
     vehicleStatus,
-    vehicleSnapshot: data.vehicleSnapshot ?? null,
+    vehicleSnapshot,
     buyerSnapshot: data.buyerSnapshot ?? null,
     manualContact: data.manualContact ?? null,
     lastMessage: data.lastMessage ?? null,

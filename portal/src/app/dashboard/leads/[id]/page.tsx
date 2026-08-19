@@ -510,7 +510,12 @@ export default function LeadDetailPage() {
           </div>
         ) : (
           <button
-            onClick={() => setClosePrompt({ price: "", currency: "ARS" })}
+            onClick={() =>
+              // Precarga el precio publicado hoy (veh.price, ya en vivo) en
+              // vez de arrancar en blanco — sigue siendo editable si el
+              // precio realmente acordado con el comprador es otro.
+              setClosePrompt({ price: veh?.price ? String(veh.price) : "", currency: (veh?.currency as "ARS" | "USD") || "ARS" })
+            }
             className="self-start rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-xs font-semibold text-success"
           >
             💰 Cerrar acuerdo de precio
