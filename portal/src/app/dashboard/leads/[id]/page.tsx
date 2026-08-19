@@ -115,6 +115,13 @@ export default function LeadDetailPage() {
   };
 
   const markWon = async (dealPrice: number, dealCurrency: "ARS" | "USD") => {
+    // Mismo criterio que confirmar el precio de toma del usado (Operación):
+    // antes esto se guardaba con un solo click sin ninguna pausa, y no había
+    // forma de distinguir a simple vista "cargué un número" de "esto es lo
+    // que de verdad se acordó con el comprador".
+    if (!confirm(`¿Confirmar el cierre en ${dealCurrency} ${dealPrice.toLocaleString("es-AR")}? Este precio queda guardado como el acordado con el comprador.`)) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -237,15 +244,15 @@ export default function LeadDetailPage() {
             <p className="text-xs text-muted-foreground">{[manual.phone, manual.email].filter(Boolean).join(" · ")}</p>
           )}
           {manual?.notes && <p className="mt-1 text-xs italic text-muted-foreground">{manual.notes}</p>}
-          {veh?.price && (
+          {veh?.price && !(lead.status === "won" && lead.dealPrice) && (
             <p className="mt-1 text-sm font-semibold text-accent">
               {veh.currency} {Number(veh.price).toLocaleString("es-AR")}
             </p>
           )}
           {lead.status === "won" && lead.dealPrice && (
-            <p className="mt-1 text-sm font-semibold text-success">
-              Cierre: {lead.dealCurrency} {Number(lead.dealPrice).toLocaleString("es-AR")}
-            </p>
+            <span className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-success/40 bg-success/10 px-2.5 py-1 text-xs font-bold text-success">
+              ✓ Cerrado en {lead.dealCurrency} {Number(lead.dealPrice).toLocaleString("es-AR")}
+            </span>
           )}
           {lead.status === "lost" && lead.reasonLost && (
             <p className="mt-1 text-xs text-error">Motivo: {lead.reasonLost}</p>
