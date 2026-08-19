@@ -106,6 +106,16 @@ export const EMPTY_TRADE_IN: TradeIn = {
 
 export type SaleOperationStatus = "en_curso" | "completada" | "cancelada";
 
+// Cómo se cubre el saldo (o el precio total si no hay parte de pago) — antes
+// esto había que deducirlo mirando si había datos cargados en Financiación
+// y/o Parte de pago por separado, sin ninguna pregunta explícita que atara
+// las dos cosas a una sola decisión ("¿cómo se paga esta venta?").
+// "financiado_propio" usa la calculadora de Financiación (cuota fija, tasa
+// que carga la agencia); "financiado_externo" es una financiera o crédito
+// privado ajeno a MatchCars — no hay cuota que calcular, solo se deja
+// constancia de con quién financia el comprador.
+export type MetodoPagoResto = "efectivo" | "financiado_propio" | "financiado_externo";
+
 export interface SaleOperation {
   id: string;
   leadId: string;
@@ -119,6 +129,8 @@ export interface SaleOperation {
   checklist: ChecklistItem[];
   financiacion: FinancingCalc | null;
   parteDePago: TradeIn;
+  metodoPago: MetodoPagoResto | null;
+  financieraNombre: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }

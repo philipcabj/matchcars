@@ -47,6 +47,8 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
       checklist: buildDefaultChecklist(),
       financiacion: null,
       parteDePago: { incluye: false, marca: "", modelo: "", version: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
+      metodoPago: null,
+      financieraNombre: null,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });

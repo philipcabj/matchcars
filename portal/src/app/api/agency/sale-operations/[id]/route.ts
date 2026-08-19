@@ -49,6 +49,8 @@ function serialize(
     financiacion: data.financiacion ?? null,
     parteDePago:
       data.parteDePago ?? { incluye: false, marca: "", modelo: "", version: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
+    metodoPago: data.metodoPago ?? null,
+    financieraNombre: data.financieraNombre ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -158,6 +160,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
 
   if (action === "clear_financing") {
     await ref.update({ financiacion: null, updatedAt: FieldValue.serverTimestamp() });
+    return Response.json({ ok: true });
+  }
+
+  if (action === "update_metodo_pago") {
+    const metodoPago = ["efectivo", "financiado_propio", "financiado_externo"].includes(body.metodoPago) ? body.metodoPago : null;
+    const financieraNombre = typeof body.financieraNombre === "string" ? body.financieraNombre.trim() || null : op.financieraNombre ?? null;
+    await ref.update({ metodoPago, financieraNombre, updatedAt: FieldValue.serverTimestamp() });
     return Response.json({ ok: true });
   }
 

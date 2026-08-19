@@ -15,7 +15,7 @@ import { parseJsonResponse } from "@/lib/api-client";
 import { CAR_MODELS_AR } from "@/lib/carModelsAr";
 import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
 import { analyzeMarketPrice } from "@/lib/pricing";
-import { ChecklistItem, SaleOperation, TradeInAppraisal } from "@/lib/sale-operations";
+import { ChecklistItem, MetodoPagoResto, SaleOperation, TradeInAppraisal } from "@/lib/sale-operations";
 import { uploadOperationDocument, uploadTradeInPhoto } from "@/lib/upload";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -157,6 +157,13 @@ export default function OperationDetailPage() {
   // antes no había ningún indicador de "qué sigue", solo una lista plana
   // que había que leer entera para saber qué faltaba.
   const nextItem = op.checklist.find((c) => c.status === "pendiente") ?? null;
+  // Precio del auto menos la tasación del usado entregado (si hay parte de
+  // pago) = lo que falta cubrir — alimenta tanto el resumen de "Forma de
+  // pago" como el precio total pre-cargado de la calculadora de Financiación,
+  // para no tener que volver a escribirlo a mano.
+  const vehiclePrice = op.vehicleSnapshot?.price ?? 0;
+  const tradeInValue = op.parteDePago.incluye ? op.parteDePago.tasacion?.avg ?? 0 : 0;
+  const restanteACubrir = Math.max(0, vehiclePrice - tradeInValue);
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
@@ -214,6 +221,8 @@ export default function OperationDetailPage() {
         </div>
       </div>
 
+      <PaymentStructureSection op={op} onChanged={refresh} patch={patch} />
+
       {op.status === "en_curso" && (
         <div
           className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${
@@ -239,7 +248,13 @@ export default function OperationDetailPage() {
       <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FinancingSection op={op} onChanged={refresh} patch={patch} />
+        <FinancingSection
+          op={op}
+          onChanged={refresh}
+          patch={patch}
+          forceOpen={op.metodoPago === "financiado_propio"}
+          initialPrecioTotal={restanteACubrir}
+        />
         <TradeInSection op={op} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
       </div>
     </div>
@@ -481,7 +496,17 @@ function ChecklistSection({
   );
 }
 
-function FinancingSection({
+const METODO_PAGO_LABELS: Record<MetodoPagoResto, string> = {
+  efectivo: "Efectivo / contado",
+  financiado_propio: "Financiado por la agencia",
+  financiado_externo: "Financiado (financiera externa)",
+};
+
+// Junta en un solo lugar las tres preguntas que hoy quedaban repartidas
+// entre Parte de pago, Financiación y la seña: ¿hay un usado de por medio?,
+// ¿cómo se cubre el resto (o el total)? — y arma la cuenta Precio − Usado =
+// Resto, que antes había que calcular a mano combinando secciones sueltas.
+function PaymentStructureSection({
   op,
   onChanged,
   patch,
@@ -490,11 +515,127 @@ function FinancingSection({
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(!!op.financiacion);
+  const [financieraNombre, setFinancieraNombre] = useState(op.financieraNombre ?? "");
+  const currency = op.vehicleSnapshot?.currency ?? "ARS";
+  const vehiclePrice = op.vehicleSnapshot?.price ?? 0;
+  const tradeInValue = op.parteDePago.incluye ? op.parteDePago.tasacion?.avg ?? 0 : 0;
+  const resto = Math.max(0, vehiclePrice - tradeInValue);
+
+  const setIncluyeUsado = async (incluye: boolean) => {
+    await patch({ action: "update_trade_in", incluye });
+    onChanged();
+  };
+
+  const setMetodoPago = async (metodoPago: string) => {
+    await patch({ action: "update_metodo_pago", metodoPago, financieraNombre });
+    onChanged();
+  };
+
+  return (
+    <div className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
+      <p className="mb-3 text-sm font-semibold">Forma de pago</p>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:gap-6">
+        <div>
+          <p className="mb-1 text-xs text-muted-foreground">¿Entrega un auto como parte de pago?</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIncluyeUsado(false)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                !op.parteDePago.incluye ? "border-accent bg-accent text-accent-foreground" : "border-border bg-card text-muted-foreground"
+              }`}
+            >
+              No
+            </button>
+            <button
+              onClick={() => setIncluyeUsado(true)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                op.parteDePago.incluye ? "border-accent bg-accent text-accent-foreground" : "border-border bg-card text-muted-foreground"
+              }`}
+            >
+              Sí
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1 text-xs text-muted-foreground">
+            ¿Cómo se cubre {op.parteDePago.incluye ? "el resto" : "el precio"}?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(METODO_PAGO_LABELS) as (keyof typeof METODO_PAGO_LABELS)[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setMetodoPago(m)}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                  op.metodoPago === m ? "border-accent bg-accent text-accent-foreground" : "border-border bg-card text-muted-foreground"
+                }`}
+              >
+                {METODO_PAGO_LABELS[m]}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {op.metodoPago === "financiado_externo" && (
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            placeholder="Nombre de la financiera (opcional)"
+            value={financieraNombre}
+            onChange={(e) => setFinancieraNombre(e.target.value)}
+            onBlur={() => patch({ action: "update_metodo_pago", metodoPago: op.metodoPago, financieraNombre }).then(onChanged)}
+            className={`${inputClass} w-64`}
+          />
+        </div>
+      )}
+
+      {vehiclePrice > 0 && (
+        <div className="mt-3 flex flex-col gap-1 rounded-lg bg-background p-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Precio del auto</span>
+            <span className="font-semibold">{currency} {vehiclePrice.toLocaleString("es-AR")}</span>
+          </div>
+          {op.parteDePago.incluye && (
+            <div className="flex justify-between text-muted-foreground">
+              <span>− Parte de pago {tradeInValue > 0 ? "(tasación estimada)" : "(sin tasar todavía)"}</span>
+              <span>− {currency} {Math.round(tradeInValue).toLocaleString("es-AR")}</span>
+            </div>
+          )}
+          <div className="flex justify-between border-t border-border pt-1 font-bold text-accent">
+            <span>{op.parteDePago.incluye ? "Resto a cubrir" : "Total a cubrir"}</span>
+            <span>{currency} {Math.round(resto).toLocaleString("es-AR")}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FinancingSection({
+  op,
+  onChanged,
+  patch,
+  forceOpen,
+  initialPrecioTotal,
+}: {
+  op: SaleOperation;
+  onChanged: () => void;
+  patch: (body: Record<string, unknown>) => Promise<void>;
+  forceOpen: boolean;
+  initialPrecioTotal: number;
+}) {
+  // Derivado, no sincronizado con un efecto: si desde "Forma de pago" se
+  // elige "Financiado por la agencia", esta tarjeta se abre sola en el
+  // siguiente render en vez de quedar colapsada esperando que alguien la
+  // encuentre y la abra a mano. manuallyOpened cubre el click en
+  // "+ Agregar financiación" cuando no aplica ninguna de las otras dos.
+  const [manuallyOpened, setManuallyOpened] = useState(false);
+  const open = !!op.financiacion || forceOpen || manuallyOpened;
   const [anticipo, setAnticipo] = useState(String(op.financiacion?.anticipo ?? ""));
   const [cuotas, setCuotas] = useState(String(op.financiacion?.cuotas ?? "12"));
   const [tasaAnual, setTasaAnual] = useState(String(op.financiacion?.tasaAnual ?? ""));
-  const [precioTotal, setPrecioTotal] = useState("");
+  const [precioTotal, setPrecioTotal] = useState(op.financiacion ? "" : initialPrecioTotal > 0 ? String(Math.round(initialPrecioTotal)) : "");
   const [saving, setSaving] = useState(false);
 
   const calc = async () => {
@@ -518,7 +659,7 @@ function FinancingSection({
       <div className="rounded-2xl border border-border bg-card p-4">
         <p className="mb-1 text-sm font-semibold">Financiación</p>
         <p className="mb-3 text-xs text-muted-foreground">¿La venta incluye un plan de cuotas?</p>
-        <button onClick={() => setOpen(true)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent">
+        <button onClick={() => setManuallyOpened(true)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent">
           + Agregar financiación
         </button>
       </div>
@@ -529,8 +670,8 @@ function FinancingSection({
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="mb-1 flex items-center justify-between">
         <p className="text-sm font-semibold">Financiación</p>
-        {!op.financiacion && (
-          <button onClick={() => setOpen(false)} className="text-xs text-muted-foreground">
+        {!op.financiacion && !forceOpen && (
+          <button onClick={() => setManuallyOpened(false)} className="text-xs text-muted-foreground">
             Quitar
           </button>
         )}
