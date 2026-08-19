@@ -19,7 +19,9 @@ function toIso(ts: unknown): string | null {
 function serialize(
   id: string,
   data: FirebaseFirestore.DocumentData,
-  liveVehicle?: { price?: number; currency?: string } | null
+  liveVehicle?: { price?: number; currency?: string; status?: string } | null,
+  leadStatus?: string | null,
+  tradeInVehicleStatus?: string | null
 ) {
   const vehicleSnapshot = data.vehicleSnapshot
     ? { ...data.vehicleSnapshot, ...(liveVehicle ? { price: liveVehicle.price, currency: liveVehicle.currency } : {}) }
@@ -66,6 +68,12 @@ function serialize(
       },
     metodoPago: data.metodoPago ?? null,
     financieraNombre: data.financieraNombre ?? null,
+    // Datos en vivo para armar el "camino" de la venta en una sola pantalla
+    // (SaleJourney) — antes había que adivinar el estado real saltando entre
+    // el lead, la operación y el stock por separado.
+    leadStatus: leadStatus ?? null,
+    vehicleStatus: liveVehicle?.status ?? null,
+    tradeInVehicleStatus: tradeInVehicleStatus ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -89,19 +97,23 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   const found = await loadOwned(agencyId, id);
   if (!found) return Response.json({ error: "No encontrado" }, { status: 404 });
 
-  // Precio en VIVO del auto (no la foto vieja del momento en que se creó la
-  // operación) — para que la agencia siempre tenga presente cuánto está
-  // publicado hoy, aunque haya cambiado desde entonces.
+  // Precio y estado en VIVO del auto vendido, estado del lead, y estado del
+  // auto tomado como parte de pago (si se agregó al stock) — todo junto acá
+  // para poder armar el "camino" completo de la venta en una sola pantalla,
+  // en vez de que la agencia tenga que ir a mirar el lead y el stock aparte.
   const op = found.snap.data()!;
-  let liveVehicle: { price?: number; currency?: string } | null = null;
-  if (op.vehicleId) {
-    const vehicleSnap = await adminDb.doc(`vehicles/${op.vehicleId}`).get();
-    if (vehicleSnap.exists) {
-      liveVehicle = { price: vehicleSnap.data()?.price, currency: vehicleSnap.data()?.currency };
-    }
-  }
+  const [vehicleSnap, leadSnap, tradeInVehicleSnap] = await Promise.all([
+    op.vehicleId ? adminDb.doc(`vehicles/${op.vehicleId}`).get() : Promise.resolve(null),
+    op.leadId ? adminDb.doc(`leads/${op.leadId}`).get() : Promise.resolve(null),
+    op.parteDePago?.vehiculoStockId ? adminDb.doc(`vehicles/${op.parteDePago.vehiculoStockId}`).get() : Promise.resolve(null),
+  ]);
+  const liveVehicle = vehicleSnap?.exists
+    ? { price: vehicleSnap.data()?.price, currency: vehicleSnap.data()?.currency, status: vehicleSnap.data()?.status }
+    : null;
+  const leadStatus = leadSnap?.exists ? leadSnap.data()?.status ?? null : null;
+  const tradeInVehicleStatus = tradeInVehicleSnap?.exists ? tradeInVehicleSnap.data()?.status ?? null : null;
 
-  return Response.json(serialize(found.snap.id, op, liveVehicle));
+  return Response.json(serialize(found.snap.id, op, liveVehicle, leadStatus, tradeInVehicleStatus));
 });
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]">) => {

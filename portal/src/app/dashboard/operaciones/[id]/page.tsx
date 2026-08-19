@@ -8,6 +8,7 @@
 // opcional.
 "use client";
 
+import { SaleJourney } from "@/components/SaleJourney";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
@@ -238,6 +239,8 @@ export default function OperationDetailPage() {
         </div>
       </div>
 
+      <SaleJourney op={op} />
+
       <PaymentStructureSection op={op} onChanged={refresh} patch={patch} />
 
       {op.status === "en_curso" && (
@@ -262,7 +265,9 @@ export default function OperationDetailPage() {
 
       {error && <p className="text-sm text-error">{error}</p>}
 
-      <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
+      <div id="checklist" className="scroll-mt-4">
+        <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
+      </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FinancingSection
@@ -272,7 +277,9 @@ export default function OperationDetailPage() {
           forceOpen={op.metodoPago === "financiado_propio"}
           initialPrecioTotal={restanteACubrir}
         />
-        <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+        <div id="parte-de-pago" className="scroll-mt-4">
+          <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+        </div>
       </div>
     </div>
   );
