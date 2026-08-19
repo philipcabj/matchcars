@@ -61,6 +61,24 @@ interface FirestoreUserDoc extends Partial<UserProfile> {
 interface AuthContextValue {
   user: User | null;
   profile: UserProfile | null;
+  /**
+   * uid a usar como `userId` al crear/publicar un auto — el propio uid,
+   * salvo que la cuenta sea miembro invitado de una agencia del Portal
+   * (agencyMemberships/{uid}, ver portal/src/lib/agency-server.ts), en cuyo
+   * caso es el uid del dueño de esa agencia. Antes de esto, un vendedor
+   * invitado que publicaba desde la app quedaba con userId = su propio uid,
+   * así que el auto (y cualquier lead que le hicieran) no aparecía en el
+   * Portal del dueño (que filtra todo por su propio uid). null mientras se
+   * resuelve al loguearse.
+   */
+  agencyId: string | null;
+  /**
+   * Perfil bajo el que se publica — el propio `profile` si no es miembro de
+   * ninguna agencia, o el perfil del dueño (plan, agencyName, trustLevel) si
+   * lo es. Usar esto (no `profile`) para decidir límites de plan, nombre de
+   * vendedor y demás campos que van al documento del auto.
+   */
+  sellerProfile: UserProfile | null;
   initializing: boolean;
   registerWithEmail: (params: {
     firstName: string;
@@ -90,6 +108,8 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [agencyId, setAgencyId] = useState<string | null>(null);
+  const [ownerProfile, setOwnerProfile] = useState<UserProfile | null>(null);
   const [initializing, setInitializing] = useState(true);
 
   const [fbRequest, fbResponse, fbPromptAsync] = Facebook.useAuthRequest(
@@ -122,7 +142,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (firebaseUser) {
         const ref = doc(db, "users", firebaseUser.uid);
-        
+
+        // Resuelve una sola vez por sesión si esta cuenta es miembro
+        // invitado de una agencia del Portal — no hace falta que sea en
+        // tiempo real, agencyMemberships casi nunca cambia mientras la app
+        // está abierta.
+        getDoc(doc(db, "agencyMemberships", firebaseUser.uid))
+          .then(async (memSnap) => {
+            if (!memSnap.exists()) {
+              setAgencyId(firebaseUser.uid);
+              setOwnerProfile(null);
+              return;
+            }
+            const ownerUid = memSnap.data().agencyId as string;
+            setAgencyId(ownerUid);
+            const ownerSnap = await getDoc(doc(db, "users", ownerUid));
+            if (ownerSnap.exists()) {
+              const data = ownerSnap.data() as FirestoreUserDoc;
+              setOwnerProfile({
+                ...data,
+                id: ownerUid,
+                plan: data.plan || (data.isPro ? "pro_monthly" : "free"),
+              } as UserProfile);
+            }
+          })
+          .catch(() => {
+            setAgencyId(firebaseUser.uid);
+            setOwnerProfile(null);
+          });
+
         // Update login count logic
         getDoc(ref).then((snap) => {
             if (snap.exists()) {
@@ -175,6 +223,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       } else {
         setProfile(null);
+        setAgencyId(null);
+        setOwnerProfile(null);
         setInitializing(false);
       }
     });
@@ -772,6 +822,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = {
     user,
     profile,
+    agencyId,
+    sellerProfile: ownerProfile ?? profile,
     initializing,
     registerWithEmail,
     loginWithEmail,

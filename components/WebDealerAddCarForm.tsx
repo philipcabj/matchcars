@@ -65,9 +65,11 @@ const TOGGLES: { key: string; label: string }[] = [
 export function WebDealerAddCarForm() {
   const { theme } = useTheme();
   const router = useRouter();
-  const { user, profile, refreshTrustLevel } = useAuth();
-  const userId = user?.uid || "anon";
-  const plan = profile?.plan || "free";
+  const { user, agencyId, sellerProfile, refreshTrustLevel } = useAuth();
+  // userId = la agencia dueña si esta cuenta es vendedor invitado (ver
+  // agencyId en AuthContext) — mismo criterio que app/(screens)/add-car.tsx.
+  const userId = agencyId || user?.uid || "anon";
+  const plan = sellerProfile?.plan || "free";
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
@@ -79,8 +81,8 @@ export function WebDealerAddCarForm() {
   const [fuelType, setFuelType] = useState("");
   const [gearbox, setGearbox] = useState("");
   const [description, setDescription] = useState("");
-  const [province, setProvince] = useState(profile?.province || "");
-  const [city, setCity] = useState(profile?.city || "");
+  const [province, setProvince] = useState(sellerProfile?.province || "");
+  const [city, setCity] = useState(sellerProfile?.city || "");
 
   const [brandOpen, setBrandOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
@@ -379,7 +381,7 @@ export function WebDealerAddCarForm() {
           currency,
           description,
           userId,
-          trustLevel: profile?.trustLevel || "new",
+          trustLevel: sellerProfile?.trustLevel || "new",
           coverImage,
         });
       } catch (e) {
@@ -387,13 +389,13 @@ export function WebDealerAddCarForm() {
       }
 
       const isDealer = isDealerPlan(plan);
-      const userName = isDealer && profile?.agencyName ? profile.agencyName : (user.displayName || user.email || "Agencia");
+      const userName = isDealer && sellerProfile?.agencyName ? sellerProfile.agencyName : (user.displayName || user.email || "Agencia");
 
       const vehicleData = {
         userId,
         userName,
         userPlan: plan,
-        sellerTrustLevel: profile?.trustLevel || "new",
+        sellerTrustLevel: sellerProfile?.trustLevel || "new",
         brand: brand.trim(),
         model: model.trim(),
         version: version || null,
@@ -413,8 +415,8 @@ export function WebDealerAddCarForm() {
         warranty: !!toggles.warranty,
 
         location: {
-          province: province || profile?.province || null,
-          city: city || profile?.city || null,
+          province: province || sellerProfile?.province || null,
+          city: city || sellerProfile?.city || null,
         },
         images: {
           cover: coverImage,

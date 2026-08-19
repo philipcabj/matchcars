@@ -253,11 +253,11 @@ import { CITY_OPTIONS_BY_PROVINCE, PROVINCES } from "@/config/locations";
 
 export default function AddCarScreen() {
   const router = useRouter();
-  const { user, profile, refreshTrustLevel } = useAuth();
+  const { user, agencyId, sellerProfile, refreshTrustLevel } = useAuth();
   const { theme, themeName } = useTheme();
   const insets = useSafeAreaInsets();
 
-  if (Platform.OS === "web" && isDealerPlan(profile?.plan)) {
+  if (Platform.OS === "web" && isDealerPlan(sellerProfile?.plan || "free")) {
     return <WebDealerAddCarForm />;
   }
 
@@ -285,13 +285,18 @@ export default function AddCarScreen() {
     );
   }
 
-  const userId = user?.uid || "anon";
-  const isDealer = isDealerPlan(profile?.plan);
+  // userId = la agencia dueña si esta cuenta es un vendedor invitado (ver
+  // agencyId en AuthContext) — así el auto y cualquier lead que le hagan
+  // aparecen en el Portal del dueño, no "perdidos" bajo el uid personal del
+  // vendedor. Para el dueño y para cuentas sin agencia, agencyId === su
+  // propio uid, así que no cambia nada.
+  const userId = agencyId || user?.uid || "anon";
+  const isDealer = isDealerPlan(sellerProfile?.plan || "free");
   const defaultUserName =
-    profile?.firstName && profile?.lastName
-      ? `${profile.firstName} ${profile.lastName}`
+    sellerProfile?.firstName && sellerProfile?.lastName
+      ? `${sellerProfile.firstName} ${sellerProfile.lastName}`
       : user?.displayName || user?.email || "Usuario";
-  const userName = isDealer && profile?.agencyName ? profile.agencyName : defaultUserName;
+  const userName = isDealer && sellerProfile?.agencyName ? sellerProfile.agencyName : defaultUserName;
 
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
@@ -1816,7 +1821,7 @@ export default function AddCarScreen() {
     });
 
   async function handleProEditorAction(action: "blurPlate" | "enhance") {
-    const plan = profile?.plan || "free";
+    const plan = sellerProfile?.plan || "free";
 
     const allowed = action === "blurPlate" ? canUseAITools(plan) : canEnhancePhoto(plan);
     if (!allowed) {
@@ -2003,7 +2008,7 @@ export default function AddCarScreen() {
   async function pickVideoAndUpload() {
     if (!user) return;
     
-    const plan = profile?.plan || 'free';
+    const plan = sellerProfile?.plan || 'free';
     
     if (!canUploadVideo(plan)) {
         showAlert("Función Premium", "El video walkaround es exclusivo para usuarios PRO. Suscribite para desbloquearlo.", "info", () => router.push("/(screens)/subscribe"));
@@ -2101,7 +2106,7 @@ export default function AddCarScreen() {
     }
 
     // Verificar límites de publicación según plan
-    const plan = profile?.plan || 'free';
+    const plan = sellerProfile?.plan || 'free';
     const limit = getMaxCars(plan);
 
     if (limit !== Infinity) {
@@ -2183,7 +2188,7 @@ export default function AddCarScreen() {
           currency,
           description: details || "",
           userId,
-          trustLevel: profile?.trustLevel || "new",
+          trustLevel: sellerProfile?.trustLevel || "new",
           coverImage: coverImage,
         });
       } catch (e) {
@@ -2194,8 +2199,8 @@ export default function AddCarScreen() {
       const vehicleData = {
         userId,
         userName,
-        userPlan: profile?.plan || 'free',
-        sellerTrustLevel: profile?.trustLevel || "new",
+        userPlan: sellerProfile?.plan || 'free',
+        sellerTrustLevel: sellerProfile?.trustLevel || "new",
         brand,
         model,
         version: version || null,
@@ -2235,8 +2240,8 @@ export default function AddCarScreen() {
         published: false,
         status: "pending_review",
         likedBy: [],
-        isFeatured: profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus') || false,
-        featuredAt: (profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus')) ? serverTimestamp() : null,
+        isFeatured: sellerProfile?.plan?.includes('pro_dealer') || sellerProfile?.plan?.includes('dealer_pro_plus') || false,
+        featuredAt: (sellerProfile?.plan?.includes('pro_dealer') || sellerProfile?.plan?.includes('dealer_pro_plus')) ? serverTimestamp() : null,
         views: 0,
         likesCount: 0,
         flags: {
