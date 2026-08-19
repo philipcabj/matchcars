@@ -1,6 +1,11 @@
 // portal/src/app/dashboard/operaciones/[id]/page.tsx
-// Detalle de una operación de venta — checklist de trámites, financiación
-// rápida (sin conexión a ninguna financiera, solo cálculo) y parte de pago.
+// Detalle de una operación de venta — checklist de trámites agrupado por
+// fases (Acuerdo → Trámites → Entrega, solo la fase activa expandida por
+// defecto) + financiación rápida y parte de pago como módulos opcionales
+// aparte, no scroll obligatorio. Reordenado a partir de feedback real: la
+// versión anterior mostraba las 7 tareas + financiación + parte de pago
+// todas juntas en un solo scroll, sin indicar qué hacer primero ni qué era
+// opcional.
 "use client";
 
 import { ThousandsInput } from "@/components/ThousandsInput";
@@ -23,6 +28,17 @@ const STATIC_MODELS_BY_MAKE: Record<string, string[]> = CAR_MODELS_AR.reduce((ac
   acc[item.make] = list;
   return acc;
 }, {} as Record<string, string[]>);
+
+// Agrupa las 7 tareas fijas de DEFAULT_CHECKLIST_STEPS (sale-operations.ts)
+// en 3 fases con sentido de negocio — el orden interno de cada fase respeta
+// el de DEFAULT_CHECKLIST_STEPS, esto solo las junta visualmente.
+const PHASES: { name: string; keys: string[] }[] = [
+  { name: "Acuerdo", keys: ["sena", "boleto_compraventa"] },
+  { name: "Trámites", keys: ["verificacion_policial", "formulario_08", "informe_dominio"] },
+  { name: "Entrega", keys: ["transferencia", "entrega"] },
+];
+
+const inputClass = "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
 // Mismo patrón que components/VehicleForm.tsx — input libre con sugerencias
 // (datalist) en vez de un <select> estricto, para no bloquear cargar una
@@ -80,8 +96,6 @@ function DatalistField({
   );
 }
 
-const inputClass = "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
-
 function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
   return Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
@@ -116,7 +130,7 @@ export default function OperationDetailPage() {
   // tragaba en silencio: cada sección llamaba a patch() dentro de un
   // try/finally SIN catch, así que la excepción quedaba sin manejar y en
   // pantalla no pasaba nada (reportado con el botón "Agregar al stock").
-  // Centralizado acá, un solo arreglo cubre las cuatro secciones.
+  // Centralizado acá, un solo arreglo cubre todas las secciones.
   const patch = async (body: Record<string, unknown>) => {
     try {
       const token = await getIdToken();
@@ -139,6 +153,10 @@ export default function OperationDetailPage() {
   if (!op) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
   const doneCount = op.checklist.filter((c) => c.status === "hecho").length;
+  // Próximo paso = primer ítem pendiente en el orden fijo del checklist —
+  // antes no había ningún indicador de "qué sigue", solo una lista plana
+  // que había que leer entera para saber qué faltaba.
+  const nextItem = op.checklist.find((c) => c.status === "pendiente") ?? null;
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
@@ -196,11 +214,34 @@ export default function OperationDetailPage() {
         </div>
       </div>
 
+      {op.status === "en_curso" && (
+        <div
+          className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold ${
+            nextItem ? "border-accent/40 bg-accent/5 text-accent" : "border-success/40 bg-success/5 text-success"
+          }`}
+        >
+          {nextItem ? (
+            <>
+              <span>→</span>
+              <span>Próximo paso: {nextItem.label}</span>
+            </>
+          ) : (
+            <>
+              <span>✓</span>
+              <span>Checklist completo — falta marcar la operación como completada.</span>
+            </>
+          )}
+        </div>
+      )}
+
       {error && <p className="text-sm text-error">{error}</p>}
 
-      <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} />
-      <FinancingSection op={op} onChanged={refresh} patch={patch} />
-      <TradeInSection op={op} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+      <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FinancingSection op={op} onChanged={refresh} patch={patch} />
+        <TradeInSection op={op} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+      </div>
     </div>
   );
 }
@@ -212,6 +253,7 @@ function ChecklistSection({
   patch,
   userId,
   onError,
+  nextKey,
 }: {
   op: SaleOperation;
   agency: ReturnType<typeof useAgencyMe>["data"];
@@ -219,6 +261,7 @@ function ChecklistSection({
   patch: (body: Record<string, unknown>) => Promise<void>;
   userId: string;
   onError: (msg: string | null) => void;
+  nextKey: string | null;
 }) {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
@@ -226,6 +269,12 @@ function ChecklistSection({
   const [senaMonto, setSenaMonto] = useState("");
   const [senaCurrency, setSenaCurrency] = useState<"ARS" | "USD">((op.vehicleSnapshot?.currency as "ARS" | "USD") || "ARS");
   const { getIdToken } = useAuth();
+
+  // Fase activa = la primera que tiene algún ítem pendiente — se expande
+  // sola. Las demás arrancan colapsadas, pero se pueden abrir a mano (ej.
+  // para adjuntar un documento de una fase futura sin esperar a llegar ahí).
+  const activePhaseIndex = PHASES.findIndex((phase) => phase.keys.includes(nextKey ?? ""));
+  const [manualExpand, setManualExpand] = useState<Record<number, boolean>>({});
 
   const generateDocument = async (tipo: "boleto_compraventa" | "recibo_sena", key: string, monto?: number, montoCurrency?: string) => {
     setGeneratingKey(key);
@@ -275,131 +324,159 @@ function ChecklistSection({
     }
   };
 
-  return (
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="mb-3 text-sm font-semibold">Checklist de trámites</p>
-      <div className="flex flex-col gap-2">
-        {op.checklist.map((item) => {
-          const remaining = daysUntil(item.dueAt);
-          const overdue = remaining !== null && remaining < 0 && item.status !== "hecho";
-          const soon = remaining !== null && remaining >= 0 && remaining <= 3 && item.status !== "hecho";
-          return (
-            <div key={item.key} className="rounded-lg border border-border bg-background p-3">
-              <div className="flex items-start gap-3">
+  const renderItem = (item: ChecklistItem) => {
+    const remaining = daysUntil(item.dueAt);
+    const overdue = remaining !== null && remaining < 0 && item.status !== "hecho";
+    const soon = remaining !== null && remaining >= 0 && remaining <= 3 && item.status !== "hecho";
+    return (
+      <div key={item.key} className="rounded-lg border border-border bg-background p-3">
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => toggleDone(item)}
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${
+              item.status === "hecho" ? "border-success bg-success text-white" : "border-border"
+            }`}
+          >
+            {item.status === "hecho" ? "✓" : ""}
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className={`text-sm font-semibold ${item.status === "hecho" ? "text-muted-foreground line-through" : ""}`}>{item.label}</p>
+              {overdue && <span className="rounded-full bg-error/15 px-2 py-0.5 text-[10px] font-bold text-error">Vencido</span>}
+              {soon && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold text-amber-600">Vence pronto</span>}
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                value={item.responsable ?? ""}
+                onChange={(e) => setResponsable(item, e.target.value)}
+                className="rounded-md border border-border bg-card px-2 py-1 text-xs"
+              >
+                <option value="">Sin responsable</option>
+                {(agency?.members ?? []).map((m) => (
+                  <option key={m.uid} value={m.uid}>
+                    {m.name || m.email || m.uid}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={item.dueAt ? item.dueAt.slice(0, 10) : ""}
+                onChange={(e) => setDueAt(item, e.target.value)}
+                className="rounded-md border border-border bg-card px-2 py-1 text-xs"
+                title="Fecha límite (opcional — la caducidad real varía, cargala vos)"
+              />
+              <label className="cursor-pointer rounded-md border border-border bg-card px-2 py-1 text-xs font-semibold text-accent">
+                {uploadingKey === item.key ? "Subiendo…" : "+ Adjuntar"}
+                <input
+                  type="file"
+                  className="hidden"
+                  disabled={uploadingKey === item.key}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadFile(item, file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {item.key === "boleto_compraventa" && (
                 <button
-                  onClick={() => toggleDone(item)}
-                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-xs ${
-                    item.status === "hecho" ? "border-success bg-success text-white" : "border-border"
+                  onClick={() => generateDocument("boleto_compraventa", item.key)}
+                  disabled={generatingKey === item.key}
+                  className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                >
+                  {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
+                </button>
+              )}
+              {item.key === "sena" && (
+                <button
+                  onClick={() => setSenaPrompt(true)}
+                  disabled={generatingKey === item.key}
+                  className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                >
+                  {generatingKey === item.key ? "Generando…" : "📄 Generar recibo"}
+                </button>
+              )}
+            </div>
+
+            {item.key === "sena" && senaPrompt && (
+              <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
+                <input
+                  type="number"
+                  autoFocus
+                  placeholder="Monto de la seña"
+                  value={senaMonto}
+                  onChange={(e) => setSenaMonto(e.target.value)}
+                  className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
+                />
+                <select
+                  value={senaCurrency}
+                  onChange={(e) => setSenaCurrency(e.target.value as "ARS" | "USD")}
+                  className="rounded-md border border-border bg-card px-2 py-1 text-xs"
+                >
+                  <option value="ARS">ARS</option>
+                  <option value="USD">USD</option>
+                </select>
+                <button
+                  onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
+                  disabled={!senaMonto || Number(senaMonto) <= 0}
+                  className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+                >
+                  Generar
+                </button>
+                <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
+                  Cancelar
+                </button>
+              </div>
+            )}
+
+            {item.adjuntos.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1">
+                {item.adjuntos.map((a, i) => (
+                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">
+                    📎 {a.nombre}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {PHASES.map((phase, i) => {
+        const items = phase.keys.map((k) => op.checklist.find((c) => c.key === k)).filter((c): c is ChecklistItem => !!c);
+        const phaseDone = items.filter((c) => c.status === "hecho").length;
+        const allDone = phaseDone === items.length;
+        const expanded = manualExpand[i] !== undefined ? manualExpand[i] : i === activePhaseIndex || (activePhaseIndex === -1 && i === PHASES.length - 1);
+        return (
+          <div key={phase.name} className="rounded-2xl border border-border bg-card p-4">
+            <button
+              onClick={() => setManualExpand((prev) => ({ ...prev, [i]: !expanded }))}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                    allDone ? "bg-success text-white" : "bg-muted/20 text-muted-foreground"
                   }`}
                 >
-                  {item.status === "hecho" ? "✓" : ""}
-                </button>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className={`text-sm font-semibold ${item.status === "hecho" ? "text-muted-foreground line-through" : ""}`}>{item.label}</p>
-                    {overdue && <span className="rounded-full bg-error/15 px-2 py-0.5 text-[10px] font-bold text-error">Vencido</span>}
-                    {soon && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold text-amber-600">Vence pronto</span>}
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <select
-                      value={item.responsable ?? ""}
-                      onChange={(e) => setResponsable(item, e.target.value)}
-                      className="rounded-md border border-border bg-card px-2 py-1 text-xs"
-                    >
-                      <option value="">Sin responsable</option>
-                      {(agency?.members ?? []).map((m) => (
-                        <option key={m.uid} value={m.uid}>
-                          {m.name || m.email || m.uid}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={item.dueAt ? item.dueAt.slice(0, 10) : ""}
-                      onChange={(e) => setDueAt(item, e.target.value)}
-                      className="rounded-md border border-border bg-card px-2 py-1 text-xs"
-                      title="Fecha límite (opcional — la caducidad real varía, cargala vos)"
-                    />
-                    <label className="cursor-pointer rounded-md border border-border bg-card px-2 py-1 text-xs font-semibold text-accent">
-                      {uploadingKey === item.key ? "Subiendo…" : "+ Adjuntar"}
-                      <input
-                        type="file"
-                        className="hidden"
-                        disabled={uploadingKey === item.key}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) uploadFile(item, file);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                    {item.key === "boleto_compraventa" && (
-                      <button
-                        onClick={() => generateDocument("boleto_compraventa", item.key)}
-                        disabled={generatingKey === item.key}
-                        className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
-                      >
-                        {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
-                      </button>
-                    )}
-                    {item.key === "sena" && (
-                      <button
-                        onClick={() => setSenaPrompt(true)}
-                        disabled={generatingKey === item.key}
-                        className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
-                      >
-                        {generatingKey === item.key ? "Generando…" : "📄 Generar recibo"}
-                      </button>
-                    )}
-                  </div>
-
-                  {item.key === "sena" && senaPrompt && (
-                    <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
-                      <input
-                        type="number"
-                        autoFocus
-                        placeholder="Monto de la seña"
-                        value={senaMonto}
-                        onChange={(e) => setSenaMonto(e.target.value)}
-                        className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
-                      />
-                      <select
-                        value={senaCurrency}
-                        onChange={(e) => setSenaCurrency(e.target.value as "ARS" | "USD")}
-                        className="rounded-md border border-border bg-card px-2 py-1 text-xs"
-                      >
-                        <option value="ARS">ARS</option>
-                        <option value="USD">USD</option>
-                      </select>
-                      <button
-                        onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
-                        disabled={!senaMonto || Number(senaMonto) <= 0}
-                        className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
-                      >
-                        Generar
-                      </button>
-                      <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
-                        Cancelar
-                      </button>
-                    </div>
-                  )}
-
-                  {item.adjuntos.length > 0 && (
-                    <div className="mt-2 flex flex-col gap-1">
-                      {item.adjuntos.map((a, i) => (
-                        <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">
-                          📎 {a.nombre}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                  {allDone ? "✓" : i + 1}
+                </span>
+                <p className="text-sm font-semibold">{phase.name}</p>
               </div>
-            </div>
-          );
-        })}
-      </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">{phaseDone}/{items.length}</span>
+                <span className="text-xs text-muted-foreground">{expanded ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {expanded && <div className="mt-3 flex flex-col gap-2">{items.map(renderItem)}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -413,6 +490,7 @@ function FinancingSection({
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const [open, setOpen] = useState(!!op.financiacion);
   const [anticipo, setAnticipo] = useState(String(op.financiacion?.anticipo ?? ""));
   const [cuotas, setCuotas] = useState(String(op.financiacion?.cuotas ?? "12"));
   const [tasaAnual, setTasaAnual] = useState(String(op.financiacion?.tasaAnual ?? ""));
@@ -435,13 +513,32 @@ function FinancingSection({
     }
   };
 
+  if (!open) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <p className="mb-1 text-sm font-semibold">Financiación</p>
+        <p className="mb-3 text-xs text-muted-foreground">¿La venta incluye un plan de cuotas?</p>
+        <button onClick={() => setOpen(true)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent">
+          + Agregar financiación
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="mb-1 text-sm font-semibold">Financiación rápida</p>
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-sm font-semibold">Financiación</p>
+        {!op.financiacion && (
+          <button onClick={() => setOpen(false)} className="text-xs text-muted-foreground">
+            Quitar
+          </button>
+        )}
+      </div>
       <p className="mb-3 text-xs text-muted-foreground">
         Calculadora propia, sin conexión a ninguna financiera — vos cargás la tasa que apliques.
       </p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Precio total</span>
           <input type="number" className={inputClass} value={precioTotal} onChange={(e) => setPrecioTotal(e.target.value)} />
@@ -620,7 +717,7 @@ function TradeInSection({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2">
         <DatalistField
           label="Marca"
           value={marca}
@@ -651,7 +748,7 @@ function TradeInSection({
           onChange={setVersion}
         />
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Año</span>
           <input type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
@@ -660,11 +757,11 @@ function TradeInSection({
           <span className="text-muted-foreground">Km</span>
           <ThousandsInput value={km} onChange={setKm} className={inputClass} />
         </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Estado (opcional)</span>
-          <input className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value)} />
-        </label>
       </div>
+      <label className="mt-2 flex flex-col gap-1 text-xs">
+        <span className="text-muted-foreground">Estado (opcional)</span>
+        <input className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value)} />
+      </label>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={save} disabled={saving} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
@@ -675,7 +772,7 @@ function TradeInSection({
           disabled={appraising || !marca || !modelo || !anio}
           className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-50"
         >
-          {appraising ? "Tasando…" : "Tasar con datos de MatchCars"}
+          {appraising ? "Tasando…" : "Tasar con MatchCars"}
         </button>
         <label className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">
           {uploadingPhoto ? "Subiendo…" : "+ Foto"}
