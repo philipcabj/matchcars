@@ -9,11 +9,12 @@ import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { sendNotificationEmail } from "@/lib/mail";
 import { sendPushNotification } from "@/lib/notifications";
+import { submitSellerRating } from "@/lib/ratings";
 import { Offer, LeadStatus } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { addDoc, arrayUnion, collection, deleteDoc, doc, getDoc, increment, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, arrayUnion, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, FlatList, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -582,19 +583,34 @@ export default function ChatWithUserScreen() {
     // que puede no existir en el segundo caso.
     if (!ratingScore || !saleData || !currentVehicleId || !user?.uid || submittingRating) return;
     const isSeller = user.uid === saleData.sellerId;
-    const ratingField = isSeller ? "ratingBySeller" : "ratingByBuyer";
     const ratedUserId = isSeller ? saleData.buyerId : saleData.sellerId;
     if (!ratedUserId) return;
     setSubmittingRating(true);
     try {
-      await updateDoc(doc(db, "sales", currentVehicleId), {
-        [ratingField]: { score: ratingScore, comment: ratingComment.trim() || null, ratedAt: serverTimestamp(), ratedByUid: user.uid },
-      });
-      // Actualizar promedio en el perfil del usuario calificado
-      updateDoc(doc(db, "users", ratedUserId), {
-        ratingSum: increment(ratingScore),
-        ratingCount: increment(1),
-      }).catch(() => {});
+      if (isSeller) {
+        // Vendedor califica al comprador — sin pantalla pública que lo
+        // muestre todavía, se guarda tal cual en la venta.
+        await updateDoc(doc(db, "sales", currentVehicleId), {
+          ratingBySeller: { score: ratingScore, comment: ratingComment.trim() || null, ratedAt: serverTimestamp(), ratedByUid: user.uid },
+        });
+      } else {
+        // Comprador califica al vendedor — mismo camino que Perfil > Mis
+        // Compras (lib/ratings.ts), así se ve reflejado en sellerRating y en
+        // `reviews`. Antes esto escribía en ratingSum/ratingCount, campos
+        // que ningún lado de la app lee — la calificación se guardaba y
+        // desaparecía.
+        await submitSellerRating({
+          vehicleId: currentVehicleId,
+          sellerId: saleData.sellerId,
+          reviewerId: user.uid,
+          reviewerName: profile?.firstName || profile?.lastName ? `${profile?.firstName ?? ""} ${profile?.lastName ?? ""}`.trim() : user.displayName || user.email || "Anónimo",
+          reviewerPhotoUrl: (profile as any)?.photoURL || user.photoURL || null,
+          vehicleBrand: saleData.vehicleSnapshot?.brand ?? null,
+          vehicleModel: saleData.vehicleSnapshot?.model ?? null,
+          score: ratingScore,
+          comment: ratingComment.trim(),
+        });
+      }
       setRatingScore(0);
       setRatingComment("");
       showAlert("¡Gracias!", "Tu calificación fue enviada.", "success");

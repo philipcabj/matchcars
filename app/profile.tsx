@@ -11,12 +11,13 @@ import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { canAccessCRM, isDealerPlan } from "@/lib/planChecks";
 import { fetchDealerReportData, generateCSV, generatePDF, shareFile } from "@/lib/reporting";
+import { submitSellerRating } from "@/lib/ratings";
 import { TrustLevel } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useRouter } from "expo-router";
-import { addDoc, collection, doc, documentId, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { formatNumber } from "@/utils/format";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -455,91 +456,28 @@ export default function ProfileScreen() {
   };
 
   const submitRating = async () => {
-    if (!selectedPurchase) return;
+    if (!selectedPurchase || !user) return;
     setSubmittingRating(true);
     try {
-        // Write to canonical sale document (vehicleId as ID) so chat screen + profile stay in sync
+        // Escribe en sales/{vehicleId} (canónico, así el chat lo ve igual),
+        // en `reviews`, y recalcula sellerRating/sellerReviewCount — ver
+        // lib/ratings.ts, mismo camino que usa la calificación desde el chat
+        // justo después de confirmar la entrega.
         const canonicalSaleId = selectedPurchase.vehicleId || selectedPurchase.id;
-        const saleRef = doc(db, "sales", canonicalSaleId);
-        await updateDoc(saleRef, {
-            ratingByBuyer: { score: rating, comment: review, ratedAt: serverTimestamp(), ratedByUid: user?.uid },
-            rating: rating,
-            review: review,
+        await submitSellerRating({
+          vehicleId: canonicalSaleId,
+          sellerId: selectedPurchase.sellerId,
+          reviewerId: user.uid,
+          reviewerName: (profile as any)?.displayName || (profile as any)?.firstName
+            ? `${(profile as any)?.firstName ?? ""} ${(profile as any)?.lastName ?? ""}`.trim()
+            : user.displayName || user.email || "Anónimo",
+          reviewerPhotoUrl: (profile as any)?.photoURL || user.photoURL || null,
+          vehicleBrand: selectedPurchase.vehicleBrand || null,
+          vehicleModel: selectedPurchase.vehicleModel || null,
+          score: rating,
+          comment: review,
         });
 
-        if (selectedPurchase.sellerId && user) {
-          try {
-            await addDoc(collection(db, "reviews"), {
-              sellerId: selectedPurchase.sellerId,
-              reviewerId: user.uid,
-              reviewerName: (profile as any)?.displayName || (profile as any)?.firstName
-                ? `${(profile as any)?.firstName ?? ""} ${(profile as any)?.lastName ?? ""}`.trim()
-                : user.displayName || user.email || "Anónimo",
-              reviewerPhotoUrl: (profile as any)?.photoURL || user.photoURL || null,
-              saleId: selectedPurchase.id,
-              vehicleId: selectedPurchase.vehicleId || null,
-              vehicleBrand: selectedPurchase.vehicleBrand || null,
-              vehicleModel: selectedPurchase.vehicleModel || null,
-              rating,
-              review,
-              createdAt: serverTimestamp(),
-            });
-          } catch (e) {
-            logger.log("Error saving review to reviews collection", e);
-          }
-        }
-
-        if (selectedPurchase.sellerId) {
-             try {
-                 const q = query(collection(db, "sales"), where("sellerId", "==", selectedPurchase.sellerId));
-                 const snap: any = await getDocs(q);
-                 const docs: any[] = snap?.docs ?? [];
-                 let total = 0;
-                 let count = 0;
-                 
-                 for (const d of docs) {
-                   const data = d.data();
-                   let r = Number(data.rating);
-                   if (d.id === selectedPurchase.id) r = rating;
-                   
-                   if (!isNaN(r) && r > 0) {
-                     total += r;
-                     count++;
-                   }
-                 }
-                 
-                if (count > 0) {
-                  const avg = total / count;
-
-                  await updateDoc(doc(db, "users", selectedPurchase.sellerId), {
-                    sellerRating: avg,
-                    sellerReviewCount: count
-                  });
-
-                  try {
-                    const vehiclesQ = query(
-                      collection(db, "vehicles"),
-                      where("userId", "==", selectedPurchase.sellerId)
-                    );
-                    const vehiclesSnap: any = await getDocs(vehiclesQ);
-                    const vehiclesDocs: any[] = vehiclesSnap?.docs ?? [];
-
-                    for (const v of vehiclesDocs) {
-                      const vRef = doc(db, "vehicles", v.id);
-                      await updateDoc(vRef, {
-                        sellerRating: avg,
-                        sellerReviewCount: count
-                      });
-                    }
-                  } catch (syncError) {
-                    logger.log("Error syncing seller rating to vehicles", syncError);
-                  }
-                }
-             } catch (e) {
-                logger.log("Error updating seller rating", e);
-             }
-        }
-        
         // Update local state — match on vehicleId so dedup'd item gets updated
         const canonicalId = selectedPurchase.vehicleId || selectedPurchase.id;
         setPurchases(prev => prev.map(p =>
