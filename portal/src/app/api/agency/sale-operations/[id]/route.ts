@@ -7,7 +7,7 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { calculateFrenchInstallment } from "@/lib/sale-operations";
+import { calculateFrenchInstallment, suggestTradeInPrice, TradeInCondition } from "@/lib/sale-operations";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -48,7 +48,21 @@ function serialize(
     })),
     financiacion: data.financiacion ?? null,
     parteDePago:
-      data.parteDePago ?? { incluye: false, marca: "", modelo: "", version: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
+      data.parteDePago ?? {
+        incluye: false,
+        marca: "",
+        modelo: "",
+        version: "",
+        anio: null,
+        km: null,
+        estado: "",
+        fotos: [],
+        tasacion: null,
+        precioTomaFinal: null,
+        tasadoPor: null,
+        agregadoAlStock: false,
+        vehiculoStockId: null,
+      },
     metodoPago: data.metodoPago ?? null,
     financieraNombre: data.financieraNombre ?? null,
     createdAt: toIso(data.createdAt),
@@ -179,7 +193,10 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       version: body.version ?? op.parteDePago?.version ?? "",
       anio: body.anio !== undefined ? Number(body.anio) || null : op.parteDePago?.anio ?? null,
       km: body.km !== undefined ? Number(body.km) || null : op.parteDePago?.km ?? null,
-      estado: body.estado ?? op.parteDePago?.estado ?? "",
+      estado: ["excelente", "bueno", "regular"].includes(body.estado) ? body.estado : op.parteDePago?.estado ?? "",
+      precioTomaFinal:
+        body.precioTomaFinal !== undefined ? Number(body.precioTomaFinal) || null : op.parteDePago?.precioTomaFinal ?? null,
+      tasadoPor: body.tasadoPor !== undefined ? body.tasadoPor || null : op.parteDePago?.tasadoPor ?? null,
     };
     await ref.update({ parteDePago, updatedAt: FieldValue.serverTimestamp() });
     return Response.json({ ok: true });
@@ -210,7 +227,12 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
     const ownerData = ownerSnap.data() ?? {};
     const vehicleRef = adminDb.collection("vehicles").doc();
-    const suggestedPrice = tradeIn.tasacion?.avg ? Math.round(tradeIn.tasacion.avg) : 0;
+    // Precio de toma final si la agencia lo cargó/confirmó; si no, la
+    // sugerencia calculada (valor de venta − margen según estado) — nunca el
+    // valor de venta estimado crudo, que es lo que se espera COBRAR después,
+    // no lo que se paga/acredita al tomarlo.
+    const suggestedPrice =
+      tradeIn.precioTomaFinal ?? (tradeIn.tasacion?.avg ? suggestTradeInPrice(tradeIn.tasacion.avg, tradeIn.estado as TradeInCondition) : 0);
     await adminDb.runTransaction(async (t) => {
       t.set(vehicleRef, {
         userId: agencyId,

@@ -69,11 +69,41 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// "matchcars" = calculado con publicaciones similares (analyzeMarketPrice);
+// "manual" ya no significa "no hay dato" — significa que la agencia lo
+// escribió a mano (con o sin datos de MatchCars) o que MatchCars no
+// encontró suficientes publicaciones similares para tasar solo.
 export interface TradeInAppraisal {
   min: number;
   avg: number;
   max: number;
   fuente: "matchcars" | "manual";
+}
+
+export type TradeInCondition = "excelente" | "bueno" | "regular";
+
+export const TRADE_IN_CONDITION_LABELS: Record<TradeInCondition, string> = {
+  excelente: "Excelente",
+  bueno: "Bueno",
+  regular: "Regular",
+};
+
+// Descuento sobre el valor de venta estimado (tasacion.avg) para llegar a un
+// precio de toma con margen de reventa — la agencia no puede pagar lo mismo
+// que después va a pedir, necesita margen para volver a publicarlo. Base
+// 5-10% según lo pedido, con un ajuste extra por estado: cuanto peor el
+// estado, más margen hace falta (más gasto de puesta a punto antes de
+// revender). Son valores de referencia editables desde el precio final, no
+// una regla fija.
+export const TRADE_IN_CONDITION_DISCOUNT: Record<TradeInCondition, number> = {
+  excelente: 0.05,
+  bueno: 0.08,
+  regular: 0.12,
+};
+
+export function suggestTradeInPrice(valorVenta: number, condicion: TradeInCondition | ""): number {
+  if (!valorVenta || !condicion) return 0;
+  return Math.round(valorVenta * (1 - TRADE_IN_CONDITION_DISCOUNT[condicion]));
 }
 
 export interface TradeIn {
@@ -83,9 +113,17 @@ export interface TradeIn {
   version: string;
   anio: number | null;
   km: number | null;
-  estado: string;
+  estado: TradeInCondition | "";
   fotos: string[];
+  // Valor de venta estimado (lo que MatchCars/la agencia cree que se puede
+  // revender) — NO es el precio de toma, ver precioTomaFinal.
   tasacion: TradeInAppraisal | null;
+  // Precio final acordado para tomar el usado — puede partir de
+  // suggestTradeInPrice(tasacion.avg, estado) o cargarse a mano si
+  // MatchCars no pudo tasar (tasacion null) o la agencia prefiere otro número.
+  precioTomaFinal: number | null;
+  // uid de quién hizo/confirmó la tasación — antes nadie quedaba registrado.
+  tasadoPor: string | null;
   agregadoAlStock: boolean;
   vehiculoStockId: string | null;
 }
@@ -100,6 +138,8 @@ export const EMPTY_TRADE_IN: TradeIn = {
   estado: "",
   fotos: [],
   tasacion: null,
+  precioTomaFinal: null,
+  tasadoPor: null,
   agregadoAlStock: false,
   vehiculoStockId: null,
 };

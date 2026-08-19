@@ -15,7 +15,15 @@ import { parseJsonResponse } from "@/lib/api-client";
 import { CAR_MODELS_AR } from "@/lib/carModelsAr";
 import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
 import { analyzeMarketPrice } from "@/lib/pricing";
-import { ChecklistItem, MetodoPagoResto, SaleOperation, TradeInAppraisal } from "@/lib/sale-operations";
+import {
+  ChecklistItem,
+  MetodoPagoResto,
+  SaleOperation,
+  suggestTradeInPrice,
+  TRADE_IN_CONDITION_LABELS,
+  TradeInAppraisal,
+  TradeInCondition,
+} from "@/lib/sale-operations";
 import { uploadOperationDocument, uploadTradeInPhoto } from "@/lib/upload";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -101,6 +109,14 @@ function daysUntil(iso: string | null): number | null {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
 }
 
+// Precio de toma "efectivo" del usado — el que confirmó la agencia si ya lo
+// cargó, si no la sugerencia calculada (valor de venta − margen por estado).
+function tradeInTakePrice(tradeIn: SaleOperation["parteDePago"]): number {
+  if (tradeIn.precioTomaFinal) return tradeIn.precioTomaFinal;
+  if (tradeIn.tasacion?.avg) return suggestTradeInPrice(tradeIn.tasacion.avg, tradeIn.estado as TradeInCondition);
+  return 0;
+}
+
 export default function OperationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { getIdToken, user } = useAuth();
@@ -157,12 +173,13 @@ export default function OperationDetailPage() {
   // antes no había ningún indicador de "qué sigue", solo una lista plana
   // que había que leer entera para saber qué faltaba.
   const nextItem = op.checklist.find((c) => c.status === "pendiente") ?? null;
-  // Precio del auto menos la tasación del usado entregado (si hay parte de
-  // pago) = lo que falta cubrir — alimenta tanto el resumen de "Forma de
-  // pago" como el precio total pre-cargado de la calculadora de Financiación,
-  // para no tener que volver a escribirlo a mano.
+  // Precio del auto menos el precio de TOMA del usado entregado (no el valor
+  // de venta estimado — eso es lo que se espera cobrar después de revenderlo,
+  // no lo que se paga/acredita ahora) = lo que falta cubrir. Alimenta tanto
+  // el resumen de "Forma de pago" como el precio total pre-cargado de la
+  // calculadora de Financiación, para no tener que volver a escribirlo a mano.
   const vehiclePrice = op.vehicleSnapshot?.price ?? 0;
-  const tradeInValue = op.parteDePago.incluye ? op.parteDePago.tasacion?.avg ?? 0 : 0;
+  const tradeInValue = op.parteDePago.incluye ? tradeInTakePrice(op.parteDePago) : 0;
   const restanteACubrir = Math.max(0, vehiclePrice - tradeInValue);
 
   return (
@@ -255,7 +272,7 @@ export default function OperationDetailPage() {
           forceOpen={op.metodoPago === "financiado_propio"}
           initialPrecioTotal={restanteACubrir}
         />
-        <TradeInSection op={op} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+        <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
       </div>
     </div>
   );
@@ -518,7 +535,7 @@ function PaymentStructureSection({
   const [financieraNombre, setFinancieraNombre] = useState(op.financieraNombre ?? "");
   const currency = op.vehicleSnapshot?.currency ?? "ARS";
   const vehiclePrice = op.vehicleSnapshot?.price ?? 0;
-  const tradeInValue = op.parteDePago.incluye ? op.parteDePago.tasacion?.avg ?? 0 : 0;
+  const tradeInValue = op.parteDePago.incluye ? tradeInTakePrice(op.parteDePago) : 0;
   const resto = Math.max(0, vehiclePrice - tradeInValue);
 
   const setIncluyeUsado = async (incluye: boolean) => {
@@ -598,7 +615,7 @@ function PaymentStructureSection({
           </div>
           {op.parteDePago.incluye && (
             <div className="flex justify-between text-muted-foreground">
-              <span>− Parte de pago {tradeInValue > 0 ? "(tasación estimada)" : "(sin tasar todavía)"}</span>
+              <span>− Parte de pago {tradeInValue > 0 ? "(precio de toma)" : "(todavía sin definir)"}</span>
               <span>− {currency} {Math.round(tradeInValue).toLocaleString("es-AR")}</span>
             </div>
           )}
@@ -718,11 +735,13 @@ function FinancingSection({
 
 function TradeInSection({
   op,
+  agency,
   onChanged,
   patch,
   userId,
 }: {
   op: SaleOperation;
+  agency: ReturnType<typeof useAgencyMe>["data"];
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
   userId: string;
@@ -733,13 +752,19 @@ function TradeInSection({
   const [version, setVersion] = useState(tradeIn.version);
   const [anio, setAnio] = useState(tradeIn.anio ? String(tradeIn.anio) : "");
   const [km, setKm] = useState(tradeIn.km ? String(tradeIn.km) : "");
-  const [estado, setEstado] = useState(tradeIn.estado);
+  const [estado, setEstado] = useState<TradeInCondition | "">(tradeIn.estado);
+  const [precioTomaFinal, setPrecioTomaFinal] = useState(tradeIn.precioTomaFinal ? String(tradeIn.precioTomaFinal) : "");
+  const [tasadoPor, setTasadoPor] = useState(tradeIn.tasadoPor ?? "");
+  const [manualValorVenta, setManualValorVenta] = useState("");
+  const [showManualValorVenta, setShowManualValorVenta] = useState(false);
   const [appraising, setAppraising] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [addingToStock, setAddingToStock] = useState(false);
   const [catalogMakes, setCatalogMakes] = useState<string[]>([]);
   const [catalogModels, setCatalogModels] = useState<{ name: string; versions: string[] }[]>([]);
+  const suggested = tradeIn.tasacion?.avg ? suggestTradeInPrice(tradeIn.tasacion.avg, estado) : 0;
 
   useEffect(() => {
     loadCatalogMakes().then(setCatalogMakes);
@@ -793,7 +818,18 @@ function TradeInSection({
   const save = async () => {
     setSaving(true);
     try {
-      await patch({ action: "update_trade_in", incluye: true, marca, modelo, version, anio: Number(anio) || null, km: Number(km) || null, estado });
+      await patch({
+        action: "update_trade_in",
+        incluye: true,
+        marca,
+        modelo,
+        version,
+        anio: Number(anio) || null,
+        km: Number(km) || null,
+        estado,
+        precioTomaFinal: precioTomaFinal ? Number(precioTomaFinal) : null,
+        tasadoPor: tasadoPor || null,
+      });
       onChanged();
     } finally {
       setSaving(false);
@@ -805,16 +841,37 @@ function TradeInSection({
     setAppraising(true);
     try {
       const result = await analyzeMarketPrice(marca, modelo, Number(anio), "ARS");
-      const tasacion: TradeInAppraisal =
-        result.count > 0
-          ? { min: result.min, avg: result.avg, max: result.max, fuente: "matchcars" }
-          : { min: 0, avg: 0, max: 0, fuente: "manual" };
-      await patch({ action: "set_trade_in_appraisal", tasacion });
-      onChanged();
+      if (result.count > 0) {
+        await patch({ action: "set_trade_in_appraisal", tasacion: { min: result.min, avg: result.avg, max: result.max, fuente: "matchcars" } });
+        onChanged();
+      } else {
+        // Sin publicaciones similares para comparar — antes esto dejaba a la
+        // agencia sin ningún valor y sin forma de cargar uno a mano (el
+        // texto decía "cargalo a mano" pero no había dónde). Ahora abre el
+        // campo manual en vez de guardar una tasación en $0.
+        setShowManualValorVenta(true);
+      }
     } finally {
       setAppraising(false);
     }
   };
+
+  const saveManualValorVenta = async () => {
+    const val = Number(manualValorVenta) || 0;
+    if (val <= 0) return;
+    setSavingManual(true);
+    try {
+      const tasacion: TradeInAppraisal = { min: val, avg: val, max: val, fuente: "manual" };
+      await patch({ action: "set_trade_in_appraisal", tasacion });
+      onChanged();
+      setShowManualValorVenta(false);
+      setManualValorVenta("");
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const applySuggested = () => setPrecioTomaFinal(String(suggested));
 
   const addPhoto = async (file: File) => {
     setUploadingPhoto(true);
@@ -835,7 +892,18 @@ function TradeInSection({
       // el servidor validaba contra lo último guardado (podía estar vacío) y
       // devolvía un error que la pantalla nunca mostraba (ver fix de patch()
       // más arriba) — el botón parecía "no hacer nada".
-      await patch({ action: "update_trade_in", incluye: true, marca, modelo, version, anio: Number(anio) || null, km: Number(km) || null, estado });
+      await patch({
+        action: "update_trade_in",
+        incluye: true,
+        marca,
+        modelo,
+        version,
+        anio: Number(anio) || null,
+        km: Number(km) || null,
+        estado,
+        precioTomaFinal: precioTomaFinal ? Number(precioTomaFinal) : null,
+        tasadoPor: tasadoPor || null,
+      });
       await patch({ action: "add_trade_in_to_stock" });
       onChanged();
     } finally {
@@ -889,7 +957,7 @@ function TradeInSection({
           onChange={setVersion}
         />
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="mt-2 grid grid-cols-3 gap-2">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Año</span>
           <input type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
@@ -898,11 +966,18 @@ function TradeInSection({
           <span className="text-muted-foreground">Km</span>
           <ThousandsInput value={km} onChange={setKm} className={inputClass} />
         </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Estado</span>
+          <select className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value as TradeInCondition)}>
+            <option value="">Sin definir</option>
+            {(Object.keys(TRADE_IN_CONDITION_LABELS) as TradeInCondition[]).map((c) => (
+              <option key={c} value={c}>
+                {TRADE_IN_CONDITION_LABELS[c]}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-      <label className="mt-2 flex flex-col gap-1 text-xs">
-        <span className="text-muted-foreground">Estado (opcional)</span>
-        <input className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value)} />
-      </label>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={save} disabled={saving} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
@@ -914,6 +989,12 @@ function TradeInSection({
           className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-50"
         >
           {appraising ? "Tasando…" : "Tasar con MatchCars"}
+        </button>
+        <button
+          onClick={() => setShowManualValorVenta((v) => !v)}
+          className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+        >
+          {tradeIn.tasacion ? "Corregir valor a mano" : "Cargar valor a mano"}
         </button>
         <label className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">
           {uploadingPhoto ? "Subiendo…" : "+ Foto"}
@@ -931,6 +1012,20 @@ function TradeInSection({
         </label>
       </div>
 
+      {showManualValorVenta && (
+        <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
+          <span className="text-xs text-muted-foreground">Valor de venta estimado</span>
+          <ThousandsInput value={manualValorVenta} onChange={setManualValorVenta} className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs" />
+          <button
+            onClick={saveManualValorVenta}
+            disabled={savingManual || !manualValorVenta}
+            className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+          >
+            {savingManual ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      )}
+
       {tradeIn.fotos.length > 0 && (
         <div className="mt-3 flex gap-2 overflow-x-auto">
           {tradeIn.fotos.map((url, i) => (
@@ -940,21 +1035,54 @@ function TradeInSection({
         </div>
       )}
 
-      {tradeIn.tasacion && (
-        <div className="mt-3 rounded-lg bg-background p-3">
-          {tradeIn.tasacion.avg > 0 ? (
-            <>
-              <p className="text-xs text-muted-foreground">Tasación estimada (datos MatchCars)</p>
-              <p className="text-lg font-extrabold text-accent">ARS {Math.round(tradeIn.tasacion.avg).toLocaleString("es-AR")}</p>
-              <p className="text-xs text-muted-foreground">
-                Min {Math.round(tradeIn.tasacion.min).toLocaleString("es-AR")} – Max {Math.round(tradeIn.tasacion.max).toLocaleString("es-AR")}
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">No hay suficientes publicaciones similares para tasar automáticamente — cargalo a mano si hace falta.</p>
+      {tradeIn.tasacion && tradeIn.tasacion.avg > 0 && (
+        <div className="mt-3 flex flex-col gap-1 rounded-lg bg-background p-3">
+          <p className="text-xs text-muted-foreground">
+            Valor de venta estimado {tradeIn.tasacion.fuente === "manual" ? "(cargado a mano)" : "(datos MatchCars)"}
+          </p>
+          <p className="text-lg font-extrabold text-accent">ARS {Math.round(tradeIn.tasacion.avg).toLocaleString("es-AR")}</p>
+          {tradeIn.tasacion.fuente === "matchcars" && (
+            <p className="text-xs text-muted-foreground">
+              Min {Math.round(tradeIn.tasacion.min).toLocaleString("es-AR")} – Max {Math.round(tradeIn.tasacion.max).toLocaleString("es-AR")}
+            </p>
+          )}
+          {estado && suggested > 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Sugerido para tomarlo ({TRADE_IN_CONDITION_LABELS[estado]}, con margen de reventa): <strong className="text-foreground">ARS {suggested.toLocaleString("es-AR")}</strong>
+            </p>
           )}
         </div>
       )}
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Precio final de toma</span>
+          <div className="flex gap-1">
+            <ThousandsInput value={precioTomaFinal} onChange={setPrecioTomaFinal} className={inputClass} />
+            {suggested > 0 && (
+              <button
+                type="button"
+                onClick={applySuggested}
+                title="Usar el precio sugerido"
+                className="shrink-0 rounded-lg border border-accent/40 bg-accent/5 px-2 text-xs font-semibold text-accent"
+              >
+                Usar sugerido
+              </button>
+            )}
+          </div>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Tasado por</span>
+          <select value={tasadoPor} onChange={(e) => setTasadoPor(e.target.value)} className={inputClass}>
+            <option value="">Sin definir</option>
+            {(agency?.members ?? []).map((m) => (
+              <option key={m.uid} value={m.uid}>
+                {m.name || m.email || m.uid}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div className="mt-3 border-t border-border pt-3">
         {tradeIn.agregadoAlStock ? (
