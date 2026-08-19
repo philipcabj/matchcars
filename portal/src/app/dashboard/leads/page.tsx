@@ -106,7 +106,16 @@ export default function LeadsPage() {
   if (error && !leads) return <p className="text-sm text-error">No pudimos cargar los leads: {error}</p>;
   if (!leads || !stats) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
-  const filtered = statusFilter === "all" ? leads : leads.filter((l) => l.status === statusFilter);
+  // No leídos primero (sin importar el filtro de estado activo) — antes se
+  // ordenaba solo por lastMessageAt, así que un lead nuevo con mensaje sin
+  // leer podía quedar tapado por leads viejos con actividad reciente propia.
+  const filtered = (statusFilter === "all" ? leads : leads.filter((l) => l.status === statusFilter))
+    .slice()
+    .sort((a, b) => {
+      const unreadDiff = ((b.unreadCount ?? 0) > 0 ? 1 : 0) - ((a.unreadCount ?? 0) > 0 ? 1 : 0);
+      if (unreadDiff !== 0) return unreadDiff;
+      return (b.lastMessageAt ?? "").localeCompare(a.lastMessageAt ?? "");
+    });
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -212,6 +221,7 @@ export default function LeadsPage() {
             const canAct = lead.status !== "won" && lead.status !== "lost";
             const days = daysSince(lead.lastMessageAt);
             const isStale = (lead.status === "contacted" || lead.status === "negotiation") && days !== null && days >= STALE_FOLLOWUP_DAYS;
+            const isUnread = (lead.unreadCount ?? 0) > 0;
             return (
               // No es un <Link> a propósito: la fila tiene un <select> (asignar)
               // adentro, y un <select> dentro de un <a> es HTML inválido — los
@@ -221,18 +231,31 @@ export default function LeadsPage() {
               <div
                 key={lead.id}
                 onClick={() => router.push(`/dashboard/leads/${lead.id}`)}
-                className="flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-card p-3 transition hover:border-accent sm:flex-row sm:items-center"
+                className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-3 transition hover:border-accent sm:flex-row sm:items-center ${
+                  isUnread ? "border-accent/50 bg-accent/5" : "border-border bg-card"
+                }`}
               >
-                <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                  style={{ backgroundColor: buyer?.avatarColor || "#F97316" }}
-                >
-                  {buyer?.initials || buyerName.slice(0, 2).toUpperCase()}
+                <div className="relative shrink-0">
+                  {isUnread && (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-card"
+                      title={`${lead.unreadCount} mensaje${lead.unreadCount === 1 ? "" : "s"} sin leer`}
+                    />
+                  )}
+                  <div
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: buyer?.avatarColor || "#F97316" }}
+                  >
+                    {buyer?.initials || buyerName.slice(0, 2).toUpperCase()}
+                  </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-semibold">{title}</p>
+                    <p className={`truncate text-sm ${isUnread ? "font-bold" : "font-semibold"}`}>{title}</p>
                     <div className="flex shrink-0 items-center gap-1.5">
+                      {isUnread && (
+                        <span className="rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-foreground">Nuevo</span>
+                      )}
                       {isStale && (
                         <span
                           className="rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-bold text-error"

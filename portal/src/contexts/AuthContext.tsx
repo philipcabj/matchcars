@@ -144,7 +144,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const getIdToken = async () => {
     if (!auth.currentUser) return null;
-    return auth.currentUser.getIdToken();
+    // forceRefresh: true a propósito — sin esto, una pestaña que quedó
+    // abierta/en segundo plano rato largo (ej. llega la notificación de un
+    // lead nuevo, la persona vuelve más tarde y recién ahí hace click) podía
+    // mandar un token vencido y el servidor lo rechazaba con "Token inválido
+    // o expirado" (reportado en /dashboard/leads/[id]). Cuesta un viaje de
+    // red extra por llamada, pero elimina esa clase de error de raíz.
+    return auth.currentUser.getIdToken(true);
   };
 
   return (

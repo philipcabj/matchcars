@@ -45,6 +45,13 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   const data = snap.data()!;
   if (data.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
 
+  // Abrir el detalle = leído — sin esto, el badge de "nuevo" en /dashboard/leads
+  // y el contador de la campanita quedaban prendidos para siempre salvo que la
+  // agencia además respondiera el mensaje (único lugar que hoy resetea unreadCount).
+  if ((data.unreadCount ?? 0) > 0) {
+    await snap.ref.update({ unreadCount: 0 });
+  }
+
   let vehicleStatus: string | null = null;
   if (data.vehicleId) {
     const vehicleSnap = await adminDb.doc(`vehicles/${data.vehicleId}`).get();
