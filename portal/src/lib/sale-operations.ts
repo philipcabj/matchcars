@@ -122,6 +122,10 @@ export interface TradeIn {
   // suggestTradeInPrice(tasacion.avg, estado) o cargarse a mano si
   // MatchCars no pudo tasar (tasacion null) o la agencia prefiere otro número.
   precioTomaFinal: number | null;
+  // true una vez que alguien confirma precioTomaFinal a propósito (con
+  // diálogo de "¿estás seguro?" — cierra el valor del auto que se recibe).
+  // Antes de confirmar, el número es editable libremente sin fricción.
+  precioTomaConfirmado: boolean;
   // uid de quién hizo/confirmó la tasación — antes nadie quedaba registrado.
   tasadoPor: string | null;
   agregadoAlStock: boolean;
@@ -139,6 +143,7 @@ export const EMPTY_TRADE_IN: TradeIn = {
   fotos: [],
   tasacion: null,
   precioTomaFinal: null,
+  precioTomaConfirmado: false,
   tasadoPor: null,
   agregadoAlStock: false,
   vehiculoStockId: null,

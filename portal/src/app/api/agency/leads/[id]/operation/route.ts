@@ -57,6 +57,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
         fotos: [],
         tasacion: null,
         precioTomaFinal: null,
+        precioTomaConfirmado: false,
         tasadoPor: null,
         agregadoAlStock: false,
         vehiculoStockId: null,

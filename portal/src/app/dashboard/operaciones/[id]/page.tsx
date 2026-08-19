@@ -760,6 +760,7 @@ function TradeInSection({
   const [appraising, setAppraising] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingManual, setSavingManual] = useState(false);
+  const [confirmingPrice, setConfirmingPrice] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [addingToStock, setAddingToStock] = useState(false);
   const [catalogMakes, setCatalogMakes] = useState<string[]>([]);
@@ -872,6 +873,41 @@ function TradeInSection({
   };
 
   const applySuggested = () => setPrecioTomaFinal(String(suggested));
+
+  const confirmPrice = async () => {
+    const val = Number(precioTomaFinal) || 0;
+    if (val <= 0) return;
+    if (!confirm(`¿Confirmar ARS ${val.toLocaleString("es-AR")} como precio final de toma? Esto cierra el valor del auto que se recibe como parte de pago.`)) {
+      return;
+    }
+    setConfirmingPrice(true);
+    try {
+      // Guarda el número tipeado y confirma en un solo paso — así el precio
+      // que queda marcado como "confirmado" es exactamente el que se ve en
+      // pantalla, no uno guardado antes.
+      await patch({
+        action: "update_trade_in",
+        incluye: true,
+        marca,
+        modelo,
+        version,
+        anio: Number(anio) || null,
+        km: Number(km) || null,
+        estado,
+        precioTomaFinal: val,
+        tasadoPor: tasadoPor || null,
+      });
+      await patch({ action: "confirm_trade_in_price" });
+      onChanged();
+    } finally {
+      setConfirmingPrice(false);
+    }
+  };
+
+  const editPrice = async () => {
+    await patch({ action: "update_trade_in", incluye: true, precioTomaConfirmado: false });
+    onChanged();
+  };
 
   const addPhoto = async (file: File) => {
     setUploadingPhoto(true);
@@ -1054,26 +1090,47 @@ function TradeInSection({
         </div>
       )}
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Precio final de toma</span>
-          <div className="flex gap-1">
-            <ThousandsInput value={precioTomaFinal} onChange={setPrecioTomaFinal} className={inputClass} />
-            {suggested > 0 && (
+      <div className="mt-3 flex flex-col gap-2">
+        {tradeIn.precioTomaConfirmado ? (
+          <div className="flex items-center justify-between rounded-lg border border-success/40 bg-success/5 p-3">
+            <div>
+              <p className="text-xs text-muted-foreground">✓ Precio de toma confirmado</p>
+              <p className="text-lg font-extrabold text-success">ARS {(tradeIn.precioTomaFinal ?? 0).toLocaleString("es-AR")}</p>
+            </div>
+            <button onClick={editPrice} className="text-xs font-semibold text-muted-foreground hover:text-foreground">
+              Editar
+            </button>
+          </div>
+        ) : (
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted-foreground">Precio final de toma</span>
+            <div className="flex flex-wrap gap-1">
+              <ThousandsInput value={precioTomaFinal} onChange={setPrecioTomaFinal} className={`${inputClass} w-32`} />
+              {suggested > 0 && (
+                <button
+                  type="button"
+                  onClick={applySuggested}
+                  title="Usar el precio sugerido"
+                  className="shrink-0 rounded-lg border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
+                >
+                  Usar sugerido
+                </button>
+              )}
               <button
                 type="button"
-                onClick={applySuggested}
-                title="Usar el precio sugerido"
-                className="shrink-0 rounded-lg border border-accent/40 bg-accent/5 px-2 text-xs font-semibold text-accent"
+                onClick={confirmPrice}
+                disabled={confirmingPrice || !precioTomaFinal}
+                title="Confirmar este precio como definitivo"
+                className="shrink-0 rounded-lg bg-success px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
               >
-                Usar sugerido
+                {confirmingPrice ? "Confirmando…" : "✓ Confirmar"}
               </button>
-            )}
-          </div>
-        </label>
+            </div>
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Tasado por</span>
-          <select value={tasadoPor} onChange={(e) => setTasadoPor(e.target.value)} className={inputClass}>
+          <select value={tasadoPor} onChange={(e) => setTasadoPor(e.target.value)} className={`${inputClass} w-full sm:w-56`}>
             <option value="">Sin definir</option>
             {(agency?.members ?? []).map((m) => (
               <option key={m.uid} value={m.uid}>

@@ -59,6 +59,7 @@ function serialize(
         fotos: [],
         tasacion: null,
         precioTomaFinal: null,
+        precioTomaConfirmado: false,
         tasadoPor: null,
         agregadoAlStock: false,
         vehiculoStockId: null,
@@ -185,6 +186,15 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   }
 
   if (action === "update_trade_in") {
+    const nextPrecioTomaFinal =
+      body.precioTomaFinal !== undefined ? Number(body.precioTomaFinal) || null : op.parteDePago?.precioTomaFinal ?? null;
+    // Editar el precio después de confirmado lo desconfirma solo — un número
+    // "confirmado" que en realidad cambió por debajo sería peor que no tener
+    // confirmación. También se puede desconfirmar a propósito (botón
+    // "Editar") mandando precioTomaConfirmado:false sin tocar el precio.
+    const priceChanged = nextPrecioTomaFinal !== (op.parteDePago?.precioTomaFinal ?? null);
+    const precioTomaConfirmado =
+      body.precioTomaConfirmado === false ? false : priceChanged ? false : op.parteDePago?.precioTomaConfirmado ?? false;
     const parteDePago = {
       ...op.parteDePago,
       incluye: !!body.incluye,
@@ -194,11 +204,19 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       anio: body.anio !== undefined ? Number(body.anio) || null : op.parteDePago?.anio ?? null,
       km: body.km !== undefined ? Number(body.km) || null : op.parteDePago?.km ?? null,
       estado: ["excelente", "bueno", "regular"].includes(body.estado) ? body.estado : op.parteDePago?.estado ?? "",
-      precioTomaFinal:
-        body.precioTomaFinal !== undefined ? Number(body.precioTomaFinal) || null : op.parteDePago?.precioTomaFinal ?? null,
+      precioTomaFinal: nextPrecioTomaFinal,
+      precioTomaConfirmado,
       tasadoPor: body.tasadoPor !== undefined ? body.tasadoPor || null : op.parteDePago?.tasadoPor ?? null,
     };
     await ref.update({ parteDePago, updatedAt: FieldValue.serverTimestamp() });
+    return Response.json({ ok: true });
+  }
+
+  if (action === "confirm_trade_in_price") {
+    if (!op.parteDePago?.precioTomaFinal) {
+      return Response.json({ error: "Cargá un precio final antes de confirmarlo." }, { status: 400 });
+    }
+    await ref.update({ "parteDePago.precioTomaConfirmado": true, updatedAt: FieldValue.serverTimestamp() });
     return Response.json({ ok: true });
   }
 
