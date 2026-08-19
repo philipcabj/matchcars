@@ -177,11 +177,15 @@ export interface SaleOperation {
   parteDePago: TradeIn;
   metodoPago: MetodoPagoResto | null;
   financieraNombre: string | null;
+  // true una vez confirmada a propósito — misma idea que
+  // parteDePago.precioTomaConfirmado, para que "Forma de pago" tenga un
+  // cierre real y no quede para siempre como una elección que se puede tocar
+  // sin querer.
+  metodoPagoConfirmado: boolean;
   // Datos en vivo (no guardados en el doc de la operación) para el
   // SaleJourney — ver comentario en el GET de sale-operations/[id]/route.ts.
   leadStatus: string | null;
   vehicleStatus: string | null;
-  tradeInVehicleStatus: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }

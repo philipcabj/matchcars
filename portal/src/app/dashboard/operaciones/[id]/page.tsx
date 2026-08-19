@@ -540,6 +540,7 @@ function PaymentStructureSection({
   patch: (body: Record<string, unknown>) => Promise<void>;
 }) {
   const [financieraNombre, setFinancieraNombre] = useState(op.financieraNombre ?? "");
+  const [confirming, setConfirming] = useState(false);
   const currency = op.vehicleSnapshot?.currency ?? "ARS";
   const vehiclePrice = op.vehicleSnapshot?.price ?? 0;
   const tradeInValue = op.parteDePago.incluye ? tradeInTakePrice(op.parteDePago) : 0;
@@ -555,8 +556,64 @@ function PaymentStructureSection({
     onChanged();
   };
 
+  const confirmMetodoPago = async () => {
+    if (op.parteDePago.incluye && !op.parteDePago.precioTomaConfirmado) {
+      alert('Confirmá primero la parte de pago del auto usado (más abajo) antes de cerrar la forma de pago.');
+      return;
+    }
+    if (!confirm("¿Confirmar la forma de pago? Queda cerrada hasta que toques \"Editar\".")) return;
+    setConfirming(true);
+    try {
+      await patch({ action: "confirm_metodo_pago" });
+      onChanged();
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const editMetodoPago = async () => {
+    await patch({ action: "update_metodo_pago", metodoPago: op.metodoPago, financieraNombre: op.financieraNombre, metodoPagoConfirmado: false });
+    onChanged();
+  };
+
+  if (op.metodoPagoConfirmado) {
+    return (
+      <div id="forma-de-pago" className="scroll-mt-4 rounded-2xl border border-success/40 bg-success/5 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs font-semibold text-success">✓ Forma de pago confirmada</p>
+          <button onClick={editMetodoPago} className="shrink-0 text-xs font-semibold text-muted-foreground hover:text-foreground">
+            Editar
+          </button>
+        </div>
+        <p className="mt-2 text-sm">
+          {op.parteDePago.incluye ? "Con auto como parte de pago" : "Sin parte de pago"} ·{" "}
+          {op.metodoPago ? METODO_PAGO_LABELS[op.metodoPago] : "—"}
+          {op.metodoPago === "financiado_externo" && op.financieraNombre ? ` (${op.financieraNombre})` : ""}
+        </p>
+        {vehiclePrice > 0 && (
+          <div className="mt-3 flex flex-col gap-1 rounded-lg bg-background p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Precio del auto</span>
+              <span className="font-semibold">{currency} {vehiclePrice.toLocaleString("es-AR")}</span>
+            </div>
+            {op.parteDePago.incluye && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>− Parte de pago (precio de toma)</span>
+                <span>− {currency} {Math.round(tradeInValue).toLocaleString("es-AR")}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-border pt-1 font-bold text-success">
+              <span>{op.parteDePago.incluye ? "Resto a cubrir" : "Total a cubrir"}</span>
+              <span>{currency} {Math.round(resto).toLocaleString("es-AR")}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
+    <div id="forma-de-pago" className="scroll-mt-4 rounded-2xl border border-accent/30 bg-accent/5 p-4">
       <p className="mb-3 text-sm font-semibold">Forma de pago</p>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:gap-6">
@@ -632,6 +689,15 @@ function PaymentStructureSection({
           </div>
         </div>
       )}
+
+      <button
+        onClick={confirmMetodoPago}
+        disabled={confirming || !op.metodoPago}
+        title={!op.metodoPago ? "Elegí cómo se cubre el pago antes de confirmar" : undefined}
+        className="mt-3 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+      >
+        {confirming ? "Confirmando…" : "✓ Confirmar forma de pago"}
+      </button>
     </div>
   );
 }

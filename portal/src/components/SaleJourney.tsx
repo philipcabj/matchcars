@@ -1,10 +1,11 @@
 // portal/src/components/SaleJourney.tsx
-// Camino completo de una venta en una sola vista: negociación → checklist →
-// venta confirmada → (si hay usado) auto publicado. Cada paso marca hecho/
-// actual/pendiente con datos en vivo (ver leadStatus/vehicleStatus/
-// tradeInVehicleStatus en sale-operations/[id]/route.ts) y linkea a la
-// pantalla donde se gestiona — antes había que recordar de memoria en qué
-// paso estaba cada operación, sin ningún resumen que las juntara.
+// Camino completo de una venta en una sola vista: negociación → forma de
+// pago → checklist → precio acordado → venta confirmada → (si hay usado)
+// ingreso de unidad al stock. Publicar ese usado es responsabilidad de
+// Stock, no de la Operación — el paso acá se cierra al meterlo al stock,
+// no al publicarlo. Cada paso marca hecho/actual/pendiente con datos en
+// vivo (ver leadStatus/vehicleStatus en sale-operations/[id]/route.ts) y
+// linkea a la pantalla donde se gestiona.
 "use client";
 
 import { SaleOperation } from "@/lib/sale-operations";
@@ -35,6 +36,12 @@ function buildSteps(op: SaleOperation): Step[] {
       label: "Negociación",
       state: "done",
       href: `/dashboard/leads/${op.leadId}`,
+    },
+    {
+      key: "forma_pago",
+      label: "Forma de pago",
+      state: op.metodoPagoConfirmado ? "done" : "current",
+      href: "#forma-de-pago",
     },
     {
       key: "checklist",
@@ -69,13 +76,15 @@ function buildSteps(op: SaleOperation): Step[] {
   }
 
   if (op.parteDePago.incluye) {
-    const stockStatus = op.tradeInVehicleStatus;
-    const publicado = !!stockStatus && !["a_preparar", "pending_review", "rejected", "rejected_limit"].includes(stockStatus);
+    // Hasta acá llega la Operación: meter el usado al stock. Publicarlo es
+    // decisión y trabajo de Stock (completar datos, moderación) — antes este
+    // paso perseguía el auto hasta publicado, mezclando dos procesos que no
+    // son responsabilidad de la Operación.
     steps.push({
       key: "usado",
-      label: "Auto usado publicado",
-      sub: op.parteDePago.agregadoAlStock ? (publicado ? "publicado" : "a preparar") : "pendiente",
-      state: publicado ? "done" : op.parteDePago.agregadoAlStock ? "current" : "pending",
+      label: "Ingreso de unidad",
+      sub: "parte de pago",
+      state: op.parteDePago.agregadoAlStock ? "done" : op.parteDePago.precioTomaConfirmado ? "current" : "pending",
       href: op.parteDePago.vehiculoStockId ? `/dashboard/stock/${op.parteDePago.vehiculoStockId}` : "#parte-de-pago",
     });
   }

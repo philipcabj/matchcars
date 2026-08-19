@@ -20,8 +20,7 @@ function serialize(
   id: string,
   data: FirebaseFirestore.DocumentData,
   liveVehicle?: { price?: number; currency?: string; status?: string } | null,
-  leadStatus?: string | null,
-  tradeInVehicleStatus?: string | null
+  leadStatus?: string | null
 ) {
   const vehicleSnapshot = data.vehicleSnapshot
     ? { ...data.vehicleSnapshot, ...(liveVehicle ? { price: liveVehicle.price, currency: liveVehicle.currency } : {}) }
@@ -68,12 +67,12 @@ function serialize(
       },
     metodoPago: data.metodoPago ?? null,
     financieraNombre: data.financieraNombre ?? null,
+    metodoPagoConfirmado: !!data.metodoPagoConfirmado,
     // Datos en vivo para armar el "camino" de la venta en una sola pantalla
     // (SaleJourney) — antes había que adivinar el estado real saltando entre
-    // el lead, la operación y el stock por separado.
+    // el lead y la operación por separado.
     leadStatus: leadStatus ?? null,
     vehicleStatus: liveVehicle?.status ?? null,
-    tradeInVehicleStatus: tradeInVehicleStatus ?? null,
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -97,23 +96,23 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   const found = await loadOwned(agencyId, id);
   if (!found) return Response.json({ error: "No encontrado" }, { status: 404 });
 
-  // Precio y estado en VIVO del auto vendido, estado del lead, y estado del
-  // auto tomado como parte de pago (si se agregó al stock) — todo junto acá
-  // para poder armar el "camino" completo de la venta en una sola pantalla,
-  // en vez de que la agencia tenga que ir a mirar el lead y el stock aparte.
+  // Precio y estado en VIVO del auto vendido, y estado del lead — todo junto
+  // acá para poder armar el "camino" completo de la venta en una sola
+  // pantalla, en vez de que la agencia tenga que ir a mirar el lead aparte.
+  // El estado de PUBLICACIÓN del auto usado (a_preparar → publicado) queda
+  // afuera a propósito: eso es responsabilidad de Stock, no de la Operación
+  // (ver SaleJourney — el paso acá es "ingreso de unidad", no "publicado").
   const op = found.snap.data()!;
-  const [vehicleSnap, leadSnap, tradeInVehicleSnap] = await Promise.all([
+  const [vehicleSnap, leadSnap] = await Promise.all([
     op.vehicleId ? adminDb.doc(`vehicles/${op.vehicleId}`).get() : Promise.resolve(null),
     op.leadId ? adminDb.doc(`leads/${op.leadId}`).get() : Promise.resolve(null),
-    op.parteDePago?.vehiculoStockId ? adminDb.doc(`vehicles/${op.parteDePago.vehiculoStockId}`).get() : Promise.resolve(null),
   ]);
   const liveVehicle = vehicleSnap?.exists
     ? { price: vehicleSnap.data()?.price, currency: vehicleSnap.data()?.currency, status: vehicleSnap.data()?.status }
     : null;
   const leadStatus = leadSnap?.exists ? leadSnap.data()?.status ?? null : null;
-  const tradeInVehicleStatus = tradeInVehicleSnap?.exists ? tradeInVehicleSnap.data()?.status ?? null : null;
 
-  return Response.json(serialize(found.snap.id, op, liveVehicle, leadStatus, tradeInVehicleStatus));
+  return Response.json(serialize(found.snap.id, op, liveVehicle, leadStatus));
 });
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]">) => {
@@ -193,7 +192,24 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (action === "update_metodo_pago") {
     const metodoPago = ["efectivo", "financiado_propio", "financiado_externo"].includes(body.metodoPago) ? body.metodoPago : null;
     const financieraNombre = typeof body.financieraNombre === "string" ? body.financieraNombre.trim() || null : op.financieraNombre ?? null;
-    await ref.update({ metodoPago, financieraNombre, updatedAt: FieldValue.serverTimestamp() });
+    // Cambiar el método de pago de verdad desconfirma — mismo criterio que el
+    // precio de toma: un "confirmado" que en realidad cambió por debajo es
+    // peor que no tener confirmación. Mandar metodoPagoConfirmado:false sin
+    // cambiar nada más es el botón "Editar".
+    const metodoPagoChanged = metodoPago !== (op.metodoPago ?? null);
+    const metodoPagoConfirmado = body.metodoPagoConfirmado === false ? false : metodoPagoChanged ? false : op.metodoPagoConfirmado ?? false;
+    await ref.update({ metodoPago, financieraNombre, metodoPagoConfirmado, updatedAt: FieldValue.serverTimestamp() });
+    return Response.json({ ok: true });
+  }
+
+  if (action === "confirm_metodo_pago") {
+    if (!op.metodoPago) {
+      return Response.json({ error: "Elegí cómo se cubre el pago antes de confirmar." }, { status: 400 });
+    }
+    if (op.parteDePago?.incluye && !op.parteDePago?.precioTomaConfirmado) {
+      return Response.json({ error: "Confirmá primero la parte de pago del auto usado." }, { status: 400 });
+    }
+    await ref.update({ metodoPagoConfirmado: true, updatedAt: FieldValue.serverTimestamp() });
     return Response.json({ ok: true });
   }
 
@@ -220,7 +236,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       precioTomaConfirmado,
       tasadoPor: body.tasadoPor !== undefined ? body.tasadoPor || null : op.parteDePago?.tasadoPor ?? null,
     };
-    await ref.update({ parteDePago, updatedAt: FieldValue.serverTimestamp() });
+    // Si cambia si incluye o no un usado, "Forma de pago" ya no describe lo
+    // mismo que cuando se confirmó — desconfirma también, no solo la parte
+    // de pago en sí.
+    const incluyeChanged = parteDePago.incluye !== !!op.parteDePago?.incluye;
+    const updates: Record<string, unknown> = { parteDePago, updatedAt: FieldValue.serverTimestamp() };
+    if (incluyeChanged) updates.metodoPagoConfirmado = false;
+    await ref.update(updates);
     return Response.json({ ok: true });
   }
 
