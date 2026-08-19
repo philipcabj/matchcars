@@ -135,6 +135,15 @@ export default function LeadDetailPage() {
   };
 
   const markVehicleSold = async () => {
+    // La comisión se calcula en este momento según quién esté asignado
+    // (ver mark_vehicle_sold en la API) — si nadie lo asignó todavía, avisar
+    // antes de seguir en vez de dejar una venta sin comisión sin que se note.
+    if (!lead?.assignedTo && agency && agency.members.length > 1) {
+      const proceed = confirm(
+        "No hay un vendedor asignado a este lead — no se va a calcular comisión para esta venta. ¿Confirmar igual?"
+      );
+      if (!proceed) return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -450,7 +459,22 @@ export default function LeadDetailPage() {
         !(lead.offer && (lead.offer.status === "pending" || lead.offer.status === "countered")) &&
         (closePrompt ? (
           <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
-            <p className="text-sm font-semibold">Cerrar venta</p>
+            <p className="text-sm font-semibold">Cerrar acuerdo de precio</p>
+            <p className="text-xs text-muted-foreground">
+              Esto todavía no es la venta confirmada — solo deja el precio acordado. La venta se confirma después, al
+              marcar el auto como vendido/entregado.
+            </p>
+            {agency && agency.members.length > 1 && (
+              <div className="flex items-center justify-between rounded-lg bg-background p-2">
+                <span className="text-xs font-semibold text-muted-foreground">Vendedor asignado</span>
+                <AssigneeSelect
+                  leadId={lead.id}
+                  assignedTo={lead.assignedTo}
+                  members={agency.members}
+                  onAssigned={(uid) => setLead((prev) => (prev ? { ...prev, assignedTo: uid } : prev))}
+                />
+              </div>
+            )}
             <div className="flex gap-2">
               <ThousandsInput
                 autoFocus
@@ -480,7 +504,7 @@ export default function LeadDetailPage() {
                 onClick={() => markWon(Number(closePrompt.price), closePrompt.currency)}
                 className="rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
               >
-                Confirmar venta
+                Cerrar con este precio
               </button>
             </div>
           </div>
@@ -489,7 +513,7 @@ export default function LeadDetailPage() {
             onClick={() => setClosePrompt({ price: "", currency: "ARS" })}
             className="self-start rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-xs font-semibold text-success"
           >
-            💰 Marcar como vendido
+            💰 Cerrar acuerdo de precio
           </button>
         ))}
 
@@ -505,33 +529,46 @@ export default function LeadDetailPage() {
       )}
 
       {lead.status === "won" && lead.vehicleId && lead.vehicleStatus !== "sold" && lead.vehicleStatus !== "reserved" && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-success/30 bg-success/10 p-4">
-          <div>
-            <p className="text-sm font-semibold text-success">Venta cerrada</p>
-            <p className="text-xs text-muted-foreground">
-              {lead.buyerId
-                ? "Marcá el auto como entregado — le vamos a pedir al comprador que confirme la recepción."
-                : "Marcá el auto como vendido en el stock para que salga de publicados."}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {lead.offer?.status === "accepted" && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-success/30 bg-success/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-success">Este paso confirma la venta</p>
+              <p className="text-xs text-muted-foreground">
+                {lead.buyerId
+                  ? "Marcá el auto como entregado — le vamos a pedir al comprador que confirme la recepción. Acá se calcula la comisión según el vendedor asignado."
+                  : "Marcá el auto como vendido en el stock para que salga de publicados. Acá se calcula la comisión según el vendedor asignado."}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {lead.offer?.status === "accepted" && (
+                <button
+                  disabled={busy}
+                  onClick={() => runOfferAction("withdraw")}
+                  className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-error disabled:opacity-50"
+                >
+                  Cancelar acuerdo
+                </button>
+              )}
               <button
                 disabled={busy}
-                onClick={() => runOfferAction("withdraw")}
-                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-error disabled:opacity-50"
+                onClick={markVehicleSold}
+                className="rounded-lg bg-success px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
               >
-                Cancelar acuerdo
+                {lead.buyerId ? "Marcar auto como entregado" : "Marcar auto como vendido"}
               </button>
-            )}
-            <button
-              disabled={busy}
-              onClick={markVehicleSold}
-              className="rounded-lg bg-success px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              {lead.buyerId ? "Marcar auto como entregado" : "Marcar auto como vendido"}
-            </button>
+            </div>
           </div>
+          {agency && agency.members.length > 1 && (
+            <div className="flex items-center justify-between rounded-lg bg-background p-2">
+              <span className="text-xs font-semibold text-muted-foreground">Vendedor asignado</span>
+              <AssigneeSelect
+                leadId={lead.id}
+                assignedTo={lead.assignedTo}
+                members={agency.members}
+                onAssigned={(uid) => setLead((prev) => (prev ? { ...prev, assignedTo: uid } : prev))}
+              />
+            </div>
+          )}
         </div>
       )}
 
