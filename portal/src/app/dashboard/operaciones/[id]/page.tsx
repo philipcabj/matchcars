@@ -659,8 +659,15 @@ function FinancingSection({
   const [anticipo, setAnticipo] = useState(String(op.financiacion?.anticipo ?? ""));
   const [cuotas, setCuotas] = useState(String(op.financiacion?.cuotas ?? "12"));
   const [tasaAnual, setTasaAnual] = useState(String(op.financiacion?.tasaAnual ?? ""));
-  const [precioTotal, setPrecioTotal] = useState(op.financiacion ? "" : initialPrecioTotal > 0 ? String(Math.round(initialPrecioTotal)) : "");
+  // Antes precioTotal arrancaba vacío apenas ya había una financiación
+  // guardada (montoFinanciado, que se persistía, ya viene con el anticipo
+  // restado — no alcanza para reconstruir el precio total original), así que
+  // reabrir para modificar un cálculo existente mostraba el campo en blanco.
+  const [precioTotal, setPrecioTotal] = useState(
+    op.financiacion?.precioTotal ? String(op.financiacion.precioTotal) : initialPrecioTotal > 0 ? String(Math.round(initialPrecioTotal)) : ""
+  );
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const calc = async () => {
     setSaving(true);
@@ -675,6 +682,18 @@ function FinancingSection({
       onChanged();
     } finally {
       setSaving(false);
+    }
+  };
+
+  const removeFinancing = async () => {
+    if (!confirm("¿Quitar la financiación de esta operación? Se borra el cálculo guardado.")) return;
+    setClearing(true);
+    try {
+      await patch({ action: "clear_financing" });
+      setManuallyOpened(false);
+      onChanged();
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -694,10 +713,16 @@ function FinancingSection({
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="mb-1 flex items-center justify-between">
         <p className="text-sm font-semibold">Financiación</p>
-        {!op.financiacion && !forceOpen && (
-          <button onClick={() => setManuallyOpened(false)} className="text-xs text-muted-foreground">
-            Quitar
+        {op.financiacion ? (
+          <button onClick={removeFinancing} disabled={clearing} className="text-xs font-semibold text-error disabled:opacity-50">
+            {clearing ? "Quitando…" : "Quitar financiación"}
           </button>
+        ) : (
+          !forceOpen && (
+            <button onClick={() => setManuallyOpened(false)} className="text-xs text-muted-foreground">
+              Quitar
+            </button>
+          )
         )}
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
@@ -884,7 +909,11 @@ function TradeInSection({
   const confirmPrice = async () => {
     const val = Number(precioTomaFinal) || 0;
     if (val <= 0) return;
-    if (!confirm(`¿Confirmar ARS ${val.toLocaleString("es-AR")} como precio final de toma? Esto cierra el valor del auto que se recibe como parte de pago.`)) {
+    if (!tasadoPor) {
+      alert("Elegí quién tasó el auto antes de confirmar la parte de pago.");
+      return;
+    }
+    if (!confirm(`¿Confirmar la parte de pago en ARS ${val.toLocaleString("es-AR")}? Esto cierra los datos del auto recibido — marca, modelo, estado y precio quedan fijos hasta que toques "Editar".`)) {
       return;
     }
     setConfirmingPrice(true);
@@ -954,199 +983,230 @@ function TradeInSection({
     }
   };
 
+  const tasadoPorName = (agency?.members ?? []).find((m) => m.uid === tradeIn.tasadoPor)?.name
+    || (agency?.members ?? []).find((m) => m.uid === tradeIn.tasadoPor)?.email
+    || tradeIn.tasadoPor;
+
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-semibold">Parte de pago</p>
-        <button
-          onClick={async () => {
-            await patch({ action: "update_trade_in", incluye: false });
-            onChanged();
-          }}
-          className="text-xs text-error"
-        >
-          Quitar
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-2">
-        <DatalistField
-          label="Marca"
-          value={marca}
-          options={makeOptions}
-          onChange={(v) => {
-            setMarca(v);
-            setModelo("");
-            setVersion("");
-          }}
-        />
-        <DatalistField
-          label="Modelo"
-          value={modelo}
-          options={modelOptions}
-          disabled={!marca}
-          placeholder="Elegí una marca primero"
-          onChange={(v) => {
-            setModelo(v);
-            setVersion("");
-          }}
-        />
-        <DatalistField
-          label="Versión"
-          value={version}
-          options={versionOptions}
-          disabled={!modelo}
-          placeholder="Elegí un modelo primero"
-          onChange={setVersion}
-        />
-      </div>
-      <div className="mt-2 grid grid-cols-3 gap-2">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Año</span>
-          <input type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Km</span>
-          <ThousandsInput value={km} onChange={setKm} className={inputClass} />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Estado</span>
-          <select className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value as TradeInCondition)}>
-            <option value="">Sin definir</option>
-            {(Object.keys(TRADE_IN_CONDITION_LABELS) as TradeInCondition[]).map((c) => (
-              <option key={c} value={c}>
-                {TRADE_IN_CONDITION_LABELS[c]}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button onClick={save} disabled={saving} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
-          {saving ? "Guardando…" : "Guardar datos"}
-        </button>
-        <button
-          onClick={appraise}
-          disabled={appraising || !marca || !modelo || !anio}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-50"
-        >
-          {appraising ? "Tasando…" : "Tasar con MatchCars"}
-        </button>
-        <button
-          onClick={() => setShowManualValorVenta((v) => !v)}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
-        >
-          {tradeIn.tasacion ? "Corregir valor a mano" : "Cargar valor a mano"}
-        </button>
-        <label className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">
-          {uploadingPhoto ? "Subiendo…" : "+ Foto"}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            disabled={uploadingPhoto}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) addPhoto(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-      </div>
-
-      {showManualValorVenta && (
-        <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
-          <span className="text-xs text-muted-foreground">Valor de venta estimado</span>
-          <ThousandsInput value={manualValorVenta} onChange={setManualValorVenta} className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs" />
+        {!tradeIn.precioTomaConfirmado && (
           <button
-            onClick={saveManualValorVenta}
-            disabled={savingManual || !manualValorVenta}
-            className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+            onClick={async () => {
+              await patch({ action: "update_trade_in", incluye: false });
+              onChanged();
+            }}
+            className="text-xs text-error"
           >
-            {savingManual ? "Guardando…" : "Guardar"}
+            Quitar
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {tradeIn.fotos.length > 0 && (
-        <div className="mt-3 flex gap-2 overflow-x-auto">
-          {tradeIn.fotos.map((url, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={url} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" />
-          ))}
-        </div>
-      )}
-
-      {tradeIn.tasacion && tradeIn.tasacion.avg > 0 && (
-        <div className="mt-3 flex flex-col gap-1 rounded-lg bg-background p-3">
-          <p className="text-xs text-muted-foreground">
-            Valor de venta estimado {tradeIn.tasacion.fuente === "manual" ? "(cargado a mano)" : "(datos MatchCars)"}
-          </p>
-          <p className="text-lg font-extrabold text-accent">ARS {Math.round(tradeIn.tasacion.avg).toLocaleString("es-AR")}</p>
-          {tradeIn.tasacion.fuente === "matchcars" && (
-            <p className="text-xs text-muted-foreground">
-              Min {Math.round(tradeIn.tasacion.min).toLocaleString("es-AR")} – Max {Math.round(tradeIn.tasacion.max).toLocaleString("es-AR")}
-            </p>
-          )}
-          {estado && suggested > 0 && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Sugerido para tomarlo ({TRADE_IN_CONDITION_LABELS[estado]}, con margen de reventa): <strong className="text-foreground">ARS {suggested.toLocaleString("es-AR")}</strong>
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-col gap-2">
-        {tradeIn.precioTomaConfirmado ? (
-          <div className="flex items-center justify-between rounded-lg border border-success/40 bg-success/5 p-3">
-            <div>
-              <p className="text-xs text-muted-foreground">✓ Precio de toma confirmado</p>
-              <p className="text-lg font-extrabold text-success">ARS {(tradeIn.precioTomaFinal ?? 0).toLocaleString("es-AR")}</p>
-            </div>
-            <button onClick={editPrice} className="text-xs font-semibold text-muted-foreground hover:text-foreground">
-              Editar
-            </button>
-          </div>
-        ) : (
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="text-muted-foreground">Precio final de toma</span>
-            <div className="flex flex-wrap gap-1">
-              <ThousandsInput value={precioTomaFinal} onChange={setPrecioTomaFinal} className={`${inputClass} w-32`} />
-              {suggested > 0 && (
-                <button
-                  type="button"
-                  onClick={applySuggested}
-                  title="Usar el precio sugerido"
-                  className="shrink-0 rounded-lg border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
-                >
-                  Usar sugerido
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={confirmPrice}
-                disabled={confirmingPrice || !precioTomaFinal}
-                title="Confirmar este precio como definitivo"
-                className="shrink-0 rounded-lg bg-success px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
-              >
-                {confirmingPrice ? "Confirmando…" : "✓ Confirmar"}
+      {tradeIn.precioTomaConfirmado ? (
+        // Confirmada = cerrada. Antes de esto la sección quedaba siempre
+        // editable aunque ya se hubiera "confirmado" el precio — ahora
+        // confirmar cierra marca/modelo/estado/tasador también, no solo el
+        // número, y hay que tocar "Editar" a propósito para volver a tocarlo.
+        <div className="flex flex-col gap-3">
+          <div className="rounded-lg border border-success/40 bg-success/5 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-semibold text-success">✓ Parte de pago confirmada</p>
+              <button onClick={editPrice} className="shrink-0 text-xs font-semibold text-muted-foreground hover:text-foreground">
+                Editar
               </button>
             </div>
-          </label>
-        )}
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Tasado por</span>
-          <select value={tasadoPor} onChange={(e) => setTasadoPor(e.target.value)} className={`${inputClass} w-full sm:w-56`}>
-            <option value="">Sin definir</option>
-            {(agency?.members ?? []).map((m) => (
-              <option key={m.uid} value={m.uid}>
-                {m.name || m.email || m.uid}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+            <p className="mt-2 text-sm font-bold">
+              {tradeIn.marca} {tradeIn.modelo} {tradeIn.version} {tradeIn.anio ?? ""}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {tradeIn.km ? `${tradeIn.km.toLocaleString("es-AR")} km` : "Km sin definir"}
+              {tradeIn.estado ? ` · ${TRADE_IN_CONDITION_LABELS[tradeIn.estado]}` : ""}
+            </p>
+            <p className="mt-2 text-lg font-extrabold text-success">ARS {(tradeIn.precioTomaFinal ?? 0).toLocaleString("es-AR")}</p>
+            <p className="text-xs text-muted-foreground">Tasado por: {tasadoPorName || "—"}</p>
+          </div>
+          {tradeIn.fotos.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto">
+              {tradeIn.fotos.map((url, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={i} src={url} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-2">
+            <DatalistField
+              label="Marca"
+              value={marca}
+              options={makeOptions}
+              onChange={(v) => {
+                setMarca(v);
+                setModelo("");
+                setVersion("");
+              }}
+            />
+            <DatalistField
+              label="Modelo"
+              value={modelo}
+              options={modelOptions}
+              disabled={!marca}
+              placeholder="Elegí una marca primero"
+              onChange={(v) => {
+                setModelo(v);
+                setVersion("");
+              }}
+            />
+            <DatalistField
+              label="Versión"
+              value={version}
+              options={versionOptions}
+              disabled={!modelo}
+              placeholder="Elegí un modelo primero"
+              onChange={setVersion}
+            />
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Año</span>
+              <input type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Km</span>
+              <ThousandsInput value={km} onChange={setKm} className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Estado</span>
+              <select className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value as TradeInCondition)}>
+                <option value="">Sin definir</option>
+                {(Object.keys(TRADE_IN_CONDITION_LABELS) as TradeInCondition[]).map((c) => (
+                  <option key={c} value={c}>
+                    {TRADE_IN_CONDITION_LABELS[c]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={save} disabled={saving} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+              {saving ? "Guardando…" : "Guardar datos"}
+            </button>
+            <button
+              onClick={appraise}
+              disabled={appraising || !marca || !modelo || !anio}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent disabled:opacity-50"
+            >
+              {appraising ? "Tasando…" : "Tasar con MatchCars"}
+            </button>
+            <button
+              onClick={() => setShowManualValorVenta((v) => !v)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+            >
+              {tradeIn.tasacion ? "Corregir valor a mano" : "Cargar valor a mano"}
+            </button>
+            <label className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">
+              {uploadingPhoto ? "Subiendo…" : "+ Foto"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploadingPhoto}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) addPhoto(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+
+          {showManualValorVenta && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
+              <span className="text-xs text-muted-foreground">Valor de venta estimado</span>
+              <ThousandsInput value={manualValorVenta} onChange={setManualValorVenta} className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs" />
+              <button
+                onClick={saveManualValorVenta}
+                disabled={savingManual || !manualValorVenta}
+                className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+              >
+                {savingManual ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          )}
+
+          {tradeIn.fotos.length > 0 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto">
+              {tradeIn.fotos.map((url, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={i} src={url} alt="" className="h-16 w-24 shrink-0 rounded-lg object-cover" />
+              ))}
+            </div>
+          )}
+
+          {tradeIn.tasacion && tradeIn.tasacion.avg > 0 && (
+            <div className="mt-3 flex flex-col gap-1 rounded-lg bg-background p-3">
+              <p className="text-xs text-muted-foreground">
+                Valor de venta estimado {tradeIn.tasacion.fuente === "manual" ? "(cargado a mano)" : "(datos MatchCars)"}
+              </p>
+              <p className="text-lg font-extrabold text-accent">ARS {Math.round(tradeIn.tasacion.avg).toLocaleString("es-AR")}</p>
+              {tradeIn.tasacion.fuente === "matchcars" && (
+                <p className="text-xs text-muted-foreground">
+                  Min {Math.round(tradeIn.tasacion.min).toLocaleString("es-AR")} – Max {Math.round(tradeIn.tasacion.max).toLocaleString("es-AR")}
+                </p>
+              )}
+              {estado && suggested > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Sugerido para tomarlo ({TRADE_IN_CONDITION_LABELS[estado]}, con margen de reventa): <strong className="text-foreground">ARS {suggested.toLocaleString("es-AR")}</strong>
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-col gap-2">
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Precio final de toma</span>
+              <div className="flex flex-wrap gap-1">
+                <ThousandsInput value={precioTomaFinal} onChange={setPrecioTomaFinal} className={`${inputClass} w-32`} />
+                {suggested > 0 && (
+                  <button
+                    type="button"
+                    onClick={applySuggested}
+                    title="Usar el precio sugerido"
+                    className="shrink-0 rounded-lg border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
+                  >
+                    Usar sugerido
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={confirmPrice}
+                  disabled={confirmingPrice || !precioTomaFinal || !tasadoPor}
+                  title={!tasadoPor ? "Elegí quién tasó antes de confirmar" : "Confirmar y cerrar la parte de pago"}
+                  className="shrink-0 rounded-lg bg-success px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {confirmingPrice ? "Confirmando…" : "✓ Confirmar parte de pago"}
+                </button>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="text-muted-foreground">Tasado por *</span>
+              <select value={tasadoPor} onChange={(e) => setTasadoPor(e.target.value)} className={`${inputClass} w-full sm:w-56`}>
+                <option value="">Sin definir</option>
+                {(agency?.members ?? []).map((m) => (
+                  <option key={m.uid} value={m.uid}>
+                    {m.name || m.email || m.uid}
+                  </option>
+                ))}
+              </select>
+              {!tasadoPor && <span className="text-[11px] text-muted-foreground">Hace falta para poder confirmar</span>}
+            </label>
+          </div>
+        </>
+      )}
 
       <div className="mt-3 border-t border-border pt-3">
         {tradeIn.agregadoAlStock ? (

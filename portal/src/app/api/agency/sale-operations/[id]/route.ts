@@ -180,7 +180,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     const precio = Number(body.precioTotal) || 0;
     const montoFinanciado = Math.max(0, precio - anticipo);
     const cuotaMensual = calculateFrenchInstallment(montoFinanciado, cuotas, tasaAnual);
-    const financiacion = { anticipo, cuotas, tasaAnual, montoFinanciado, cuotaMensual };
+    const financiacion = { precioTotal: precio, anticipo, cuotas, tasaAnual, montoFinanciado, cuotaMensual };
     await ref.update({ financiacion, updatedAt: FieldValue.serverTimestamp() });
     return Response.json({ ok: true, financiacion });
   }

@@ -48,6 +48,7 @@ export function buildDefaultChecklist(): ChecklistItem[] {
 }
 
 export interface FinancingCalc {
+  precioTotal: number; // se guarda para poder reabrir y modificar el cálculo — antes solo quedaba montoFinanciado (ya restado el anticipo), y el campo volvía a aparecer vacío al reabrir
   anticipo: number;
   cuotas: number;
   tasaAnual: number; // % nominal anual, cargada a mano por la agencia
