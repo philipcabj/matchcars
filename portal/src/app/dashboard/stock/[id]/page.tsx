@@ -193,6 +193,24 @@ export default function VehicleDetailPage() {
         </div>
       )}
 
+      {vehicle.status === "a_preparar" && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <div>
+            <p className="text-sm font-semibold text-amber-700">Falta completarlo para publicar</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Este auto entró como parte de pago de una venta — todavía no está en revisión ni visible para compradores.
+              Completá los datos que falten (combustible, caja, ubicación, más fotos) y guardá para mandarlo a revisión.
+            </p>
+          </div>
+          <Link
+            href={`/dashboard/stock/${id}/edit`}
+            className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+          >
+            Completar y publicar
+          </Link>
+        </div>
+      )}
+
       {vehicle.coverImage && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
