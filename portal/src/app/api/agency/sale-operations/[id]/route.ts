@@ -16,7 +16,17 @@ function toIso(ts: unknown): string | null {
   return null;
 }
 
-function serialize(id: string, data: FirebaseFirestore.DocumentData) {
+function serialize(
+  id: string,
+  data: FirebaseFirestore.DocumentData,
+  liveVehicle?: { price?: number; currency?: string } | null
+) {
+  const vehicleSnapshot = data.vehicleSnapshot
+    ? { ...data.vehicleSnapshot, ...(liveVehicle ? { price: liveVehicle.price, currency: liveVehicle.currency } : {}) }
+    : liveVehicle
+      ? { price: liveVehicle.price, currency: liveVehicle.currency }
+      : null;
+
   return {
     id,
     leadId: data.leadId,
@@ -25,7 +35,7 @@ function serialize(id: string, data: FirebaseFirestore.DocumentData) {
     buyerId: data.buyerId ?? null,
     assignedTo: data.assignedTo ?? null,
     status: data.status ?? "en_curso",
-    vehicleSnapshot: data.vehicleSnapshot ?? null,
+    vehicleSnapshot,
     buyerLabel: data.buyerLabel ?? "Comprador",
     checklist: (data.checklist ?? []).map((c: Record<string, unknown>) => ({
       ...c,
@@ -37,7 +47,8 @@ function serialize(id: string, data: FirebaseFirestore.DocumentData) {
       })),
     })),
     financiacion: data.financiacion ?? null,
-    parteDePago: data.parteDePago ?? { incluye: false, marca: "", modelo: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
+    parteDePago:
+      data.parteDePago ?? { incluye: false, marca: "", modelo: "", version: "", anio: null, km: null, estado: "", fotos: [], tasacion: null, agregadoAlStock: false, vehiculoStockId: null },
     createdAt: toIso(data.createdAt),
     updatedAt: toIso(data.updatedAt),
   };
@@ -60,7 +71,20 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   const { id } = await ctx.params;
   const found = await loadOwned(agencyId, id);
   if (!found) return Response.json({ error: "No encontrado" }, { status: 404 });
-  return Response.json(serialize(found.snap.id, found.snap.data()!));
+
+  // Precio en VIVO del auto (no la foto vieja del momento en que se creó la
+  // operación) — para que la agencia siempre tenga presente cuánto está
+  // publicado hoy, aunque haya cambiado desde entonces.
+  const op = found.snap.data()!;
+  let liveVehicle: { price?: number; currency?: string } | null = null;
+  if (op.vehicleId) {
+    const vehicleSnap = await adminDb.doc(`vehicles/${op.vehicleId}`).get();
+    if (vehicleSnap.exists) {
+      liveVehicle = { price: vehicleSnap.data()?.price, currency: vehicleSnap.data()?.currency };
+    }
+  }
+
+  return Response.json(serialize(found.snap.id, op, liveVehicle));
 });
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]">) => {
@@ -143,6 +167,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       incluye: !!body.incluye,
       marca: body.marca ?? op.parteDePago?.marca ?? "",
       modelo: body.modelo ?? op.parteDePago?.modelo ?? "",
+      version: body.version ?? op.parteDePago?.version ?? "",
       anio: body.anio !== undefined ? Number(body.anio) || null : op.parteDePago?.anio ?? null,
       km: body.km !== undefined ? Number(body.km) || null : op.parteDePago?.km ?? null,
       estado: body.estado ?? op.parteDePago?.estado ?? "",
@@ -184,6 +209,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
         userPlan: ownerData.plan || "free",
         brand: tradeIn.marca,
         model: tradeIn.modelo,
+        version: tradeIn.version || null,
         year: tradeIn.anio || null,
         km: tradeIn.km || 0,
         price: suggestedPrice,

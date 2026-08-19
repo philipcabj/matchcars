@@ -36,6 +36,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   const body = await request.json();
   const tipo = body.tipo === "recibo_sena" ? "recibo_sena" : "boleto_compraventa";
   const monto = Number(body.monto) || 0;
+  const montoCurrency = body.montoCurrency === "USD" ? "USD" : "ARS";
   if (tipo === "recibo_sena" && monto <= 0) {
     return Response.json({ error: "Ingresá el monto de la seña." }, { status: 400 });
   }
@@ -63,7 +64,9 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
     publicationCode: vehicle?.publicationCode ?? null,
   };
 
-  const buffer = await renderToBuffer(tipo === "recibo_sena" ? <ReciboDeSena data={data} monto={monto} /> : <BoletoCompraventa data={data} />);
+  const buffer = await renderToBuffer(
+    tipo === "recibo_sena" ? <ReciboDeSena data={data} monto={monto} montoCurrency={montoCurrency} /> : <BoletoCompraventa data={data} />
+  );
 
   const filename = `${tipo}_${Date.now()}.pdf`;
   const filePath = `uploads/${agencyId}/operations/${id}/${filename}`;
@@ -72,7 +75,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
     metadata: { contentType: "application/pdf", metadata: { firebaseStorageDownloadTokens: token } },
   });
   const url = `https://firebasestorage.googleapis.com/v0/b/${adminStorage.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`;
-  const nombre = tipo === "recibo_sena" ? `Recibo de seña (${data.currency} ${monto.toLocaleString("es-AR")}).pdf` : "Boleto de compraventa.pdf";
+  const nombre = tipo === "recibo_sena" ? `Recibo de seña (${montoCurrency} ${monto.toLocaleString("es-AR")}).pdf` : "Boleto de compraventa.pdf";
 
   const checklistKey = CHECKLIST_KEY_BY_TIPO[tipo];
   const checklist = [...(op.checklist ?? [])];

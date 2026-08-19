@@ -118,7 +118,12 @@ export function BoletoCompraventa({ data }: { data: DocumentData }) {
   );
 }
 
-export function ReciboDeSena({ data, monto }: { data: DocumentData; monto: number }) {
+export function ReciboDeSena({ data, monto, montoCurrency }: { data: DocumentData; monto: number; montoCurrency: string }) {
+  // La seña puede pagarse en una moneda distinta a la del precio de venta
+  // (ej. venta en USD, seña en efectivo en ARS) — el saldo pendiente solo se
+  // puede calcular por resta directa si las monedas coinciden; si no, se
+  // informan los dos montos por separado sin inventar un tipo de cambio.
+  const sameCurrency = montoCurrency === data.currency;
   return (
     <Document>
       <Page size="A4" style={styles.page}>
@@ -128,11 +133,13 @@ export function ReciboDeSena({ data, monto }: { data: DocumentData; monto: numbe
         </View>
 
         <Text style={styles.paragraph}>
-          Recibí de {data.buyerLabel} la suma de {fmtMoney(monto, data.currency)} en concepto de SEÑA / RESERVA por el
+          Recibí de {data.buyerLabel} la suma de {fmtMoney(monto, montoCurrency)} en concepto de SEÑA / RESERVA por el
           vehículo {data.brand} {data.model} {data.year ?? ""}
           {data.licensePlate ? `, patente ${data.licensePlate}` : ""}, a cuenta del precio total de venta de{" "}
-          {fmtMoney(data.price, data.currency)}, quedando el saldo de {fmtMoney(Math.max(0, data.price - monto), data.currency)}{" "}
-          pendiente de pago según lo acordado entre las partes.
+          {fmtMoney(data.price, data.currency)}
+          {sameCurrency
+            ? `, quedando el saldo de ${fmtMoney(Math.max(0, data.price - monto), data.currency)} pendiente de pago según lo acordado entre las partes.`
+            : ", quedando el saldo pendiente de pago a determinar entre las partes según el tipo de cambio acordado."}
         </Text>
 
         <View style={styles.section}>

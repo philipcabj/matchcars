@@ -80,6 +80,7 @@ export interface TradeIn {
   incluye: boolean;
   marca: string;
   modelo: string;
+  version: string;
   anio: number | null;
   km: number | null;
   estado: string;
@@ -93,6 +94,7 @@ export const EMPTY_TRADE_IN: TradeIn = {
   incluye: false,
   marca: "",
   modelo: "",
+  version: "",
   anio: null,
   km: null,
   estado: "",
@@ -112,7 +114,7 @@ export interface SaleOperation {
   buyerId: string | null;
   assignedTo: string | null;
   status: SaleOperationStatus;
-  vehicleSnapshot?: { brand?: string; model?: string; year?: number; coverUrl?: string } | null;
+  vehicleSnapshot?: { brand?: string; model?: string; year?: number; coverUrl?: string; price?: number; currency?: string } | null;
   buyerLabel: string;
   checklist: ChecklistItem[];
   financiacion: FinancingCalc | null;

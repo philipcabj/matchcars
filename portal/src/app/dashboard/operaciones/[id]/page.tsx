@@ -3,15 +3,82 @@
 // rápida (sin conexión a ninguna financiera, solo cálculo) y parte de pago.
 "use client";
 
+import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
+import { CAR_MODELS_AR } from "@/lib/carModelsAr";
+import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { ChecklistItem, SaleOperation, TradeInAppraisal } from "@/lib/sale-operations";
 import { uploadOperationDocument, uploadTradeInPhoto } from "@/lib/upload";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+const STATIC_MAKES = Array.from(new Set(CAR_MODELS_AR.map((x) => x.make))).sort();
+const STATIC_MODELS_BY_MAKE: Record<string, string[]> = CAR_MODELS_AR.reduce((acc, item) => {
+  const list = acc[item.make] || [];
+  if (!list.includes(item.model)) list.push(item.model);
+  acc[item.make] = list;
+  return acc;
+}, {} as Record<string, string[]>);
+
+// Mismo patrón que components/VehicleForm.tsx — input libre con sugerencias
+// (datalist) en vez de un <select> estricto, para no bloquear cargar una
+// marca/modelo que todavía no está catalogado.
+function DatalistField({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const listId = `dl-op-${label.replace(/\s+/g, "-").toLowerCase()}`;
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <label className="flex flex-col gap-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="relative">
+        <input
+          ref={inputRef}
+          list={listId}
+          className={`${inputClass} w-full ${value ? "pr-7" : ""}`}
+          value={value}
+          disabled={disabled}
+          placeholder={disabled ? placeholder : "Escribir o elegir…"}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange("");
+              inputRef.current?.focus();
+            }}
+            title="Cambiar"
+            className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-card hover:text-foreground"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      <datalist id={listId}>
+        {options.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+    </label>
+  );
+}
 
 const inputClass = "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
@@ -45,14 +112,25 @@ export default function OperationDetailPage() {
     return (uid: string | null) => (uid ? map.get(uid) || uid : null);
   }, [agency]);
 
+  // Antes, un error del servidor acá (ej. "Completá marca y modelo") se
+  // tragaba en silencio: cada sección llamaba a patch() dentro de un
+  // try/finally SIN catch, así que la excepción quedaba sin manejar y en
+  // pantalla no pasaba nada (reportado con el botón "Agregar al stock").
+  // Centralizado acá, un solo arreglo cubre las cuatro secciones.
   const patch = async (body: Record<string, unknown>) => {
-    const token = await getIdToken();
-    const res = await fetch(`/api/agency/sale-operations/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    await parseJsonResponse(res);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/sale-operations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      await parseJsonResponse(res);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+      throw e;
+    }
   };
 
   const refresh = () => setReloadKey((k) => k + 1);
@@ -73,6 +151,12 @@ export default function OperationDetailPage() {
           <p className="text-base font-bold">
             {op.vehicleSnapshot?.brand} {op.vehicleSnapshot?.model} {op.vehicleSnapshot?.year}
           </p>
+          {typeof op.vehicleSnapshot?.price === "number" && op.vehicleSnapshot.price > 0 && (
+            <p className="text-sm font-bold text-accent">
+              {op.vehicleSnapshot.currency ?? "ARS"} {op.vehicleSnapshot.price.toLocaleString("es-AR")}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">publicado hoy</span>
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">{op.buyerLabel}</p>
           {op.assignedTo && <p className="text-xs text-muted-foreground">Vendedor: {memberName(op.assignedTo)}</p>}
         </div>
@@ -114,7 +198,7 @@ export default function OperationDetailPage() {
 
       {error && <p className="text-sm text-error">{error}</p>}
 
-      <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+      <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} />
       <FinancingSection op={op} onChanged={refresh} patch={patch} />
       <TradeInSection op={op} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
     </div>
@@ -127,31 +211,37 @@ function ChecklistSection({
   onChanged,
   patch,
   userId,
+  onError,
 }: {
   op: SaleOperation;
   agency: ReturnType<typeof useAgencyMe>["data"];
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
   userId: string;
+  onError: (msg: string | null) => void;
 }) {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
   const [senaPrompt, setSenaPrompt] = useState(false);
   const [senaMonto, setSenaMonto] = useState("");
+  const [senaCurrency, setSenaCurrency] = useState<"ARS" | "USD">((op.vehicleSnapshot?.currency as "ARS" | "USD") || "ARS");
   const { getIdToken } = useAuth();
 
-  const generateDocument = async (tipo: "boleto_compraventa" | "recibo_sena", key: string, monto?: number) => {
+  const generateDocument = async (tipo: "boleto_compraventa" | "recibo_sena", key: string, monto?: number, montoCurrency?: string) => {
     setGeneratingKey(key);
     try {
       const token = await getIdToken();
       const res = await fetch(`/api/agency/sale-operations/${op.id}/document`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ tipo, monto }),
+        body: JSON.stringify({ tipo, monto, montoCurrency }),
       });
       const data = await parseJsonResponse<{ url: string }>(res);
+      onError(null);
       onChanged();
       window.open(data.url, "_blank");
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setGeneratingKey(null);
       setSenaPrompt(false);
@@ -272,10 +362,18 @@ function ChecklistSection({
                         placeholder="Monto de la seña"
                         value={senaMonto}
                         onChange={(e) => setSenaMonto(e.target.value)}
-                        className="w-32 rounded-md border border-border bg-card px-2 py-1 text-xs"
+                        className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
                       />
+                      <select
+                        value={senaCurrency}
+                        onChange={(e) => setSenaCurrency(e.target.value as "ARS" | "USD")}
+                        className="rounded-md border border-border bg-card px-2 py-1 text-xs"
+                      >
+                        <option value="ARS">ARS</option>
+                        <option value="USD">USD</option>
+                      </select>
                       <button
-                        onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto))}
+                        onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
                         disabled={!senaMonto || Number(senaMonto) <= 0}
                         className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
                       >
@@ -394,6 +492,7 @@ function TradeInSection({
   const tradeIn = op.parteDePago;
   const [marca, setMarca] = useState(tradeIn.marca);
   const [modelo, setModelo] = useState(tradeIn.modelo);
+  const [version, setVersion] = useState(tradeIn.version);
   const [anio, setAnio] = useState(tradeIn.anio ? String(tradeIn.anio) : "");
   const [km, setKm] = useState(tradeIn.km ? String(tradeIn.km) : "");
   const [estado, setEstado] = useState(tradeIn.estado);
@@ -401,6 +500,39 @@ function TradeInSection({
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [addingToStock, setAddingToStock] = useState(false);
+  const [catalogMakes, setCatalogMakes] = useState<string[]>([]);
+  const [catalogModels, setCatalogModels] = useState<{ name: string; versions: string[] }[]>([]);
+
+  useEffect(() => {
+    loadCatalogMakes().then(setCatalogMakes);
+  }, []);
+
+  useEffect(() => {
+    if (!marca) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset síncrono cuando falta la marca, no dispara un fetch
+      setCatalogModels([]);
+      return;
+    }
+    let cancelled = false;
+    loadCatalogModels(marca).then((models) => {
+      if (!cancelled) setCatalogModels(models);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [marca]);
+
+  const makeOptions = useMemo(() => Array.from(new Set([...STATIC_MAKES, ...catalogMakes])).sort(), [catalogMakes]);
+  const modelOptions = useMemo(() => {
+    const fromStatic = STATIC_MODELS_BY_MAKE[marca] || [];
+    const fromCatalog = catalogModels.map((m) => m.name);
+    return Array.from(new Set([...fromStatic, ...fromCatalog])).sort();
+  }, [marca, catalogModels]);
+  const versionOptions = useMemo(() => {
+    const fromStatic = CAR_MODELS_AR.find((x) => x.make === marca && x.model === modelo)?.versions || [];
+    const fromCatalog = catalogModels.find((m) => m.name === modelo)?.versions || [];
+    return Array.from(new Set([...fromStatic, ...fromCatalog])).sort();
+  }, [marca, modelo, catalogModels]);
 
   if (!tradeIn.incluye) {
     return (
@@ -423,7 +555,7 @@ function TradeInSection({
   const save = async () => {
     setSaving(true);
     try {
-      await patch({ action: "update_trade_in", incluye: true, marca, modelo, anio: Number(anio) || null, km: Number(km) || null, estado });
+      await patch({ action: "update_trade_in", incluye: true, marca, modelo, version, anio: Number(anio) || null, km: Number(km) || null, estado });
       onChanged();
     } finally {
       setSaving(false);
@@ -460,6 +592,12 @@ function TradeInSection({
   const addToStock = async () => {
     setAddingToStock(true);
     try {
+      // Guarda los datos tipeados antes de crear el auto en Stock — antes,
+      // si tocabas "Agregar al stock" sin haber tocado "Guardar datos" antes,
+      // el servidor validaba contra lo último guardado (podía estar vacío) y
+      // devolvía un error que la pantalla nunca mostraba (ver fix de patch()
+      // más arriba) — el botón parecía "no hacer nada".
+      await patch({ action: "update_trade_in", incluye: true, marca, modelo, version, anio: Number(anio) || null, km: Number(km) || null, estado });
       await patch({ action: "add_trade_in_to_stock" });
       onChanged();
     } finally {
@@ -482,13 +620,51 @@ function TradeInSection({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <input placeholder="Marca" className={inputClass} value={marca} onChange={(e) => setMarca(e.target.value)} />
-        <input placeholder="Modelo" className={inputClass} value={modelo} onChange={(e) => setModelo(e.target.value)} />
-        <input placeholder="Año" type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
-        <input placeholder="Km" type="number" className={inputClass} value={km} onChange={(e) => setKm(e.target.value)} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <DatalistField
+          label="Marca"
+          value={marca}
+          options={makeOptions}
+          onChange={(v) => {
+            setMarca(v);
+            setModelo("");
+            setVersion("");
+          }}
+        />
+        <DatalistField
+          label="Modelo"
+          value={modelo}
+          options={modelOptions}
+          disabled={!marca}
+          placeholder="Elegí una marca primero"
+          onChange={(v) => {
+            setModelo(v);
+            setVersion("");
+          }}
+        />
+        <DatalistField
+          label="Versión"
+          value={version}
+          options={versionOptions}
+          disabled={!modelo}
+          placeholder="Elegí un modelo primero"
+          onChange={setVersion}
+        />
       </div>
-      <input placeholder="Estado (opcional)" className={`${inputClass} mt-2 w-full`} value={estado} onChange={(e) => setEstado(e.target.value)} />
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Año</span>
+          <input type="number" className={inputClass} value={anio} onChange={(e) => setAnio(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Km</span>
+          <ThousandsInput value={km} onChange={setKm} className={inputClass} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-muted-foreground">Estado (opcional)</span>
+          <input className={inputClass} value={estado} onChange={(e) => setEstado(e.target.value)} />
+        </label>
+      </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
         <button onClick={save} disabled={saving} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
