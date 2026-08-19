@@ -23,6 +23,7 @@ import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
 import { AGENCY_ROLE_PERMISSIONS, canManageCommissions } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
+import { randomUUID } from "node:crypto";
 
 const TERMINAL_OFFER_STATUSES = ["rejected", "withdrawn", "expired"];
 
@@ -69,6 +70,15 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     ? { ...data.vehicleSnapshot, ...(liveVehicle ?? {}) }
     : liveVehicle;
 
+  // Token del QR de confirmación de entrega — se guardó en sales/{vehicleId}
+  // al marcar como entregado (ver mark_vehicle_sold acá abajo). Se expone
+  // acá para poder re-mostrar el mismo QR si se recarga la página.
+  let deliveryConfirmToken: string | null = null;
+  if (vehicleStatus === "reserved" && data.vehicleId) {
+    const saleSnap = await adminDb.doc(`sales/${data.vehicleId}`).get();
+    deliveryConfirmToken = saleSnap.exists ? saleSnap.data()?.deliveryConfirmToken ?? null : null;
+  }
+
   return Response.json({
     id: snap.id,
     status: data.status || "new",
@@ -77,6 +87,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     buyerId: data.buyerId || null,
     vehicleStatus,
     vehicleSnapshot,
+    deliveryConfirmToken,
     buyerSnapshot: data.buyerSnapshot ?? null,
     manualContact: data.manualContact ?? null,
     lastMessage: data.lastMessage ?? null,
@@ -195,6 +206,12 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     // quién confirme, así que se cierra directo como antes.
     const pendingConfirmation = !!lead.buyerId;
     const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    // Token para el QR de confirmación de entrega en persona — cualquiera
+    // que tenga este link puede confirmar esta venta puntual, sin necesitar
+    // sesión propia (el comprador puede no tener la app abierta/logueada en
+    // el momento de la entrega). Alcanza con la posesión del QR, igual
+    // criterio que un link de descarga con token de Storage.
+    const deliveryConfirmToken = pendingConfirmation ? randomUUID() : null;
 
     // Comisión (Módulo C) — solo si hay un vendedor asignado distinto del
     // dueño (el dueño no se paga comisión a sí mismo) y el plan la incluye.
@@ -248,7 +265,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
           source: "matchcars",
           vehicleSnapshot: lead.vehicleSnapshot ?? {},
           confirmedByBuyer: pendingConfirmation ? null : true,
-          ...(pendingConfirmation ? { buyerConfirmDeadline: deadline } : { confirmedAt: FieldValue.serverTimestamp() }),
+          ...(pendingConfirmation ? { buyerConfirmDeadline: deadline, deliveryConfirmToken } : { confirmedAt: FieldValue.serverTimestamp() }),
           ...(commission ? { commission } : {}),
         },
         { merge: true }
@@ -270,7 +287,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       }
     }
 
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, deliveryConfirmToken });
   }
 
   return Response.json({ error: "Acción inválida." }, { status: 400 });

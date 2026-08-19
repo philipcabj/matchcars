@@ -7,6 +7,7 @@
 "use client";
 
 import { AssigneeSelect } from "@/components/AssigneeSelect";
+import { DeliveryQrCode } from "@/components/DeliveryQrCode";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
@@ -537,6 +538,9 @@ export default function LeadDetailPage() {
               ? "Le avisamos que marcaste esta venta como entregada. Cuando confirme desde la app (o pase el plazo de 3 días sin respuesta), el auto pasa a Vendido o vuelve a estar disponible automáticamente."
               : "Este auto está reservado."}
           </p>
+          {lead.buyerId && lead.deliveryConfirmToken && (
+            <DeliveryQrCode vehicleId={lead.vehicleId} token={lead.deliveryConfirmToken} />
+          )}
         </div>
       )}
 

@@ -87,6 +87,7 @@ export interface LeadDetail {
   createdAt?: string | null;
   assignedTo?: string | null;
   saleOperationId?: string | null;
+  deliveryConfirmToken?: string | null;
 }
 
 export interface CreateManualLeadInput {
