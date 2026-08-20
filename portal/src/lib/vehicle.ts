@@ -97,14 +97,20 @@ export interface VehicleListItem {
 export interface VehicleDetail extends VehicleFormValues {
   id: string;
   status: string;
+  published: boolean;
   rejectionReason: string | null;
   views: number;
   likesCount: number;
   createdAt: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  deletedAt: string | null;
+  soldAt: string | null;
   priceHistory: { price: number; currency: string; changedAt: string | null }[];
   publicationCode: number | null;
   purchasePrice: number | null;
   expensesTotal: number;
+  sale: { confirmedByBuyer: boolean | null; confirmedAt: string | null; confirmedAutomatically: boolean } | null;
 }
 
 // Color sólido por estado, para barras/gráficos (a diferencia de STATUS_LABELS.className,

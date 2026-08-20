@@ -15,6 +15,54 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+interface TimelineEvent {
+  at: string;
+  icon: string;
+  label: string;
+  detail?: string;
+}
+
+// Timeline derivado 100% de campos que ya existían (createdAt, approvedAt,
+// rejectedAt, deletedAt, soldAt, priceHistory, sales/{id}) — no se persiste
+// nada nuevo, así que la app no tiene que escribir un solo evento extra
+// para que esto funcione.
+function buildTimeline(vehicle: VehicleDetail): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+
+  if (vehicle.createdAt) {
+    events.push({ at: vehicle.createdAt, icon: "＋", label: "Publicación cargada" });
+  }
+  for (const h of vehicle.priceHistory) {
+    if (!h.changedAt) continue;
+    events.push({ at: h.changedAt, icon: "$", label: "Precio actualizado", detail: `${h.currency} ${Number(h.price).toLocaleString("es-AR")}` });
+  }
+  if (vehicle.approvedAt) {
+    events.push({ at: vehicle.approvedAt, icon: "✓", label: "Aprobada por moderación — publicada" });
+  }
+  if (vehicle.rejectedAt) {
+    events.push({ at: vehicle.rejectedAt, icon: "✕", label: "Rechazada", detail: vehicle.rejectionReason ?? undefined });
+  }
+  if (vehicle.soldAt) {
+    events.push({
+      at: vehicle.soldAt,
+      icon: "🤝",
+      label: vehicle.status === "reserved" ? "Venta iniciada — esperando confirmación" : "Vendida",
+    });
+  }
+  if (vehicle.sale?.confirmedAt) {
+    events.push({
+      at: vehicle.sale.confirmedAt,
+      icon: "🚗",
+      label: vehicle.sale.confirmedAutomatically ? "Entrega confirmada automáticamente (sin respuesta del comprador)" : "Entrega confirmada por el comprador",
+    });
+  }
+  if (vehicle.deletedAt) {
+    events.push({ at: vehicle.deletedAt, icon: "🗑", label: "Eliminada" });
+  }
+
+  return events.sort((a, b) => a.at.localeCompare(b.at));
+}
+
 function Lightbox({ photos, index, onClose, onNavigate }: { photos: string[]; index: number; onClose: () => void; onNavigate: (i: number) => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -85,6 +133,27 @@ export default function VehicleDetailPage() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [togglingVisibility, setTogglingVisibility] = useState(false);
+
+  const toggleVisibility = async () => {
+    if (!vehicle) return;
+    setTogglingVisibility(true);
+    try {
+      const token = await getIdToken();
+      const nextPublished = vehicle.published === false;
+      const res = await fetch(`/api/agency/vehicles/${id}/visibility`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ published: nextPublished }),
+      });
+      await parseJsonResponse(res);
+      setVehicle((prev) => (prev ? { ...prev, published: nextPublished } : prev));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setTogglingVisibility(false);
+    }
+  };
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -115,10 +184,14 @@ export default function VehicleDetailPage() {
   if (error) return <p className="text-sm text-error">No pudimos abrir este auto: {error}</p>;
   if (!vehicle) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
-  const statusInfo = STATUS_LABELS[vehicle.status] ?? { label: vehicle.status, className: "bg-muted/20 text-muted-foreground" };
+  const isPaused = vehicle.status === "available" && vehicle.published === false;
+  const statusInfo = isPaused
+    ? { label: "Pausado", className: "bg-amber-500/15 text-amber-600" }
+    : STATUS_LABELS[vehicle.status] ?? { label: vehicle.status, className: "bg-muted/20 text-muted-foreground" };
   const activeToggles = TOGGLE_FIELDS.filter((t) => vehicle.toggles[t.key]);
   const isRejected = ["rejected", "rejected_limit", "blocked", "deleted"].includes(vehicle.status);
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean) as string[];
+  const timeline = buildTimeline(vehicle);
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
@@ -141,6 +214,16 @@ export default function VehicleDetailPage() {
           >
             Editar
           </Link>
+          {vehicle.status === "available" && (
+            <button
+              type="button"
+              onClick={toggleVisibility}
+              disabled={togglingVisibility}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground disabled:opacity-50"
+            >
+              {vehicle.published === false ? "Republicar" : "Pausar"}
+            </button>
+          )}
           {vehicle.status !== "deleted" && (
             <button
               type="button"
@@ -311,16 +394,22 @@ export default function VehicleDetailPage() {
         />
       )}
 
-      {vehicle.priceHistory.length > 1 && (
+      {timeline.length > 0 && (
         <div className="rounded-xl border border-border bg-card p-4">
-          <p className="mb-2 text-xs font-semibold text-muted-foreground">Historial de precio</p>
-          <div className="flex flex-col gap-1">
-            {vehicle.priceHistory.map((h, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span>{h.changedAt ? new Date(h.changedAt).toLocaleDateString("es-AR") : "—"}</span>
-                <span className="font-semibold">
-                  {h.currency} {Number(h.price).toLocaleString("es-AR")}
-                </span>
+          <p className="mb-3 text-xs font-semibold text-muted-foreground">Historial de la unidad</p>
+          <div className="flex flex-col gap-3">
+            {timeline.map((ev, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-background text-xs">{ev.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <p className="text-sm font-semibold">{ev.label}</p>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {new Date(ev.at).toLocaleDateString("es-AR", { day: "2-digit", month: "short", year: "numeric" })}
+                    </span>
+                  </div>
+                  {ev.detail && <p className="text-xs text-muted-foreground">{ev.detail}</p>}
+                </div>
               </div>
             ))}
           </div>

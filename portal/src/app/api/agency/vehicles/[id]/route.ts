@@ -10,6 +10,11 @@ import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canUploadVideo } from "@/lib/plans";
 import { FieldValue, type DocumentReference, type DocumentSnapshot } from "firebase-admin/firestore";
 
+function toIso(ts: unknown): string | null {
+  if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
+  return null;
+}
+
 async function loadOwnedVehicle(
   agencyId: string,
   id: string
@@ -59,18 +64,39 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
       immediateDelivery: !!data.immediateDelivery,
     },
     status: data.status ?? "available",
+    published: data.published === true,
     rejectionReason: data.rejectionReason || data.rejectedReason || null,
     views: data.views ?? 0,
     likesCount: data.likesCount ?? 0,
-    createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
+    createdAt: toIso(data.createdAt),
+    approvedAt: toIso(data.approvedAt),
+    rejectedAt: toIso(data.rejectedAt),
+    deletedAt: toIso(data.deletedAt),
+    soldAt: toIso(data.soldAt),
     publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
     purchasePrice: typeof data.purchasePrice === "number" ? data.purchasePrice : null,
     expensesTotal: typeof data.expensesTotal === "number" ? data.expensesTotal : 0,
     priceHistory: (data.priceHistory ?? []).map((h: { price: number; currency: string; changedAt?: { toDate?: () => Date } }) => ({
       price: h.price,
       currency: h.currency,
-      changedAt: h.changedAt?.toDate ? h.changedAt.toDate().toISOString() : null,
+      changedAt: toIso(h.changedAt),
     })),
+    // Solo lectura de sales/{id} (ya la escriben app/functions/portal en el
+    // flujo de venta existente) — para poder mostrar en el timeline si el
+    // comprador confirmó la entrega y cuándo, sin escribir nada nuevo.
+    sale:
+      data.status === "reserved" || data.status === "sold"
+        ? await (async () => {
+            const saleSnap = await adminDb.doc(`sales/${id}`).get();
+            if (!saleSnap.exists) return null;
+            const sale = saleSnap.data()!;
+            return {
+              confirmedByBuyer: sale.confirmedByBuyer ?? null,
+              confirmedAt: toIso(sale.confirmedAt),
+              confirmedAutomatically: !!sale.confirmedAutomatically,
+            };
+          })()
+        : null,
   });
 });
 
