@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -62,6 +62,7 @@ const EXCLUDED_STATUSES = [
     "rejected_limit",
     "blocked",
     "sold",
+    "a_preparar",
 ];
 const FEATURED_DURATION_DAYS = 7;
 function getMaxCars(plan) {
@@ -172,8 +173,15 @@ exports.expireFeaturedListings = (0, scheduler_1.onSchedule)("every 6 hours", as
 // "reserved" hasta que el comprador confirma que lo recibió (ver
 // handleMarkAsSold en app/(screens)/chat/[uid].tsx y mark_vehicle_sold en
 // portal/src/app/api/agency/leads/[id]/route.ts). Si pasan 3 días sin
-// confirmar ni rechazar, se revierte solo — mismo efecto que "No lo recibí"
-// del lado del comprador — y se avisa a ambas partes.
+// confirmar ni rechazar, se da por entregado igual (2026-08-19: antes esto
+// revertía la venta — status "available" de nuevo — como si nunca hubiera
+// pasado, pero la agencia ya entregó el auto en la vida real; que el
+// comprador no haya tocado la app no debería deshacer una venta real). Se
+// confirma sola (confirmedByBuyer:true, dispara onSaleConfirmed → Postventa
+// igual que una confirmación manual) y se le manda un aviso al comprador
+// invitándolo a puntuar al vendedor — el panel de calificación ya le va a
+// aparecer solo la próxima vez que abra ese chat, no hace falta nada extra
+// para habilitarlo.
 async function sendSimpleMail(recipientUid, subject, bodyHtml) {
     var _a;
     try {
@@ -193,7 +201,7 @@ async function sendSimpleMail(recipientUid, subject, bodyHtml) {
         console.error("[resolvePendingSaleConfirmations] mail error", e);
     }
 }
-async function sendSimplePush(recipientUid, title, body) {
+async function sendSimplePush(recipientUid, title, body, data) {
     var _a;
     try {
         const userSnap = await db.doc(`users/${recipientUid}`).get();
@@ -203,7 +211,7 @@ async function sendSimplePush(recipientUid, title, body) {
         await fetch("https://exp.host/--/api/v2/push/send", {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({ to: token, sound: "default", title, body }),
+            body: JSON.stringify(Object.assign({ to: token, sound: "default", title, body }, (data ? { data } : {}))),
         });
     }
     catch (e) {
@@ -228,24 +236,104 @@ exports.resolvePendingSaleConfirmations = (0, scheduler_1.onSchedule)("every 24 
         if (!vehicleId || !sellerId || !buyerId)
             continue;
         try {
-            await saleSnap.ref.update({ confirmedByBuyer: false });
-            await db.doc(`vehicles/${vehicleId}`).update({ status: "available", published: true });
-            const leadId = `${sellerId}_${buyerId}_${vehicleId}`;
-            await db.doc(`leads/${leadId}`).update({
-                status: "negotiation",
-                revertedAt: admin.firestore.FieldValue.serverTimestamp(),
-                revertReason: "timeout",
-            }).catch(() => { });
+            await saleSnap.ref.update({
+                confirmedByBuyer: true,
+                confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+                confirmedAutomatically: true, // distingue de una confirmación real del comprador, por si hace falta más adelante (reportes, confianza)
+            });
+            await db.doc(`vehicles/${vehicleId}`).update({ status: "sold" });
             const carModel = `${(_b = (_a = sale.vehicleSnapshot) === null || _a === void 0 ? void 0 : _a.brand) !== null && _b !== void 0 ? _b : ""} ${(_d = (_c = sale.vehicleSnapshot) === null || _c === void 0 ? void 0 : _c.model) !== null && _d !== void 0 ? _d : ""}`.trim() || "el auto";
+            const chatDeepLink = { url: `matchcars://chat/${sellerId}?vehicleId=${vehicleId}` };
             await Promise.all([
-                sendSimpleMail(buyerId, `Se venció el plazo para confirmar ${carModel}`, `No confirmaste la recepción de <strong>${carModel}</strong> a tiempo — si todavía te interesa, escribile de nuevo al vendedor.`),
-                sendSimplePush(buyerId, "Se venció el plazo", `No confirmaste la recepción de ${carModel} a tiempo.`),
-                sendSimpleMail(sellerId, `${carModel} volvió a estar disponible`, `El comprador no confirmó la recepción de <strong>${carModel}</strong> a tiempo — la publicación volvió a estar disponible.`),
-                sendSimplePush(sellerId, "Venta no confirmada", `El comprador no confirmó ${carModel} a tiempo — volvió a estar disponible.`),
+                sendSimpleMail(buyerId, `Confirmamos tu compra de ${carModel}`, `Como no confirmaste la recepción a tiempo, dimos por entregado <strong>${carModel}</strong> — el vendedor ya marcó la entrega. Entrá a la app y contanos cómo te fue calificando al vendedor.`),
+                sendSimplePush(buyerId, "¡Confirmamos tu compra!", `Calificá al vendedor de ${carModel} en la app.`, chatDeepLink),
+                sendSimpleMail(sellerId, `Se confirmó la entrega de ${carModel}`, `El comprador no respondió a tiempo, así que confirmamos la entrega de <strong>${carModel}</strong> automáticamente — no hizo falta esperar más.`),
+                sendSimplePush(sellerId, "Entrega confirmada", `Se confirmó automáticamente la entrega de ${carModel}.`),
             ]);
+            // onSaleConfirmed (más abajo) se dispara solo con el update de arriba
+            // y crea las tareas de Postventa — mismo camino que una confirmación
+            // manual del comprador.
         }
         catch (e) {
             console.error("[resolvePendingSaleConfirmations] error processing sale", saleSnap.id, e);
+        }
+    }
+});
+// Offsets en días desde la confirmación. "recontacto" es a propósito manual
+// (canal "manual", nunca se auto-envía nada) — es un gesto comercial de la
+// agencia, no un mensaje genérico; solo queda como recordatorio en el panel.
+const TASK_OFFSETS_DAYS = {
+    encuesta: 2,
+    resena: 7,
+    service: 30,
+    recontacto: 90,
+};
+exports.onSaleConfirmed = (0, firestore_1.onDocumentUpdated)("sales/{vehicleId}", async (event) => {
+    var _a, _b, _c;
+    const before = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before.data();
+    const after = (_b = event.data) === null || _b === void 0 ? void 0 : _b.after.data();
+    if (!before || !after)
+        return;
+    if (before.confirmedByBuyer === true || after.confirmedByBuyer !== true)
+        return; // solo al pasar A true
+    if (!after.buyerId || !after.sellerId)
+        return; // sin comprador real no hay a quién hacerle seguimiento
+    const vehicleId = event.params.vehicleId;
+    const now = Date.now();
+    const batch = db.batch();
+    for (const tipo of Object.keys(TASK_OFFSETS_DAYS)) {
+        const ref = db.collection("postSaleTasks").doc();
+        batch.set(ref, {
+            saleId: vehicleId,
+            vehicleId,
+            sellerId: after.sellerId,
+            buyerId: after.buyerId,
+            vehicleSnapshot: (_c = after.vehicleSnapshot) !== null && _c !== void 0 ? _c : null,
+            tipo,
+            programadaPara: admin.firestore.Timestamp.fromMillis(now + TASK_OFFSETS_DAYS[tipo] * 24 * 60 * 60 * 1000),
+            estado: "pendiente",
+            canal: tipo === "recontacto" ? "manual" : "auto",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+    await batch.commit();
+});
+function postSaleMessage(tipo, carModel) {
+    switch (tipo) {
+        case "encuesta":
+            return { title: "¿Cómo te fue con tu compra?", body: `Contanos cómo estuvo tu experiencia comprando ${carModel} — respondé este mensaje.` };
+        case "resena":
+            return { title: "¿Nos dejás una reseña?", body: `Si ${carModel} cumplió tus expectativas, una reseña ayuda a otros compradores.` };
+        case "service":
+            return { title: "Recordatorio de service", body: `Ya pasó un tiempo desde que retiraste ${carModel} — es un buen momento para el primer service.` };
+        default:
+            return { title: "", body: "" };
+    }
+}
+// Un solo where (estado == "pendiente") y el resto se filtra en memoria —
+// mismo criterio que resolvePendingSaleConfirmations, para no necesitar un
+// índice compuesto nuevo (equality + range en campos distintos sí lo pide).
+exports.runPostSaleTasks = (0, scheduler_1.onSchedule)("every 6 hours", async () => {
+    var _a, _b, _c, _d;
+    const now = Date.now();
+    const snap = await db.collection("postSaleTasks").where("estado", "==", "pendiente").get();
+    for (const taskSnap of snap.docs) {
+        const task = taskSnap.data();
+        if (task.canal === "manual")
+            continue; // recontacto: lo maneja la agencia a mano, no se toca acá
+        const programadaPara = task.programadaPara;
+        if (!programadaPara || programadaPara.toMillis() > now)
+            continue;
+        try {
+            const carModel = `${(_b = (_a = task.vehicleSnapshot) === null || _a === void 0 ? void 0 : _a.brand) !== null && _b !== void 0 ? _b : ""} ${(_d = (_c = task.vehicleSnapshot) === null || _c === void 0 ? void 0 : _c.model) !== null && _d !== void 0 ? _d : ""}`.trim() || "tu auto";
+            const { title, body } = postSaleMessage(task.tipo, carModel);
+            if (title) {
+                await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body)]);
+            }
+            await taskSnap.ref.update({ estado: "enviada", sentAt: admin.firestore.FieldValue.serverTimestamp() });
+        }
+        catch (e) {
+            console.error("[runPostSaleTasks] error processing task", taskSnap.id, e);
         }
     }
 });
@@ -745,6 +833,9 @@ function mapCsvRow(row) {
         description: row.description || row.descripcion || "",
         fuel: row.fuel || row.combustible || "",
         transmission: row.transmission || row.transmision || "",
+        // Patente/dominio — columna opcional nueva, sin relación con id/sku/vin
+        // (eso se usa para matchear fotos del ZIP, no es el campo del auto).
+        licensePlate: (row.patente || row.dominio || row.licensePlate || row.plate || "").toUpperCase(),
     };
 }
 function guessImageContentType(filename) {
@@ -851,6 +942,7 @@ exports.startBulkImport = (0, https_1.onCall)({ memory: "1GiB", timeoutSeconds: 
                     km: Number(row.km) || 0,
                     fuelType: row.fuel || null,
                     gearbox: row.transmission || null,
+                    licensePlate: row.licensePlate || null,
                     description: row.description || null,
                     location: {
                         province: userData.province || null,

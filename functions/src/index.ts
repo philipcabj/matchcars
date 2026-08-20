@@ -155,8 +155,15 @@ export const expireFeaturedListings = onSchedule("every 6 hours", async () => {
 // "reserved" hasta que el comprador confirma que lo recibió (ver
 // handleMarkAsSold en app/(screens)/chat/[uid].tsx y mark_vehicle_sold en
 // portal/src/app/api/agency/leads/[id]/route.ts). Si pasan 3 días sin
-// confirmar ni rechazar, se revierte solo — mismo efecto que "No lo recibí"
-// del lado del comprador — y se avisa a ambas partes.
+// confirmar ni rechazar, se da por entregado igual (2026-08-19: antes esto
+// revertía la venta — status "available" de nuevo — como si nunca hubiera
+// pasado, pero la agencia ya entregó el auto en la vida real; que el
+// comprador no haya tocado la app no debería deshacer una venta real). Se
+// confirma sola (confirmedByBuyer:true, dispara onSaleConfirmed → Postventa
+// igual que una confirmación manual) y se le manda un aviso al comprador
+// invitándolo a puntuar al vendedor — el panel de calificación ya le va a
+// aparecer solo la próxima vez que abra ese chat, no hace falta nada extra
+// para habilitarlo.
 
 async function sendSimpleMail(recipientUid: string, subject: string, bodyHtml: string) {
   try {
@@ -175,7 +182,7 @@ async function sendSimpleMail(recipientUid: string, subject: string, bodyHtml: s
   }
 }
 
-async function sendSimplePush(recipientUid: string, title: string, body: string) {
+async function sendSimplePush(recipientUid: string, title: string, body: string, data?: Record<string, unknown>) {
   try {
     const userSnap = await db.doc(`users/${recipientUid}`).get();
     const token = userSnap.data()?.pushToken;
@@ -183,7 +190,7 @@ async function sendSimplePush(recipientUid: string, title: string, body: string)
     await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ to: token, sound: "default", title, body }),
+      body: JSON.stringify({ to: token, sound: "default", title, body, ...(data ? { data } : {}) }),
     });
   } catch (e) {
     console.error("[resolvePendingSaleConfirmations] push error", e);
@@ -207,22 +214,28 @@ export const resolvePendingSaleConfirmations = onSchedule("every 24 hours", asyn
     if (!vehicleId || !sellerId || !buyerId) continue;
 
     try {
-      await saleSnap.ref.update({ confirmedByBuyer: false });
-      await db.doc(`vehicles/${vehicleId}`).update({ status: "available", published: true });
-      const leadId = `${sellerId}_${buyerId}_${vehicleId}`;
-      await db.doc(`leads/${leadId}`).update({
-        status: "negotiation",
-        revertedAt: admin.firestore.FieldValue.serverTimestamp(),
-        revertReason: "timeout",
-      }).catch(() => {});
+      await saleSnap.ref.update({
+        confirmedByBuyer: true,
+        confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+        confirmedAutomatically: true, // distingue de una confirmación real del comprador, por si hace falta más adelante (reportes, confianza)
+      });
+      await db.doc(`vehicles/${vehicleId}`).update({ status: "sold" });
 
       const carModel = `${sale.vehicleSnapshot?.brand ?? ""} ${sale.vehicleSnapshot?.model ?? ""}`.trim() || "el auto";
+      const chatDeepLink = { url: `matchcars://chat/${sellerId}?vehicleId=${vehicleId}` };
       await Promise.all([
-        sendSimpleMail(buyerId, `Se venció el plazo para confirmar ${carModel}`, `No confirmaste la recepción de <strong>${carModel}</strong> a tiempo — si todavía te interesa, escribile de nuevo al vendedor.`),
-        sendSimplePush(buyerId, "Se venció el plazo", `No confirmaste la recepción de ${carModel} a tiempo.`),
-        sendSimpleMail(sellerId, `${carModel} volvió a estar disponible`, `El comprador no confirmó la recepción de <strong>${carModel}</strong> a tiempo — la publicación volvió a estar disponible.`),
-        sendSimplePush(sellerId, "Venta no confirmada", `El comprador no confirmó ${carModel} a tiempo — volvió a estar disponible.`),
+        sendSimpleMail(
+          buyerId,
+          `Confirmamos tu compra de ${carModel}`,
+          `Como no confirmaste la recepción a tiempo, dimos por entregado <strong>${carModel}</strong> — el vendedor ya marcó la entrega. Entrá a la app y contanos cómo te fue calificando al vendedor.`
+        ),
+        sendSimplePush(buyerId, "¡Confirmamos tu compra!", `Calificá al vendedor de ${carModel} en la app.`, chatDeepLink),
+        sendSimpleMail(sellerId, `Se confirmó la entrega de ${carModel}`, `El comprador no respondió a tiempo, así que confirmamos la entrega de <strong>${carModel}</strong> automáticamente — no hizo falta esperar más.`),
+        sendSimplePush(sellerId, "Entrega confirmada", `Se confirmó automáticamente la entrega de ${carModel}.`),
       ]);
+      // onSaleConfirmed (más abajo) se dispara solo con el update de arriba
+      // y crea las tareas de Postventa — mismo camino que una confirmación
+      // manual del comprador.
     } catch (e) {
       console.error("[resolvePendingSaleConfirmations] error processing sale", saleSnap.id, e);
     }
