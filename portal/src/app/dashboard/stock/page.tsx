@@ -427,7 +427,10 @@ export default function StockPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
-      <div className="sticky top-0 z-10 -mx-6 -mt-6 flex flex-col gap-4 border-b border-border bg-background px-6 pb-4 pt-6">
+      <div
+        className="sticky top-0 z-10 -mx-6 -mt-6 flex flex-col gap-4 border-b border-border bg-background px-6 pb-4 pt-6"
+        style={{ willChange: "transform" }}
+      >
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold">Stock</h1>
           <div className="flex items-center gap-2">
