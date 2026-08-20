@@ -125,6 +125,7 @@ export default function OperationDetailPage() {
   const [op, setOp] = useState<SaleOperation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [downloadingRecord, setDownloadingRecord] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -166,6 +167,29 @@ export default function OperationDetailPage() {
 
   const refresh = () => setReloadKey((k) => k + 1);
 
+  // Snapshot con todo el detalle de la operación (forma de pago,
+  // financiación, parte de pago, checklist, entrega) — a diferencia del
+  // boleto/recibo, no queda atado a ningún paso del checklist, se puede
+  // pedir en cualquier momento con los datos que haya hasta ese punto.
+  const downloadRecord = async () => {
+    setDownloadingRecord(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/sale-operations/${id}/document`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tipo: "registro" }),
+      });
+      const data = await parseJsonResponse<{ url: string }>(res);
+      setError(null);
+      window.open(data.url, "_blank");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setDownloadingRecord(false);
+    }
+  };
+
   if (error && !op) return <p className="text-sm text-error">No pudimos abrir esta operación: {error}</p>;
   if (!op) return <p className="text-sm text-muted-foreground">Cargando…</p>;
 
@@ -205,6 +229,14 @@ export default function OperationDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground">{doneCount}/{op.checklist.length} pasos</span>
+          <button
+            onClick={downloadRecord}
+            disabled={downloadingRecord}
+            title="Descargar un PDF con todo el detalle de esta operación"
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold transition hover:border-accent hover:text-accent disabled:opacity-60"
+          >
+            {downloadingRecord ? "Generando…" : "📄 Registro"}
+          </button>
           {op.status === "en_curso" ? (
             <div className="flex gap-2">
               <button

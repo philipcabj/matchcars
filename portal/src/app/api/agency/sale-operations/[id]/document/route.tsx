@@ -1,13 +1,16 @@
 // portal/src/app/api/agency/sale-operations/[id]/document/route.tsx
-// POST -> genera el PDF real (boleto de compraventa o recibo de seña),
-// autocompletado con datos de la agencia/comprador/vehículo, lo sube a
-// Storage y lo adjunta automáticamente al paso correspondiente del
-// checklist (mismo mecanismo que un adjunto subido a mano). .tsx porque
-// arma el documento con JSX de @react-pdf/renderer, no HTML.
+// POST -> genera un PDF real (boleto de compraventa, recibo de seña, o el
+// registro completo de la operación), lo sube a Storage y devuelve la URL.
+// Boleto/recibo además se adjuntan automáticamente al paso correspondiente
+// del checklist (mismo mecanismo que un adjunto subido a mano) — el
+// registro no, porque no pertenece a ningún paso puntual, es un snapshot de
+// toda la operación. .tsx porque arma los documentos con JSX de
+// @react-pdf/renderer, no HTML.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb, adminStorage } from "@/lib/firebase-admin";
+import { OperationRecord, OperationRecordData } from "@/lib/pdf/OperationRecord";
 import { BoletoCompraventa, DocumentData, ReciboDeSena } from "@/lib/pdf/SaleDocuments";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { renderToBuffer } from "@react-pdf/renderer";
@@ -18,6 +21,12 @@ const CHECKLIST_KEY_BY_TIPO: Record<string, string> = {
   boleto_compraventa: "boleto_compraventa",
   recibo_sena: "sena",
 };
+
+function toIso(ts: unknown): string | null {
+  if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
+  if (ts instanceof Date) return ts.toISOString();
+  return null;
+}
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]/document">) => {
   const uid = await requireUid(request);
@@ -34,7 +43,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   const op = opSnap.data()!;
 
   const body = await request.json();
-  const tipo = body.tipo === "recibo_sena" ? "recibo_sena" : "boleto_compraventa";
+  const tipo = body.tipo === "recibo_sena" ? "recibo_sena" : body.tipo === "registro" ? "registro" : "boleto_compraventa";
   const monto = Number(body.monto) || 0;
   const montoCurrency = body.montoCurrency === "USD" ? "USD" : "ARS";
   if (tipo === "recibo_sena" && monto <= 0) {
@@ -47,26 +56,105 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   ]);
   const ownerData = ownerSnap.data() ?? {};
   const vehicle = vehicleSnap?.exists ? vehicleSnap.data()! : null;
+  const agencyName = ownerData.agencyName || ownerData.displayName || ownerData.email || "Agencia";
 
-  const data: DocumentData = {
-    agencyName: ownerData.agencyName || ownerData.displayName || ownerData.email || "Agencia",
-    agencyAddress: ownerData.businessAddress || undefined,
-    buyerLabel: op.buyerLabel || "Comprador",
-    brand: vehicle?.brand ?? op.vehicleSnapshot?.brand ?? "",
-    model: vehicle?.model ?? op.vehicleSnapshot?.model ?? "",
-    version: vehicle?.version ?? "",
-    year: vehicle?.year ?? op.vehicleSnapshot?.year ?? null,
-    licensePlate: vehicle?.licensePlate ?? "",
-    km: vehicle?.km ?? null,
-    price: vehicle?.price ?? 0,
-    currency: vehicle?.currency ?? "ARS",
-    fecha: new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" }),
-    publicationCode: vehicle?.publicationCode ?? null,
-  };
+  let buffer: Buffer;
+  let nombre: string;
 
-  const buffer = await renderToBuffer(
-    tipo === "recibo_sena" ? <ReciboDeSena data={data} monto={monto} montoCurrency={montoCurrency} /> : <BoletoCompraventa data={data} />
-  );
+  if (tipo === "registro") {
+    const [membersSnap, saleSnap] = await Promise.all([
+      adminDb.collection(`agencies/${agencyId}/members`).get(),
+      op.vehicleId ? adminDb.doc(`sales/${op.vehicleId}`).get() : Promise.resolve(null),
+    ]);
+    const nameByUid = new Map<string, string>([[agencyId, agencyName]]);
+    membersSnap.docs.forEach((d) => nameByUid.set(d.id, d.data().name || d.data().email || d.id));
+    const resolveName = (uidVal: string | null | undefined) => (uidVal ? nameByUid.get(uidVal) ?? uidVal : null);
+
+    const sale = saleSnap?.exists ? saleSnap.data()! : null;
+    const parteDePago = op.parteDePago ?? {};
+
+    const data: OperationRecordData = {
+      id,
+      status: op.status ?? "en_curso",
+      createdAt: toIso(op.createdAt),
+      updatedAt: toIso(op.updatedAt),
+      agencyName,
+      assignedToName: resolveName(op.assignedTo),
+      buyerLabel: op.buyerLabel || "Comprador",
+      vehicle: {
+        brand: vehicle?.brand ?? op.vehicleSnapshot?.brand ?? "",
+        model: vehicle?.model ?? op.vehicleSnapshot?.model ?? "",
+        version: vehicle?.version ?? "",
+        year: vehicle?.year ?? op.vehicleSnapshot?.year ?? null,
+        licensePlate: vehicle?.licensePlate ?? "",
+        km: vehicle?.km ?? null,
+        price: vehicle?.price ?? op.vehicleSnapshot?.price ?? 0,
+        currency: vehicle?.currency ?? op.vehicleSnapshot?.currency ?? "ARS",
+        publicationCode: vehicle?.publicationCode ?? null,
+      },
+      metodoPago: op.metodoPago ?? null,
+      metodoPagoConfirmado: !!op.metodoPagoConfirmado,
+      financieraNombre: op.financieraNombre ?? null,
+      financiacion: op.financiacion ?? null,
+      parteDePago: {
+        incluye: !!parteDePago.incluye,
+        marca: parteDePago.marca ?? "",
+        modelo: parteDePago.modelo ?? "",
+        version: parteDePago.version ?? "",
+        anio: parteDePago.anio ?? null,
+        km: parteDePago.km ?? null,
+        estado: parteDePago.estado ?? "",
+        tasacion: parteDePago.tasacion ?? null,
+        precioTomaFinal: parteDePago.precioTomaFinal ?? null,
+        precioTomaConfirmado: !!parteDePago.precioTomaConfirmado,
+        tasadoPorName: resolveName(parteDePago.tasadoPor),
+        agregadoAlStock: !!parteDePago.agregadoAlStock,
+      },
+      checklist: (op.checklist ?? []).map((c: Record<string, unknown>) => ({
+        label: c.label as string,
+        status: c.status as string,
+        responsableName: resolveName(c.responsable as string | null),
+        completedAt: toIso(c.completedAt),
+        adjuntosCount: ((c.adjuntos as unknown[] | undefined) ?? []).length,
+      })),
+      documentosGenerados: ((op.documentosGenerados as { tipo: string; generadoEn: unknown }[] | undefined) ?? [])
+        .filter((d) => d.tipo !== "registro")
+        .map((d) => ({ tipo: d.tipo, generadoEn: toIso(d.generadoEn) })),
+      entrega: op.buyerId
+        ? {
+            vehicleStatus: vehicle?.status ?? null,
+            buyerId: op.buyerId,
+            confirmedByBuyer: sale?.confirmedByBuyer ?? null,
+            confirmedAt: toIso(sale?.confirmedAt),
+            confirmedAutomatically: !!sale?.confirmedAutomatically,
+          }
+        : null,
+      generadoEn: new Date().toISOString(),
+    };
+
+    buffer = await renderToBuffer(<OperationRecord data={data} />);
+    nombre = `Registro de operación — ${data.vehicle.brand} ${data.vehicle.model}.pdf`;
+  } else {
+    const data: DocumentData = {
+      agencyName,
+      agencyAddress: ownerData.businessAddress || undefined,
+      buyerLabel: op.buyerLabel || "Comprador",
+      brand: vehicle?.brand ?? op.vehicleSnapshot?.brand ?? "",
+      model: vehicle?.model ?? op.vehicleSnapshot?.model ?? "",
+      version: vehicle?.version ?? "",
+      year: vehicle?.year ?? op.vehicleSnapshot?.year ?? null,
+      licensePlate: vehicle?.licensePlate ?? "",
+      km: vehicle?.km ?? null,
+      price: vehicle?.price ?? 0,
+      currency: vehicle?.currency ?? "ARS",
+      fecha: new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" }),
+      publicationCode: vehicle?.publicationCode ?? null,
+    };
+    buffer = await renderToBuffer(
+      tipo === "recibo_sena" ? <ReciboDeSena data={data} monto={monto} montoCurrency={montoCurrency} /> : <BoletoCompraventa data={data} />
+    );
+    nombre = tipo === "recibo_sena" ? `Recibo de seña (${montoCurrency} ${monto.toLocaleString("es-AR")}).pdf` : "Boleto de compraventa.pdf";
+  }
 
   const filename = `${tipo}_${Date.now()}.pdf`;
   const filePath = `uploads/${agencyId}/operations/${id}/${filename}`;
@@ -75,17 +163,16 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
     metadata: { contentType: "application/pdf", metadata: { firebaseStorageDownloadTokens: token } },
   });
   const url = `https://firebasestorage.googleapis.com/v0/b/${adminStorage.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`;
-  const nombre = tipo === "recibo_sena" ? `Recibo de seña (${montoCurrency} ${monto.toLocaleString("es-AR")}).pdf` : "Boleto de compraventa.pdf";
 
   const checklistKey = CHECKLIST_KEY_BY_TIPO[tipo];
   const checklist = [...(op.checklist ?? [])];
-  const idx = checklist.findIndex((c: { key: string }) => c.key === checklistKey);
+  const idx = checklistKey ? checklist.findIndex((c: { key: string }) => c.key === checklistKey) : -1;
   if (idx !== -1) {
     checklist[idx] = { ...checklist[idx], adjuntos: [...(checklist[idx].adjuntos ?? []), { url, nombre, subidoEn: new Date() }] };
   }
 
   await opRef.update({
-    checklist,
+    ...(idx !== -1 ? { checklist } : {}),
     documentosGenerados: FieldValue.arrayUnion({ tipo, url, generadoEn: new Date() }),
     updatedAt: FieldValue.serverTimestamp(),
   });
