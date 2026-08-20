@@ -76,12 +76,19 @@ export interface VehicleListItem {
   currency?: string;
   km?: number;
   status?: string;
+  // Si el auto ya pasó moderación (status:"available"), published distingue
+  // "visible en el marketplace" de "pausado por la agencia" — antes no había
+  // forma de pausar sin eliminar, así que este campo no se usaba en Stock.
+  published?: boolean;
   coverImage?: string;
   createdAt?: string | null;
   publicationCode?: number | null;
   // margin es null si nunca se cargó el costo de compra — no se muestra
   // "$0 de margen", se oculta el dato (ver CostsCard/Módulo C).
   margin?: number | null;
+  // Costo de adquisición (Módulo C) — null si nunca se cargó, para el
+  // dashboard de inventario a costo (se degrada mostrando solo lo que hay).
+  purchasePrice?: number | null;
 }
 
 // Superset de VehicleFormValues (mismos campos, mismo shape string-based que

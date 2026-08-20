@@ -35,10 +35,12 @@ export const GET = withApiErrors(async (request) => {
         currency: data.currency ?? null,
         km: data.km ?? null,
         status: data.status ?? "available",
+        published: data.published === true,
         coverImage: data.images?.cover ?? data.coverImage ?? null,
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
         publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
         margin,
+        purchasePrice: typeof data.purchasePrice === "number" ? data.purchasePrice : null,
       };
     })
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));

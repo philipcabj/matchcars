@@ -4,12 +4,35 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
-import { STATUS_LABELS, VehicleListItem } from "@/lib/vehicle";
+import { STATUS_BAR_COLOR, STATUS_LABELS, VehicleListItem } from "@/lib/vehicle";
 import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
 
 type StatusFilter = "all" | "available" | "pending_review" | "reserved" | "a_preparar" | "sold" | "rejected" | "deleted";
-type SortOption = "recent" | "price_desc" | "price_asc" | "name";
+type SortOption = "recent" | "price_desc" | "price_asc" | "name" | "aging";
+type AgingFilter = "all" | "green" | "yellow" | "red";
+
+// Semáforo de antigüedad en stock — mismos cortes en toda la pantalla (fila
+// y filtro), pedidos explícitamente: verde <30 días, amarillo 30-60, rojo >60.
+function agingBucket(days: number | null): AgingFilter {
+  if (days === null) return "all";
+  if (days > 60) return "red";
+  if (days >= 30) return "yellow";
+  return "green";
+}
+
+const AGING_DOT_COLOR: Record<Exclude<AgingFilter, "all">, string> = {
+  green: "bg-success",
+  yellow: "bg-amber-500",
+  red: "bg-error",
+};
+
+const AGING_LABEL: Record<AgingFilter, string> = {
+  all: "Cualquier antigüedad",
+  green: "Menos de 30 días",
+  yellow: "Entre 30 y 60 días",
+  red: "Más de 60 días",
+};
 
 const FILTER_DEFS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "Todos" },
@@ -51,10 +74,10 @@ function daysInStock(iso: string | null | undefined): number | null {
   return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function sumByCurrency(vehicles: VehicleListItem[], field: "price" | "margin"): { ars: number; usd: number } {
+function sumByCurrency(vehicles: VehicleListItem[], field: "price" | "margin" | "purchasePrice"): { ars: number; usd: number } {
   return vehicles.reduce(
     (acc, v) => {
-      const value = field === "price" ? v.price : v.margin;
+      const value = field === "price" ? v.price : field === "margin" ? v.margin : v.purchasePrice;
       if (typeof value !== "number") return acc;
       if (v.currency === "USD") acc.usd += value;
       else acc.ars += value;
@@ -146,6 +169,7 @@ export default function StockPage() {
   const [vehicles, setVehicles] = useState<VehicleListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [agingFilter, setAgingFilter] = useState<AgingFilter>("all");
   const [sort, setSort] = useState<SortOption>("recent");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -166,7 +190,12 @@ export default function StockPage() {
 
   const filtered = useMemo(() => {
     if (!vehicles) return [];
-    const list = vehicles.filter((v) => matchesFilter(v.status ?? "available", statusFilter) && matchesSearch(v, search));
+    const list = vehicles.filter(
+      (v) =>
+        matchesFilter(v.status ?? "available", statusFilter) &&
+        matchesSearch(v, search) &&
+        (agingFilter === "all" || agingBucket(daysInStock(v.createdAt)) === agingFilter)
+    );
     const sorted = [...list];
     switch (sort) {
       case "price_desc":
@@ -178,17 +207,43 @@ export default function StockPage() {
       case "name":
         sorted.sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`));
         break;
+      case "aging":
+        sorted.sort((a, b) => (daysInStock(b.createdAt) ?? -1) - (daysInStock(a.createdAt) ?? -1));
+        break;
       default:
         sorted.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
     }
     return sorted;
-  }, [vehicles, statusFilter, sort, search]);
+  }, [vehicles, statusFilter, agingFilter, sort, search]);
 
   const countFor = (filter: StatusFilter) => (vehicles ? vehicles.filter((v) => matchesFilter(v.status ?? "available", filter)).length : 0);
 
+  // Distribución por estado (para el dashboard) — a diferencia de countFor
+  // (que agrupa "rejected"/"rejected_limit"/"blocked" en un solo filtro),
+  // acá se muestra cada status real tal cual está en el dato, para no
+  // esconder la diferencia entre un rechazo de moderación y un bloqueo.
+  const byStatus = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const v of vehicles ?? []) {
+      const status = v.status ?? "available";
+      counts.set(status, (counts.get(status) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  }, [vehicles]);
+
   const inventory = useMemo(() => {
     const active = (vehicles ?? []).filter((v) => ACTIVE_STATUSES.includes(v.status ?? "available"));
-    return { count: active.length, value: sumByCurrency(active, "price"), invested: sumByCurrency(active, "margin") };
+    const withCost = active.filter((v) => typeof v.purchasePrice === "number");
+    const agingDays = active.map((v) => daysInStock(v.createdAt)).filter((d): d is number => d !== null);
+    const avgAging = agingDays.length > 0 ? Math.round(agingDays.reduce((a, b) => a + b, 0) / agingDays.length) : null;
+    return {
+      count: active.length,
+      value: sumByCurrency(active, "price"),
+      invested: sumByCurrency(active, "margin"),
+      cost: sumByCurrency(withCost, "purchasePrice"),
+      costCoverage: { withCost: withCost.length, total: active.length },
+      avgAging,
+    };
   }, [vehicles]);
 
   const toggleSelect = (id: string) => {
@@ -265,35 +320,93 @@ export default function StockPage() {
                   </button>
                 ))}
               </div>
-              <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortOption)}
-                className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
-              >
-                <option value="recent">Más reciente</option>
-                <option value="price_desc">Precio: mayor a menor</option>
-                <option value="price_asc">Precio: menor a mayor</option>
-                <option value="name">Marca / modelo (A-Z)</option>
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={agingFilter}
+                  onChange={(e) => setAgingFilter(e.target.value as AgingFilter)}
+                  className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                  title="Filtrar por antigüedad"
+                >
+                  {(Object.keys(AGING_LABEL) as AgingFilter[]).map((k) => (
+                    <option key={k} value={k}>
+                      {AGING_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value as SortOption)}
+                  className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                >
+                  <option value="recent">Más reciente</option>
+                  <option value="aging">Más antiguo primero</option>
+                  <option value="price_desc">Precio: mayor a menor</option>
+                  <option value="price_asc">Precio: menor a mayor</option>
+                  <option value="name">Marca / modelo (A-Z)</option>
+                </select>
+              </div>
             </div>
           </>
         )}
       </div>
 
       {inventory.count > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-border bg-card p-3">
-            <p className="text-xs text-muted-foreground">Autos activos</p>
-            <p className="text-base font-bold">{inventory.count}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3">
-            <p className="text-xs text-muted-foreground">Valor de venta del stock</p>
-            <p className="text-base font-bold">{fmtMoney(inventory.value.ars, inventory.value.usd)}</p>
-          </div>
-          {(inventory.invested.ars !== 0 || inventory.invested.usd !== 0) && (
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-border bg-card p-3">
-              <p className="text-xs text-muted-foreground">Margen estimado del stock</p>
-              <p className="text-base font-bold">{fmtMoney(inventory.invested.ars, inventory.invested.usd)}</p>
+              <p className="text-xs text-muted-foreground">Autos activos</p>
+              <p className="text-base font-bold">{inventory.count}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-3">
+              <p className="text-xs text-muted-foreground">Antigüedad promedio</p>
+              <p className="text-base font-bold">{inventory.avgAging !== null ? `${inventory.avgAging} días` : "—"}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-3">
+              <p className="text-xs text-muted-foreground">Valor de venta del stock</p>
+              <p className="text-base font-bold">{fmtMoney(inventory.value.ars, inventory.value.usd)}</p>
+            </div>
+            {(inventory.cost.ars !== 0 || inventory.cost.usd !== 0) && (
+              <div className="rounded-xl border border-border bg-card p-3">
+                <p className="text-xs text-muted-foreground">
+                  Valor a costo
+                  {inventory.costCoverage.withCost < inventory.costCoverage.total && (
+                    <span className="ml-1 text-muted-foreground/70">
+                      ({inventory.costCoverage.withCost}/{inventory.costCoverage.total})
+                    </span>
+                  )}
+                </p>
+                <p className="text-base font-bold">{fmtMoney(inventory.cost.ars, inventory.cost.usd)}</p>
+              </div>
+            )}
+            {(inventory.invested.ars !== 0 || inventory.invested.usd !== 0) && (
+              <div className="rounded-xl border border-border bg-card p-3">
+                <p className="text-xs text-muted-foreground">Margen estimado del stock</p>
+                <p className="text-base font-bold">{fmtMoney(inventory.invested.ars, inventory.invested.usd)}</p>
+              </div>
+            )}
+          </div>
+
+          {byStatus.length > 1 && (
+            <div className="rounded-xl border border-border bg-card p-3">
+              <p className="mb-2 text-xs text-muted-foreground">Distribución por estado</p>
+              <div className="flex h-2 w-full overflow-hidden rounded-full bg-background">
+                {byStatus.map(([status, count]) => (
+                  <div
+                    key={status}
+                    title={`${STATUS_LABELS[status]?.label ?? status}: ${count}`}
+                    className={STATUS_BAR_COLOR[status] ?? "bg-muted-foreground"}
+                    style={{ width: `${(count / (vehicles?.length || 1)) * 100}%` }}
+                  />
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                {byStatus.map(([status, count]) => (
+                  <span key={status} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className={`h-2 w-2 rounded-full ${STATUS_BAR_COLOR[status] ?? "bg-muted-foreground"}`} />
+                    {STATUS_LABELS[status]?.label ?? status} ({count})
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -363,7 +476,15 @@ export default function StockPage() {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     {v.km != null && <span>{v.km.toLocaleString("es-AR")} km</span>}
                     {v.licensePlate && <span className="font-mono">{v.licensePlate}</span>}
-                    {days !== null && ACTIVE_STATUSES.includes(v.status ?? "available") && <span>{fmtDate(v.createdAt)}</span>}
+                    {days !== null && ACTIVE_STATUSES.includes(v.status ?? "available") && (
+                      <span className="flex items-center gap-1">
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${AGING_DOT_COLOR[agingBucket(days) as Exclude<AgingFilter, "all">]}`}
+                          title={`${days} días en stock`}
+                        />
+                        {fmtDate(v.createdAt)}
+                      </span>
+                    )}
                   </div>
                   {typeof v.margin === "number" && (
                     <p className={`text-xs font-semibold ${v.margin >= 0 ? "text-success" : "text-error"}`}>
