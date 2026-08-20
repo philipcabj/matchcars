@@ -8,7 +8,7 @@ import { STATUS_BAR_COLOR, STATUS_LABELS, VehicleListItem } from "@/lib/vehicle"
 import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
 
-type StatusFilter = "all" | "available" | "pending_review" | "reserved" | "a_preparar" | "sold" | "rejected" | "deleted";
+type StatusFilter = "all" | "available" | "paused" | "pending_review" | "reserved" | "a_preparar" | "sold" | "rejected" | "deleted";
 type SortOption = "recent" | "price_desc" | "price_asc" | "name" | "aging";
 type AgingFilter = "all" | "green" | "yellow" | "red";
 
@@ -37,6 +37,7 @@ const AGING_LABEL: Record<AgingFilter, string> = {
 const FILTER_DEFS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "Todos" },
   { key: "available", label: "Publicados" },
+  { key: "paused", label: "Pausados" },
   { key: "pending_review", label: "En revisión" },
   { key: "reserved", label: "Reservados" },
   { key: "a_preparar", label: "A preparar" },
@@ -48,9 +49,15 @@ const FILTER_DEFS: { key: StatusFilter; label: string }[] = [
 const REJECTED_STATUSES = ["rejected", "rejected_limit", "blocked"];
 const ACTIVE_STATUSES = ["available", "pending_review", "reserved"]; // cuentan para "valor de inventario"
 
-function matchesFilter(status: string, filter: StatusFilter) {
+// "Pausado" no es un status propio hoy — es available + published:false. Se
+// distingue de "available" (publicado de verdad) solo para filtrar/contar,
+// nunca se escribe un status distinto para esto (ver PATCH .../visibility).
+function matchesFilter(v: VehicleListItem, filter: StatusFilter) {
+  const status = v.status ?? "available";
   if (filter === "all") return true;
   if (filter === "rejected") return REJECTED_STATUSES.includes(status);
+  if (filter === "available") return status === "available" && v.published !== false;
+  if (filter === "paused") return status === "available" && v.published === false;
   return status === filter;
 }
 
@@ -192,7 +199,7 @@ export default function StockPage() {
     if (!vehicles) return [];
     const list = vehicles.filter(
       (v) =>
-        matchesFilter(v.status ?? "available", statusFilter) &&
+        matchesFilter(v, statusFilter) &&
         matchesSearch(v, search) &&
         (agingFilter === "all" || agingBucket(daysInStock(v.createdAt)) === agingFilter)
     );
@@ -216,7 +223,7 @@ export default function StockPage() {
     return sorted;
   }, [vehicles, statusFilter, agingFilter, sort, search]);
 
-  const countFor = (filter: StatusFilter) => (vehicles ? vehicles.filter((v) => matchesFilter(v.status ?? "available", filter)).length : 0);
+  const countFor = (filter: StatusFilter) => (vehicles ? vehicles.filter((v) => matchesFilter(v, filter)).length : 0);
 
   // Distribución por estado (para el dashboard) — a diferencia de countFor
   // (que agrupa "rejected"/"rejected_limit"/"blocked" en un solo filtro),
@@ -266,6 +273,72 @@ export default function StockPage() {
         ids.map((id) => fetch(`/api/agency/vehicles/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }))
       );
       setVehicles((prev) => (prev ?? []).map((v) => (ids.includes(v.id) ? { ...v, status: "deleted" } : v)));
+      setSelected(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  // Pausar/republicar — individual y en lote. Solo afecta autos ya
+  // aprobados (status:"available"); el endpoint devuelve 400 para el resto,
+  // así que se filtran acá antes de mandar el pedido.
+  const setVisibility = async (ids: string[], published: boolean) => {
+    const token = await getIdToken();
+    const eligible = ids.filter((id) => vehicles?.find((v) => v.id === id)?.status === "available");
+    if (eligible.length === 0) return;
+    await Promise.all(
+      eligible.map((id) =>
+        fetch(`/api/agency/vehicles/${id}/visibility`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ published }),
+        })
+      )
+    );
+    setVehicles((prev) => (prev ?? []).map((v) => (eligible.includes(v.id) ? { ...v, published } : v)));
+  };
+
+  const bulkSetVisibility = async (published: boolean) => {
+    if (selected.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      await setVisibility(Array.from(selected), published);
+      setSelected(new Set());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const bulkChangePrice = async () => {
+    if (selected.size === 0) return;
+    const rawCurrency = prompt(`Moneda para ${selected.size} auto${selected.size === 1 ? "" : "s"} seleccionado${selected.size === 1 ? "" : "s"} — escribí ARS o USD:`, "ARS");
+    if (rawCurrency === null) return;
+    const currency = rawCurrency.trim().toUpperCase() === "USD" ? "USD" : "ARS";
+    const raw = prompt(`Nuevo precio en ${currency} para los ${selected.size} seleccionados (mismo precio para todos):`);
+    if (raw === null) return;
+    const price = Number(raw);
+    if (!price || price <= 0) {
+      setError("Ingresá un precio válido.");
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const token = await getIdToken();
+      const ids = Array.from(selected);
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/agency/vehicles/${id}/price`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ price, currency }),
+          })
+        )
+      );
+      setVehicles((prev) => (prev ?? []).map((v) => (ids.includes(v.id) ? { ...v, price, currency } : v)));
       setSelected(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error desconocido");
@@ -427,14 +500,37 @@ export default function StockPage() {
       )}
 
       {selected.size > 0 && (
-        <div className="sticky top-[7.5rem] z-10 flex items-center justify-between rounded-xl border border-error/40 bg-error/5 px-4 py-2.5">
+        <div className="sticky top-[7.5rem] z-10 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-accent/5 px-4 py-2.5">
           <p className="text-sm font-semibold">{selected.size} seleccionado{selected.size === 1 ? "" : "s"}</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => setSelected(new Set())} className="text-xs font-semibold text-muted-foreground">
               Cancelar
             </button>
+            <button
+              onClick={() => bulkSetVisibility(true)}
+              disabled={bulkDeleting}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+              title="Solo afecta a los ya aprobados de la selección"
+            >
+              Republicar
+            </button>
+            <button
+              onClick={() => bulkSetVisibility(false)}
+              disabled={bulkDeleting}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+              title="Solo afecta a los ya aprobados de la selección"
+            >
+              Pausar
+            </button>
+            <button
+              onClick={bulkChangePrice}
+              disabled={bulkDeleting}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+            >
+              Cambiar precio
+            </button>
             <button onClick={bulkDelete} disabled={bulkDeleting} className="rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
-              {bulkDeleting ? "Eliminando…" : "Eliminar seleccionados"}
+              {bulkDeleting ? "Aplicando…" : "Eliminar"}
             </button>
           </div>
         </div>
@@ -442,7 +538,10 @@ export default function StockPage() {
 
       <div className="relative z-0 flex flex-col gap-2">
         {filtered.map((v) => {
-          const statusInfo = STATUS_LABELS[v.status ?? "available"] ?? { label: v.status, className: "bg-muted/20 text-muted-foreground" };
+          const isPaused = v.status === "available" && v.published === false;
+          const statusInfo = isPaused
+            ? { label: "Pausado", className: "bg-amber-500/15 text-amber-600" }
+            : STATUS_LABELS[v.status ?? "available"] ?? { label: v.status, className: "bg-muted/20 text-muted-foreground" };
           const days = daysInStock(v.createdAt);
           const canDelete = v.status !== "deleted";
           return (
@@ -501,6 +600,19 @@ export default function StockPage() {
               >
                 📄
               </Link>
+              {v.status === "available" && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setVisibility([v.id], isPaused);
+                  }}
+                  title={isPaused ? "Republicar" : "Pausar sin eliminar"}
+                  className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground transition hover:border-accent"
+                >
+                  {isPaused ? "▶" : "⏸"}
+                </button>
+              )}
               <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${statusInfo.className}`}>{statusInfo.label}</span>
             </div>
           );
