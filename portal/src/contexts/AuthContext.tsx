@@ -8,6 +8,7 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
@@ -29,6 +30,8 @@ interface AuthContextValue {
   user: User | null;
   initializing: boolean;
   loginWithEmail: (email: string, password: string) => Promise<void>;
+  /** Mismo mecanismo que ya usa la app (contexts/AuthContext.tsx raíz) — Firebase manda el mail con su plantilla/link por defecto. */
+  resetPassword: (email: string) => Promise<void>;
   /**
    * Solo se usa desde /invite/[id] (aceptar una invitación de equipo) — no
    * hay un registro público general en el portal todavía. Mismo shape de
@@ -68,6 +71,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
+  };
+
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email.trim().toLowerCase());
   };
 
   const registerWithEmail = async ({ firstName, lastName, email, password, acceptedTerms }: RegisterParams) => {
@@ -155,7 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, initializing, loginWithEmail, loginWithGoogle, loginWithApple, registerWithEmail, logout, getIdToken }}
+      value={{ user, initializing, loginWithEmail, resetPassword, loginWithGoogle, loginWithApple, registerWithEmail, logout, getIdToken }}
     >
       {children}
     </AuthContext.Provider>

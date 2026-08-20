@@ -7,15 +7,17 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 export default function LoginPage() {
-  const { loginWithEmail, loginWithGoogle, loginWithApple } = useAuth();
+  const { loginWithEmail, resetPassword, loginWithGoogle, loginWithApple } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -43,6 +45,30 @@ export default function LoginPage() {
       setError(`No pudimos iniciar sesión con Google. Probá de nuevo.${code}`);
     } finally {
       setGoogleLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setError(null);
+    setMessage(null);
+    if (!email.trim()) {
+      setError("Ingresá tu email para poder enviarte el link de recuperación.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      await resetPassword(email);
+      setMessage("Te enviamos un email con un link para restablecer tu contraseña.");
+    } catch (e) {
+      console.error("[resetPassword]", e);
+      const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : "";
+      setError(
+        code === "auth/user-not-found"
+          ? "No encontramos una cuenta con ese email."
+          : "No pudimos enviar el link de recuperación. Probá de nuevo."
+      );
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -124,7 +150,17 @@ export default function LoginPage() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={resetLoading}
+            className="self-end text-xs font-semibold text-accent hover:underline disabled:opacity-60"
+          >
+            {resetLoading ? "Enviando…" : "¿Olvidaste tu contraseña?"}
+          </button>
+
           {error && <p className="text-sm text-error">{error}</p>}
+          {message && <p className="text-sm text-success">{message}</p>}
 
           <button
             type="submit"
