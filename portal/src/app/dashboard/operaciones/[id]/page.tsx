@@ -209,6 +209,19 @@ export default function OperationDetailPage() {
             <div className="flex gap-2">
               <button
                 onClick={async () => {
+                  // El checklist en 7/7 marca los trámites hechos, pero no
+                  // que el comprador ya confirmó la entrega por la app (ver
+                  // paso "Comprador confirma" en SaleJourney) — sin este aviso
+                  // se podía marcar "Completada" en verde mientras esa
+                  // confirmación seguía pendiente, algo que se veía
+                  // inconsistente en pantalla.
+                  const pendingBuyerConfirm = !!op.buyerId && op.vehicleStatus === "reserved";
+                  if (
+                    pendingBuyerConfirm &&
+                    !confirm("El comprador todavía no confirmó la entrega desde la app. ¿Marcar la operación como completada igual?")
+                  ) {
+                    return;
+                  }
                   await patch({ action: "set_status", status: "completada" });
                   refresh();
                 }}
