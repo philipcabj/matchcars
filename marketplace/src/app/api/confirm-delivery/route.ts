@@ -13,9 +13,23 @@
 // Postventa — es un trigger de Firestore, no depende de qué SDK/app hizo
 // el write.
 import { adminDb } from "@/lib/firebase-admin";
+import { loadDeliveryConfirmation } from "@/lib/delivery-confirmation";
 import { submitSellerRatingServer } from "@/lib/ratings-server";
 import { FieldValue } from "firebase-admin/firestore";
 import { NextRequest } from "next/server";
+
+// GET -> mismos datos que consume la página web (SSR), pero como JSON — lo
+// usa la pantalla nativa de la app (app/(screens)/confirmar-entrega/[vehicleId].tsx)
+// al abrir el mismo link vía universal link/App Link, ya que ese lado no
+// puede leer Firestore directo sin auth (el token del link es la única
+// autorización, no una sesión propia).
+export async function GET(request: NextRequest) {
+  const vehicleId = request.nextUrl.searchParams.get("vehicleId") || "";
+  const token = request.nextUrl.searchParams.get("token") || "";
+  if (!vehicleId) return Response.json({ error: "Falta el auto." }, { status: 400 });
+  const result = await loadDeliveryConfirmation(vehicleId, token);
+  return Response.json(result);
+}
 
 export async function POST(request: NextRequest) {
   let body: { vehicleId?: string; token?: string; score?: number; comment?: string };

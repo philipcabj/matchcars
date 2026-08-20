@@ -5,30 +5,11 @@
 // — la autorización es el token del link, no una sesión. El comprador
 // confirma que recibió el auto y puntúa al vendedor (obligatorio) desde
 // acá; el POST real vive en /api/confirm-delivery.
-import { adminDb } from "@/lib/firebase-admin";
+import { loadDeliveryConfirmation } from "@/lib/delivery-confirmation";
 import type { Metadata } from "next";
 import { ConfirmDeliveryForm } from "./ConfirmDeliveryForm";
 
 export const metadata: Metadata = { title: "Confirmar entrega" };
-
-async function loadSale(vehicleId: string, token: string) {
-  const saleSnap = await adminDb.doc(`sales/${vehicleId}`).get();
-  if (!saleSnap.exists) return { state: "not_found" as const };
-  const sale = saleSnap.data()!;
-
-  if (sale.confirmedByBuyer === true) return { state: "already_confirmed" as const, sale };
-  if (!sale.deliveryConfirmToken || sale.deliveryConfirmToken !== token) return { state: "invalid_token" as const };
-
-  const [vehicleSnap, sellerSnap] = await Promise.all([
-    adminDb.doc(`vehicles/${vehicleId}`).get(),
-    sale.sellerId ? adminDb.doc(`users/${sale.sellerId}`).get() : Promise.resolve(null),
-  ]);
-  const vehicle = vehicleSnap.exists ? vehicleSnap.data()! : sale.vehicleSnapshot ?? {};
-  const sellerData = sellerSnap?.exists ? sellerSnap.data()! : {};
-  const sellerName = sellerData.agencyName || sellerData.displayName || `${sellerData.firstName ?? ""} ${sellerData.lastName ?? ""}`.trim() || "el vendedor";
-
-  return { state: "ready" as const, vehicle, sellerName };
-}
 
 export default async function ConfirmarEntregaPage({
   params,
@@ -39,7 +20,7 @@ export default async function ConfirmarEntregaPage({
 }) {
   const { vehicleId } = await params;
   const { token } = await searchParams;
-  const result = await loadSale(vehicleId, token ?? "");
+  const result = await loadDeliveryConfirmation(vehicleId, token ?? "");
 
   return (
     <main className="mx-auto flex max-w-md flex-col gap-4 px-4 py-10">
@@ -69,7 +50,7 @@ export default async function ConfirmarEntregaPage({
           <div className="rounded-2xl border border-border bg-card p-5 text-center">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Confirmar entrega</p>
             <h1 className="mt-1 text-lg font-bold">
-              {result.vehicle.brand} {result.vehicle.model} {result.vehicle.year ?? ""}
+              {String(result.vehicle.brand ?? "")} {String(result.vehicle.model ?? "")} {String(result.vehicle.year ?? "")}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               ¿Confirmás que recibiste este auto de {result.sellerName}?

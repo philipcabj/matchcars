@@ -4,7 +4,7 @@
         "details": [
             {
                 "appID": "LTYH3X96Z6.com.matchcars.app",
-                "paths": [ "/car/*", "/user-profile/*", "/match/*" ]
+                "paths": [ "/car/*", "/user-profile/*", "/match/*", "/confirmar-entrega/*" ]
             }
         ]
     }
