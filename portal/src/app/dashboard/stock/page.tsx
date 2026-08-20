@@ -471,7 +471,7 @@ export default function StockPage() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={agingFilter}
                   onChange={(e) => setAgingFilter(e.target.value as AgingFilter)}
@@ -504,57 +504,94 @@ export default function StockPage() {
                 >
                   Rango de precio
                 </button>
+                {showPriceRange && (
+                  <>
+                    <input
+                      type="number"
+                      value={priceMin}
+                      onChange={(e) => setPriceMin(e.target.value)}
+                      placeholder="Mín."
+                      className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                    />
+                    <span className="text-xs text-muted-foreground">a</span>
+                    <input
+                      type="number"
+                      value={priceMax}
+                      onChange={(e) => setPriceMax(e.target.value)}
+                      placeholder="Máx."
+                      className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                    />
+                    {(priceMin || priceMax) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPriceMin("");
+                          setPriceMax("");
+                        }}
+                        className="text-xs text-muted-foreground hover:underline"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
 
-            {showPriceRange && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={priceMin}
-                  onChange={(e) => setPriceMin(e.target.value)}
-                  placeholder="Precio mín."
-                  className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
-                />
-                <span className="text-xs text-muted-foreground">a</span>
-                <input
-                  type="number"
-                  value={priceMax}
-                  onChange={(e) => setPriceMax(e.target.value)}
-                  placeholder="Precio máx."
-                  className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
-                />
-                {(priceMin || priceMax) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPriceMin("");
-                      setPriceMax("");
-                    }}
-                    className="text-xs text-muted-foreground hover:underline"
-                  >
-                    Limpiar
-                  </button>
-                )}
+            {(views.length > 0 || search || statusFilter !== "all" || agingFilter !== "all" || priceMin || priceMax) && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {views.map((v) => (
+                  <span key={v.id} className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1">
+                    <button type="button" onClick={() => applyView(v)} className="font-semibold hover:text-accent">
+                      {v.name}
+                    </button>
+                    <button type="button" onClick={() => deleteView(v.id)} title="Borrar vista" className="text-muted-foreground hover:text-error">
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button type="button" onClick={saveCurrentView} className="font-semibold text-accent hover:underline">
+                  + Guardar vista actual
+                </button>
               </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-semibold text-muted-foreground">Vistas guardadas:</span>
-              {views.map((v) => (
-                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1">
-                  <button type="button" onClick={() => applyView(v)} className="font-semibold hover:text-accent">
-                    {v.name}
+            {selected.size > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-accent/5 px-3 py-2">
+                <p className="text-sm font-semibold">{selected.size} seleccionado{selected.size === 1 ? "" : "s"}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => setSelected(new Set())} className="text-xs font-semibold text-muted-foreground">
+                    Cancelar
                   </button>
-                  <button type="button" onClick={() => deleteView(v.id)} title="Borrar vista" className="text-muted-foreground hover:text-error">
-                    ×
+                  <button
+                    onClick={() => bulkSetVisibility(true)}
+                    disabled={bulkDeleting}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                    title="Solo afecta a los ya aprobados de la selección"
+                  >
+                    Republicar
                   </button>
-                </span>
-              ))}
-              <button type="button" onClick={saveCurrentView} className="font-semibold text-accent hover:underline">
-                + Guardar vista actual
-              </button>
-            </div>
+                  <button
+                    onClick={() => bulkSetVisibility(false)}
+                    disabled={bulkDeleting}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                    title="Solo afecta a los ya aprobados de la selección"
+                  >
+                    Pausar
+                  </button>
+                  <button
+                    onClick={bulkChangePrice}
+                    disabled={bulkDeleting}
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                  >
+                    Cambiar precio
+                  </button>
+                  <button onClick={bulkDelete} disabled={bulkDeleting} className="rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                    {bulkDeleting ? "Aplicando…" : "Eliminar"}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -633,43 +670,6 @@ export default function StockPage() {
         <p className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
           Sin autos para este filtro o búsqueda.
         </p>
-      )}
-
-      {selected.size > 0 && (
-        <div className="sticky top-[7.5rem] z-10 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-accent/40 bg-accent/5 px-4 py-2.5">
-          <p className="text-sm font-semibold">{selected.size} seleccionado{selected.size === 1 ? "" : "s"}</p>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setSelected(new Set())} className="text-xs font-semibold text-muted-foreground">
-              Cancelar
-            </button>
-            <button
-              onClick={() => bulkSetVisibility(true)}
-              disabled={bulkDeleting}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-              title="Solo afecta a los ya aprobados de la selección"
-            >
-              Republicar
-            </button>
-            <button
-              onClick={() => bulkSetVisibility(false)}
-              disabled={bulkDeleting}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-              title="Solo afecta a los ya aprobados de la selección"
-            >
-              Pausar
-            </button>
-            <button
-              onClick={bulkChangePrice}
-              disabled={bulkDeleting}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
-            >
-              Cambiar precio
-            </button>
-            <button onClick={bulkDelete} disabled={bulkDeleting} className="rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
-              {bulkDeleting ? "Aplicando…" : "Eliminar"}
-            </button>
-          </div>
-        </div>
       )}
 
       <div className="relative z-0 flex flex-col gap-2">
