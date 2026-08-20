@@ -91,6 +91,7 @@ export default function EditVehiclePage() {
       <VehicleForm
         plan={agency.plan}
         userId={user.uid}
+        excludeId={id}
         initialValues={initialValues}
         submitLabel={isPreparing ? "Guardar y enviar a revisión" : "Guardar cambios"}
         submitting={submitting}

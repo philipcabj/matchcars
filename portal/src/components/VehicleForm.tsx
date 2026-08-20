@@ -6,6 +6,8 @@
 "use client";
 
 import { ThousandsInput } from "@/components/ThousandsInput";
+import { useAuth } from "@/contexts/AuthContext";
+import { parseJsonResponse } from "@/lib/api-client";
 import { CAR_MODELS_AR } from "@/lib/carModelsAr";
 import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
 import { CITY_OPTIONS_BY_PROVINCE, PROVINCES } from "@/lib/locations";
@@ -109,6 +111,7 @@ export function VehicleForm({
   initialValues = EMPTY_VEHICLE_FORM,
   plan,
   userId,
+  excludeId,
   submitLabel,
   submitting,
   onSubmit,
@@ -116,11 +119,16 @@ export function VehicleForm({
   initialValues?: VehicleFormValues;
   plan: string;
   userId: string;
+  // Id del propio auto cuando se está editando — evita que el chequeo de
+  // patente duplicada se dispare contra sí mismo. undefined en alta nueva.
+  excludeId?: string;
   submitLabel: string;
   submitting: boolean;
   onSubmit: (values: VehicleFormValues) => void | Promise<void>;
 }) {
+  const { getIdToken } = useAuth();
   const [values, setValues] = useState<VehicleFormValues>(initialValues);
+  const [duplicateMatches, setDuplicateMatches] = useState<{ id: string; brand: string; model: string; status: string }[]>([]);
   const [coverUploading, setCoverUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [videoUploading, setVideoUploading] = useState(false);
@@ -177,6 +185,34 @@ export function VehicleForm({
       clearTimeout(timer);
     };
   }, [values.brand, values.model, values.year, values.currency]);
+
+  // Chequeo de patente duplicada — avisa, no bloquea (ver comentario en
+  // check-duplicate/route.ts). Debounce para no pegarle al backend en cada
+  // tecla mientras se termina de escribir.
+  useEffect(() => {
+    const plate = values.licensePlate.trim();
+    if (plate.length < 6) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset síncrono, no dispara un fetch
+      setDuplicateMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const token = await getIdToken();
+        const params = new URLSearchParams({ licensePlate: plate, ...(excludeId ? { excludeId } : {}) });
+        const res = await fetch(`/api/agency/vehicles/check-duplicate?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await parseJsonResponse<{ matches: { id: string; brand: string; model: string; status: string }[] }>(res);
+        if (!cancelled) setDuplicateMatches(data.matches);
+      } catch {
+        // silencioso a propósito — es un aviso, no algo crítico para poder publicar
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [values.licensePlate, excludeId, getIdToken]);
 
   const makeOptions = useMemo(() => Array.from(new Set([...STATIC_MAKES, ...catalogMakes])).sort(), [catalogMakes]);
   const modelOptions = useMemo(() => {
@@ -380,6 +416,13 @@ export function VehicleForm({
           />
         </Field>
       </div>
+
+      {duplicateMatches.length > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+          Ya tenés {duplicateMatches.length === 1 ? "un auto" : `${duplicateMatches.length} autos`} cargado{duplicateMatches.length === 1 ? "" : "s"} con
+          esta patente: {duplicateMatches.map((m) => `${m.brand} ${m.model}`).join(", ")}. Revisá que no sea una carga repetida.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Provincia">
