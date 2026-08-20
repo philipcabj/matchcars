@@ -6,7 +6,22 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { STATUS_BAR_COLOR, STATUS_LABELS, VehicleListItem } from "@/lib/vehicle";
 import Link from "next/link";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
+
+interface StockViewFilters {
+  statusFilter: string;
+  agingFilter: string;
+  sort: string;
+  search: string;
+  priceMin: string;
+  priceMax: string;
+}
+
+interface StockView {
+  id: string;
+  name: string;
+  filters: StockViewFilters;
+}
 
 type StatusFilter = "all" | "available" | "paused" | "pending_review" | "reserved" | "a_preparar" | "sold" | "rejected" | "deleted";
 type SortOption = "recent" | "price_desc" | "price_asc" | "name" | "aging";
@@ -179,8 +194,12 @@ export default function StockPage() {
   const [agingFilter, setAgingFilter] = useState<AgingFilter>("all");
   const [sort, setSort] = useState<SortOption>("recent");
   const [search, setSearch] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [views, setViews] = useState<StockView[]>([]);
+  const [showPriceRange, setShowPriceRange] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -195,11 +214,70 @@ export default function StockPage() {
     })();
   }, [getIdToken]);
 
+  const loadViews = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch("/api/agency/stock-views", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await parseJsonResponse<{ views: StockView[] }>(res);
+      setViews(data.views);
+    } catch {
+      // silencioso — las vistas guardadas son una comodidad, no algo crítico
+    }
+  }, [getIdToken]);
+
+  useEffect(() => {
+    (async () => {
+      await loadViews();
+    })();
+  }, [loadViews]);
+
+  const applyView = (v: StockView) => {
+    setStatusFilter(v.filters.statusFilter as StatusFilter);
+    setAgingFilter(v.filters.agingFilter as AgingFilter);
+    setSort(v.filters.sort as SortOption);
+    setSearch(v.filters.search);
+    setPriceMin(v.filters.priceMin);
+    setPriceMax(v.filters.priceMax);
+    setShowPriceRange(!!(v.filters.priceMin || v.filters.priceMax));
+  };
+
+  const saveCurrentView = async () => {
+    const name = prompt("Nombre para esta vista (ej. \"Autos viejos sin vender\"):");
+    if (!name?.trim()) return;
+    try {
+      const token = await getIdToken();
+      const filters: StockViewFilters = { statusFilter, agingFilter, sort, search, priceMin, priceMax };
+      const res = await fetch("/api/agency/stock-views", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: name.trim(), filters }),
+      });
+      await parseJsonResponse(res);
+      await loadViews();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    }
+  };
+
+  const deleteView = async (id: string) => {
+    try {
+      const token = await getIdToken();
+      await fetch(`/api/agency/stock-views/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+      setViews((prev) => prev.filter((v) => v.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    }
+  };
+
   const filtered = useMemo(() => {
     if (!vehicles) return [];
+    const min = priceMin ? Number(priceMin) : null;
+    const max = priceMax ? Number(priceMax) : null;
     const list = vehicles.filter(
       (v) =>
         matchesFilter(v, statusFilter) &&
+        (min === null || (v.price ?? 0) >= min) &&
+        (max === null || (v.price ?? 0) <= max) &&
         matchesSearch(v, search) &&
         (agingFilter === "all" || agingBucket(daysInStock(v.createdAt)) === agingFilter)
     );
@@ -221,7 +299,7 @@ export default function StockPage() {
         sorted.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
     }
     return sorted;
-  }, [vehicles, statusFilter, agingFilter, sort, search]);
+  }, [vehicles, statusFilter, agingFilter, sort, search, priceMin, priceMax]);
 
   const countFor = (filter: StatusFilter) => (vehicles ? vehicles.filter((v) => matchesFilter(v, filter)).length : 0);
 
@@ -417,7 +495,65 @@ export default function StockPage() {
                   <option value="price_asc">Precio: menor a mayor</option>
                   <option value="name">Marca / modelo (A-Z)</option>
                 </select>
+                <button
+                  type="button"
+                  onClick={() => setShowPriceRange((s) => !s)}
+                  className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${
+                    showPriceRange || priceMin || priceMax ? "border-accent bg-accent/10 text-accent" : "border-border bg-background text-muted-foreground"
+                  }`}
+                >
+                  Rango de precio
+                </button>
               </div>
+            </div>
+
+            {showPriceRange && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={priceMin}
+                  onChange={(e) => setPriceMin(e.target.value)}
+                  placeholder="Precio mín."
+                  className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                />
+                <span className="text-xs text-muted-foreground">a</span>
+                <input
+                  type="number"
+                  value={priceMax}
+                  onChange={(e) => setPriceMax(e.target.value)}
+                  placeholder="Precio máx."
+                  className="w-32 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                />
+                {(priceMin || priceMax) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPriceMin("");
+                      setPriceMax("");
+                    }}
+                    className="text-xs text-muted-foreground hover:underline"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-muted-foreground">Vistas guardadas:</span>
+              {views.map((v) => (
+                <span key={v.id} className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1">
+                  <button type="button" onClick={() => applyView(v)} className="font-semibold hover:text-accent">
+                    {v.name}
+                  </button>
+                  <button type="button" onClick={() => deleteView(v.id)} title="Borrar vista" className="text-muted-foreground hover:text-error">
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={saveCurrentView} className="font-semibold text-accent hover:underline">
+                + Guardar vista actual
+              </button>
             </div>
           </>
         )}
