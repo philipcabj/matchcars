@@ -1,4 +1,5 @@
 // app/_layout.tsx
+import AnimatedSplash from "@/components/AnimatedSplash";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { trackEvent } from "@/lib/analytics";
 import { logger } from "@/lib/logger";
@@ -7,12 +8,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import * as Linking from 'expo-linking';
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
-import React, { useEffect } from "react";
-import { ActivityIndicator, Image, LogBox, Platform, Text, TouchableOpacity, View } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useState } from "react";
+import { Image, LogBox, Platform, Text, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Ignorar logs de advertencia/error en pantalla (YellowBox/RedBox) para el usuario final
 LogBox.ignoreAllLogs(true);
+
+// Mantiene visible el splash nativo hasta que AnimatedSplash lo oculte a
+// propósito (SplashScreen.hideAsync() en su primer useEffect) — sin esto,
+// Expo lo oculta solo apenas arranca el JS y el splash animado nunca tiene
+// nada que reemplazar (aparecía "de la nada" en vez de continuar el nativo).
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
@@ -64,11 +72,18 @@ function RootStackContent() {
   
   const [fontsLoaded] = useFonts({
     ...Ionicons.font,
+    ArchivoBlack: require("@/assets/fonts/ArchivoBlack-Regular.ttf"),
+    Archivo: require("@/assets/fonts/Archivo-SemiBold.ttf"),
   });
+  const [splashDone, setSplashDone] = useState(false);
 
   // Only try to access theme AFTER initial render to avoid context issues
   const { theme } = useTheme();
   const { user, profile, initializing, logout } = useAuth();
+  // AnimatedSplash arranca su fade-out (2100ms) recién cuando esto pasa a
+  // true — cubre fuentes Y sesión de Firebase, así el logo/tipografía nunca
+  // se ven "a medio cargar" ni queda una segunda pantalla de carga después.
+  const appReady = fontsLoaded && !initializing;
 
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -109,13 +124,8 @@ function RootStackContent() {
     } catch {}
   }, []);
 
-  if (!fontsLoaded) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
-        <ActivityIndicator size="large" color={theme.accent} />
-        <Text style={{ marginTop: 20, color: theme.text }}>Cargando recursos...</Text>
-      </View>
-    );
+  if (!splashDone) {
+    return <AnimatedSplash appReady={appReady} onFinish={() => setSplashDone(true)} />;
   }
 
   // MOBILE WEB LOGIN GUARD: Prevent accessing /login on mobile web
@@ -171,29 +181,9 @@ function RootStackContent() {
       }
   }
 
-  // Solo spinner mientras Firebase inicializa la sesión
-  if (initializing) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme.background,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <ActivityIndicator color={theme.accent} />
-        <Text
-          style={{
-            color: theme.text,
-            marginTop: 12,
-          }}
-        >
-          Cargando sesión...
-        </Text>
-      </View>
-    );
-  }
+  // El spinner de "Cargando sesión..." ya no hace falta acá — appReady
+  // (arriba) incluye !initializing, así que AnimatedSplash no llega a
+  // splashDone hasta que Firebase también terminó de inicializar la sesión.
 
   // Redirigir a Términos si el usuario no los aceptó aún (evitar bucle si ya estamos en /terms)
   if (user && profile && profile.acceptedTerms !== true && pathname !== "/terms") {

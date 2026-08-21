@@ -2,7 +2,7 @@
   "expo": {
     "name": "Matchcars",
     "slug": "matchcars",
-    "version": "1.8.1",
+    "version": "1.8.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "matchcars",
@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.matchcars.app",
       "associatedDomains": ["applinks:matchcars.app"],
-      "buildNumber": "1.8.1",
+      "buildNumber": "1.8.2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "newArchEnabled": true,
       "infoPlist": {
@@ -23,9 +23,9 @@
       }
     },
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/images/splash-blank.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0E1117"
+      "backgroundColor": "#232327"
     },
     "notification": {
       "icon": "./assets/images/android-icon-monochrome.png",
@@ -64,7 +64,7 @@
         }
       ],
       "newArchEnabled": true,
-      "versionCode": 41,
+      "versionCode": 42,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/icon.png"
@@ -111,12 +111,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/splash-blank.png",
+          "imageWidth": 1,
           "resizeMode": "contain",
-          "backgroundColor": "#0E1117",
+          "backgroundColor": "#232327",
           "dark": {
-            "backgroundColor": "#0E1117"
+            "backgroundColor": "#232327"
           }
         }
       ],
