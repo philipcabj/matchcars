@@ -43,6 +43,7 @@ const PLAN_COLORS: Record<string, string> = {
 export function UsersTab() {
   const { getIdToken } = useAuth();
   const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<UserRole | "all">("all");
@@ -54,8 +55,9 @@ export function UsersTab() {
       try {
         const token = await getIdToken();
         const res = await fetch("/api/admin/users", { headers: { Authorization: `Bearer ${token}` } });
-        const data = await parseJsonResponse<{ users: AdminUser[] }>(res);
+        const data = await parseJsonResponse<{ users: AdminUser[]; total: number }>(res);
         setUsers(data.users);
+        setTotalUsers(data.total);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Error desconocido");
       }
@@ -126,7 +128,11 @@ export function UsersTab() {
         ))}
       </div>
 
-      <p className="text-xs text-muted-foreground">{filtered.length} usuario(s)</p>
+      <p className="text-xs text-muted-foreground">
+        {filtered.length === (users ?? []).length
+          ? `${filtered.length} usuario(s)${totalUsers !== null ? ` de ${totalUsers} en total` : ""}`
+          : `${filtered.length} de ${(users ?? []).length} cargados${totalUsers !== null ? ` (${totalUsers} en total)` : ""}`}
+      </p>
 
       <div className="flex flex-col gap-2">
         {filtered.map((u) => (

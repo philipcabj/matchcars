@@ -10,7 +10,7 @@ import { getPlanFeatures } from "@/lib/planChecks";
 import { SubscriptionPlan, UserRole } from "@/types/user";
 import { Vehicle } from "@/types/vehicle";
 import { Ionicons } from "@expo/vector-icons";
-import { collection, doc, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, doc, getCountFromServer, getDoc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Linking, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -226,6 +226,7 @@ export default function AdminDashboardScreen() {
 
   // State for Users tab
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [totalUsersCount, setTotalUsersCount] = useState<number | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersSearch, setUsersSearch] = useState("");
   const [usersRoleFilter, setUsersRoleFilter] = useState<UserRole | "all">("all");
@@ -374,7 +375,13 @@ export default function AdminDashboardScreen() {
   useEffect(() => {
     if (activeTab === "users") {
       setLoadingUsers(true);
-      const q = query(collection(db, "users"), limit(300));
+      // Antes limit(300) escondía usuarios en silencio apenas se pasaba ese
+      // número (confirmado: 399 usuarios reales, 99 invisibles acá). El
+      // límite de 5000 es un techo de seguridad, no un corte real esperado.
+      const q = query(collection(db, "users"), limit(5000));
+      getCountFromServer(collection(db, "users"))
+        .then((snap) => setTotalUsersCount(snap.data().count))
+        .catch((error) => console.error("Error counting users:", error));
       getDocs(q).then((snap) => {
         const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         data.sort((a: any, b: any) => {
@@ -1165,7 +1172,11 @@ export default function AdminDashboardScreen() {
             </ScrollView>
 
             <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
-              {loadingUsers ? "Cargando..." : `${filteredUsers.length} usuario(s)`}
+              {loadingUsers
+                ? "Cargando..."
+                : filteredUsers.length === allUsers.length
+                  ? `${filteredUsers.length} usuario(s)${totalUsersCount !== null ? ` de ${totalUsersCount} en total` : ""}`
+                  : `${filteredUsers.length} de ${allUsers.length} cargados${totalUsersCount !== null ? ` (${totalUsersCount} en total)` : ""}`}
             </Text>
           </View>
           <View
