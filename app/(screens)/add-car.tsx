@@ -1946,17 +1946,38 @@ export default function AddCarScreen() {
         const aiResult = await detectCar(base64);
         if (aiResult.success && aiResult.box) {
              const box = aiResult.box;
-             
+
+             // Control de sanidad: antes de esto, si Gemini devolvía una caja
+             // mal detectada (ej. un reflejo o un detalle de la carrocería en
+             // vez del auto completo), el código recortaba igual sin
+             // preguntar — resultado: fotos publicadas con un zoom
+             // inservible (ver caso reportado, publicación #127). Un auto
+             // real casi nunca ocupa menos del 15% del ancho/alto de una
+             // foto pensada para mostrarlo — si la caja detectada es más
+             // chica que eso, tratamos la detección como no confiable y
+             // dejamos la foto sin tocar en vez de arriesgarnos a arruinarla.
+             const MIN_CAR_FRACTION = 0.15;
+             const boxWidthFrac = box.xmax - box.xmin;
+             const boxHeightFrac = box.ymax - box.ymin;
+
+             if (boxWidthFrac < MIN_CAR_FRACTION || boxHeightFrac < MIN_CAR_FRACTION) {
+               logger.warn("detectCar: caja demasiado chica, se descarta el recorte", box);
+               showAlert(
+                 "No pudimos mejorar el encuadre",
+                 "No identificamos bien el auto en esta foto — la dejamos como estaba para no arruinarla.",
+                 "info"
+               );
+             } else {
              // Smart Crop Logic
              // Calculate car dimensions in pixels
-             const carW = (box.xmax - box.xmin) * width;
-             const carH = (box.ymax - box.ymin) * height;
-             
+             const carW = boxWidthFrac * width;
+             const carH = boxHeightFrac * height;
+
              // Expand car box by 30% to give more context
              const padding = 0.30;
              let w = carW * (1 + padding);
              let h = carH * (1 + padding);
-             
+
              // Ensure we don't exceed image bounds initially (with 2px safety margin)
              w = Math.min(w, width - 2);
              h = Math.min(h, height - 2);
@@ -1974,10 +1995,10 @@ export default function AddCarScreen() {
              // Center and Clamp
              const centerX = (box.xmin + box.xmax) / 2;
              const centerY = (box.ymin + box.ymax) / 2;
-             
+
              let x = (centerX * width) - (w / 2);
              let y = (centerY * height) - (h / 2);
-             
+
              // Final Clamping and Floor
              const finalW = Math.max(1, Math.floor(w));
              const finalH = Math.max(1, Math.floor(h));
@@ -1989,10 +2010,11 @@ export default function AddCarScreen() {
                 compress: 0.9,
                 format: ImageManipulator.SaveFormat.JPEG,
              });
-             
+
              setEditorWorkingUri(result.uri);
              setImageRatio(result.width / result.height);
              showAlert("Foto mejorada", "Se ha re-encuadrado el vehículo (4:3) automáticamente.", "success");
+             }
         } else {
              console.error("AI Error (Car):", aiResult.error);
              showAlert("No detectado", `No se encontró el vehículo.\n${aiResult.error || 'Intenta con otra foto.'}`, "info");
