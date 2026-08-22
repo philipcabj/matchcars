@@ -4,6 +4,7 @@
 //          eso lo sigue manejando el flujo de moderación existente, sin tocar.
 import { ApiAuthError, requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { resolveMembership } from "@/lib/agency-server";
 import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
@@ -160,6 +161,18 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
 
   await ref.update(update);
   await ensureCatalogEntry(body.brand.trim(), body.model.trim(), body.version || null);
+
+  if (priceChanged) {
+    const carLabel = `${body.brand.trim()} ${body.model.trim()}`.trim();
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "vehicle",
+      entityId: id,
+      summary: `Cambió el precio de ${carLabel}: ${existing.currency ?? "ARS"} ${Number(existing.price ?? 0).toLocaleString("es-AR")} → ${currency} ${priceNum.toLocaleString("es-AR")}`,
+    });
+  }
+
   return Response.json({ ok: true });
 });
 
@@ -179,5 +192,10 @@ export const DELETE = withApiErrors(async (request, ctx: RouteContext<"/api/agen
   if (snap.data()?.status === "deleted") return Response.json({ ok: true });
 
   await ref.update({ status: "deleted", published: false, updatedAt: FieldValue.serverTimestamp() });
+
+  const deleted = snap.data()!;
+  const carLabel = `${deleted.brand ?? ""} ${deleted.model ?? ""}`.trim() || "un auto";
+  await logActivity({ agencyId, actorUid: uid, entityType: "vehicle", entityId: id, summary: `Eliminó ${carLabel}` });
+
   return Response.json({ ok: true });
 });

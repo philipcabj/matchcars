@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { AGENCY_ROLE_LABELS, AgencyRole } from "@/lib/plans";
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 const ROLE_OPTIONS: AgencyRole[] = ["manager", "sales"];
@@ -98,11 +99,18 @@ export default function TeamPage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-bold">Equipo</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {data.usage.seats.used} de {data.usage.seats.limit} usuarios incluidos en tu plan.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Equipo</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {data.usage.seats.used} de {data.usage.seats.limit} usuarios incluidos en tu plan.
+          </p>
+        </div>
+        {canManage && (
+          <Link href="/dashboard/team/activity" className="shrink-0 text-xs font-semibold text-accent">
+            Ver actividad →
+          </Link>
+        )}
       </div>
 
       {actionError && <p className="text-sm text-error">{actionError}</p>}

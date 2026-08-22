@@ -7,6 +7,7 @@
 // pendientes cuentan contra `includedSeats`).
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
@@ -84,6 +85,14 @@ export const POST = withApiErrors(async (request) => {
       adminDb.doc(`agencyMemberships/${targetUid}`).set({ agencyId, role }),
     ]);
 
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "team",
+      entityId: targetUid,
+      summary: `Sumó a ${memberData.name} al equipo como ${AGENCY_ROLE_LABELS[role]}`,
+    });
+
     return Response.json({ ok: true, invited: false, uid: targetUid }, { status: 201 });
   }
 
@@ -113,6 +122,14 @@ export const POST = withApiErrors(async (request) => {
     agencyName: inviterName,
     roleLabel: AGENCY_ROLE_LABELS[role],
     ctaLink: `${siteUrl}/invite/${inviteRef.id}`,
+  });
+
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "team",
+    entityId: inviteRef.id,
+    summary: `Invitó a ${email} al equipo como ${AGENCY_ROLE_LABELS[role]}`,
   });
 
   return Response.json({ ok: true, invited: true, inviteId: inviteRef.id }, { status: 201 });

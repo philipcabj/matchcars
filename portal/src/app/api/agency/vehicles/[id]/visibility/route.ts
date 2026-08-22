@@ -7,6 +7,7 @@
 // republicar deja el auto exactamente como estaba antes de pausarlo.
 import { ApiAuthError, requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
@@ -36,5 +37,15 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   const body = await request.json();
   const published = body.published === true;
   await ref.update({ published, updatedAt: FieldValue.serverTimestamp() });
+
+  const carLabel = `${data.brand ?? ""} ${data.model ?? ""}`.trim() || "un auto";
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "vehicle",
+    entityId: id,
+    summary: published ? `Republicó ${carLabel}` : `Pausó ${carLabel}`,
+  });
+
   return Response.json({ ok: true, published });
 });

@@ -5,6 +5,7 @@
 //          con "action", mismo criterio que leads/[id]/route.ts.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { calculateFrenchInstallment, suggestTradeInPrice, TradeInCondition } from "@/lib/sale-operations";
@@ -317,6 +318,14 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (action === "set_status") {
     const status = body.status === "completada" ? "completada" : body.status === "cancelada" ? "cancelada" : "en_curso";
     await ref.update({ status, updatedAt: FieldValue.serverTimestamp() });
+    const carLabel = `${op.vehicleSnapshot?.brand ?? ""} ${op.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "operation",
+      entityId: id,
+      summary: status === "completada" ? `Marcó la operación de ${carLabel} como completada` : `Canceló la operación de ${carLabel}`,
+    });
     return Response.json({ ok: true });
   }
 

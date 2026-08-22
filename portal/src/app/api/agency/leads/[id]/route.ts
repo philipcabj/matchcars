@@ -15,6 +15,7 @@
 // conversación real ya es el registro.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { calculateCommission, CommissionRule, DEFAULT_COMMISSION_RULE } from "@/lib/commissions";
@@ -121,8 +122,11 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   const action = body.action as "advance" | "lost" | "mark_won" | "mark_vehicle_sold" | "assign";
   const current = lead.status || "new";
 
+  const carLabel = () => `${lead.vehicleSnapshot?.brand ?? ""} ${lead.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
+
   if (action === "assign") {
     const assignedTo = typeof body.assignedTo === "string" && body.assignedTo ? body.assignedTo : null;
+    let assignedName = "sin asignar";
     if (assignedTo) {
       // Solo se puede asignar a alguien que realmente sea miembro de la
       // agencia — evita asignar a un uid arbitrario mandado por el cliente.
@@ -131,8 +135,16 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       if (!isOwner && !memberSnap.exists) {
         return Response.json({ error: "Ese usuario no es parte de tu equipo." }, { status: 400 });
       }
+      assignedName = isOwner ? "el dueño de la agencia" : memberSnap.data()?.name || memberSnap.data()?.email || assignedTo;
     }
     await ref.update({ assignedTo });
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: assignedTo ? `Asignó el lead de ${carLabel()} a ${assignedName}` : `Quitó la asignación del lead de ${carLabel()}`,
+    });
     return Response.json({ ok: true });
   }
 
@@ -145,6 +157,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     const updates: Record<string, unknown> = { status: "lost", reasonLost: reason };
     if (!lead.lostAt) updates.lostAt = FieldValue.serverTimestamp();
     await ref.update(updates);
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: `Marcó como perdido el lead de ${carLabel()}: ${reason}`,
+    });
     return Response.json({ ok: true });
   }
 
@@ -171,6 +190,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     }
 
     await ref.update(updates);
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: `Avanzó el lead de ${carLabel()} a "${LEAD_STATUS_LABELS[nextStatus]}"`,
+    });
     return Response.json({ ok: true });
   }
 
@@ -187,6 +213,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       return Response.json({ error: "Ingresá un precio de cierre válido." }, { status: 400 });
     }
     await ref.update({ status: "won", wonAt: FieldValue.serverTimestamp(), dealPrice, dealCurrency });
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: `Cerró el acuerdo de precio de ${carLabel()} en ${dealCurrency} ${dealPrice.toLocaleString("es-AR")}`,
+    });
     return Response.json({ ok: true });
   }
 
@@ -286,6 +319,16 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
         sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {}).catch(() => {});
       }
     }
+
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: pendingConfirmation
+        ? `Marcó ${carLabel()} como vendido — esperando confirmación del comprador`
+        : `Marcó ${carLabel()} como vendido y entregado`,
+    });
 
     return Response.json({ ok: true, deliveryConfirmToken });
   }

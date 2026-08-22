@@ -4,6 +4,7 @@
 // PATCH grande de vehicles/[id].
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
@@ -35,6 +36,17 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     updatedAt: FieldValue.serverTimestamp(),
     ...(priceChanged ? { priceHistory: FieldValue.arrayUnion({ price, currency, changedAt: new Date() }) } : {}),
   });
+
+  if (priceChanged) {
+    const carLabel = `${existing.brand ?? ""} ${existing.model ?? ""}`.trim() || "un auto";
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "vehicle",
+      entityId: id,
+      summary: `Cambió el precio de ${carLabel}: ${existing.currency ?? "ARS"} ${Number(existing.price ?? 0).toLocaleString("es-AR")} → ${currency} ${price.toLocaleString("es-AR")}`,
+    });
+  }
 
   return Response.json({ ok: true });
 });
