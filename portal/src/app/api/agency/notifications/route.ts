@@ -36,10 +36,11 @@ export const GET = withApiErrors(async (request) => {
     return Response.json({ items: [] });
   }
 
-  const [newLeadsSnap, pendingOfferSnap, pendingSalesSnap] = await Promise.all([
+  const [newLeadsSnap, pendingOfferSnap, pendingSalesSnap, activeOperationsSnap] = await Promise.all([
     adminDb.collection("leads").where("sellerId", "==", agencyId).where("status", "==", "new").get(),
     adminDb.collection("leads").where("sellerId", "==", agencyId).where("offer.status", "==", "pending").get(),
     adminDb.collection("sales").where("sellerId", "==", agencyId).where("confirmedByBuyer", "==", null).get(),
+    adminDb.collection("saleOperations").where("sellerId", "==", agencyId).where("status", "==", "en_curso").get(),
   ]);
 
   const items: NotificationItem[] = [];
@@ -84,6 +85,40 @@ export const GET = withApiErrors(async (request) => {
       href: `/dashboard/stock/${data.vehicleId}`,
       at: toIso(data.soldAt),
     });
+  }
+
+  // Trámites vencidos o por vencer — el checklist vive como array embebido
+  // en la propia Operación (no una subcolección), así que se filtra en
+  // memoria igual que el resto de este endpoint (un solo where() real).
+  const DUE_SOON_DAYS = 3;
+  const now = Date.now();
+  const dueSoonThreshold = now + DUE_SOON_DAYS * 24 * 60 * 60 * 1000;
+
+  for (const d of activeOperationsSnap.docs) {
+    const data = d.data();
+    const checklist = (data.checklist ?? []) as {
+      key: string;
+      label: string;
+      status: string;
+      dueAt?: { toMillis?: () => number } | null;
+    }[];
+    const veh = data.vehicleSnapshot;
+    const carLabel = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""}`.trim() : "un auto";
+
+    for (const item of checklist) {
+      if (item.status !== "pendiente" || !item.dueAt?.toMillis) continue;
+      const dueMillis = item.dueAt.toMillis();
+      if (dueMillis > dueSoonThreshold) continue;
+      const overdue = dueMillis < now;
+      items.push({
+        id: `checklist_due_${d.id}_${item.key}`,
+        type: "checklist_due",
+        title: overdue ? `Vencido: ${item.label}` : `Vence pronto: ${item.label}`,
+        subtitle: `${carLabel} — ${new Date(dueMillis).toLocaleDateString("es-AR")}`,
+        href: `/dashboard/operaciones/${d.id}`,
+        at: new Date(dueMillis).toISOString(),
+      });
+    }
   }
 
   items.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));

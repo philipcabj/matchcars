@@ -16,6 +16,7 @@ interface OperationListItem {
   buyerLabel: string;
   stepsDone: number;
   stepsTotal: number;
+  dueSeverity: "overdue" | "soon" | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -115,6 +116,15 @@ function OperationRow({ op, assignedName }: { op: OperationListItem; assignedNam
           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_COLORS[op.status]}`}>
             {STATUS_LABELS[op.status]}
           </span>
+          {op.dueSeverity && (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                op.dueSeverity === "overdue" ? "bg-error/15 text-error" : "bg-amber-500/15 text-amber-600"
+              }`}
+            >
+              {op.dueSeverity === "overdue" ? "Trámite vencido" : "Vence pronto"}
+            </span>
+          )}
         </div>
         <p className="truncate text-xs text-muted-foreground">
           {op.buyerLabel}

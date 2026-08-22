@@ -20,12 +20,27 @@ export const GET = withApiErrors(async (request) => {
   }
   await requireCRMAccess(agencyId);
 
+  const DUE_SOON_DAYS = 3;
+  const now = Date.now();
+  const dueSoonThreshold = now + DUE_SOON_DAYS * 24 * 60 * 60 * 1000;
+
   const snap = await adminDb.collection("saleOperations").where("sellerId", "==", agencyId).get();
   const operations = snap.docs
     .map((d) => {
       const data = d.data();
       const checklist = data.checklist ?? [];
       const doneCount = checklist.filter((c: { status: string }) => c.status === "hecho").length;
+
+      // Peor severidad entre los pasos pendientes con fecha límite — para
+      // pintar un aviso en la fila sin tener que abrir cada operación.
+      let dueSeverity: "overdue" | "soon" | null = null;
+      for (const c of checklist as { status: string; dueAt?: { toMillis?: () => number } | null }[]) {
+        if (c.status !== "pendiente" || !c.dueAt?.toMillis) continue;
+        const dueMillis = c.dueAt.toMillis();
+        if (dueMillis < now) dueSeverity = "overdue";
+        else if (dueMillis <= dueSoonThreshold && dueSeverity !== "overdue") dueSeverity = "soon";
+      }
+
       return {
         id: d.id,
         leadId: data.leadId,
@@ -35,6 +50,7 @@ export const GET = withApiErrors(async (request) => {
         buyerLabel: data.buyerLabel ?? "Comprador",
         stepsDone: doneCount,
         stepsTotal: checklist.length,
+        dueSeverity,
         createdAt: toIso(data.createdAt),
         updatedAt: toIso(data.updatedAt),
       };
