@@ -5,6 +5,7 @@ import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
+import { trackPortalEvent } from "@/lib/ga";
 import { AGENCY_ROLE_LABELS, AgencyRole } from "@/lib/plans";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
@@ -35,6 +36,7 @@ export default function TeamPage() {
       });
       const data = await parseJsonResponse<{ invited: boolean }>(res);
       setFormSuccess(data.invited ? `Le mandamos una invitación a ${email}.` : `${email} ya es parte del equipo.`);
+      trackPortalEvent("portal_team_member_added", { role, invited: data.invited });
       setEmail("");
       refetch();
     } catch (e) {

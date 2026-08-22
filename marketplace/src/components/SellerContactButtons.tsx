@@ -1,4 +1,7 @@
+"use client";
+
 import { APPLE_URL, PLAY_URL } from "@/lib/app-links";
+import { trackWebEvent } from "@/lib/ga";
 
 // Compartido entre la ficha del auto y el perfil de agencia — mismo patrón
 // de contacto: WhatsApp directo si el vendedor lo cargó, si no mail. El botón
@@ -27,13 +30,18 @@ export function SellerContactButtons({
           href={waLink}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={() => trackWebEvent("web_seller_contact_click", { channel: "whatsapp" })}
           className="rounded-lg bg-[#25D366] px-4 py-2.5 text-center text-sm font-semibold text-white"
         >
           Escribir por WhatsApp
         </a>
       )}
       {mailLink && (
-        <a href={mailLink} className="rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground">
+        <a
+          href={mailLink}
+          onClick={() => trackWebEvent("web_seller_contact_click", { channel: "email" })}
+          className="rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-semibold text-accent-foreground"
+        >
           Enviar email
         </a>
       )}
@@ -44,12 +52,14 @@ export function SellerContactButtons({
         <div className="flex gap-2">
           <a
             href={APPLE_URL}
+            onClick={() => trackWebEvent("web_cta_download_app_click", { store: "apple", source: "car_detail" })}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-xs font-bold text-background transition hover:opacity-90"
           >
             🍏 App Store
           </a>
           <a
             href={PLAY_URL}
+            onClick={() => trackWebEvent("web_cta_download_app_click", { store: "google", source: "car_detail" })}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-xs font-bold text-background transition hover:opacity-90"
           >
             🤖 Google Play

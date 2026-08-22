@@ -2,6 +2,7 @@ import { CarDetailTabs } from "@/components/CarDetailTabs";
 import { PhotoGallery } from "@/components/Lightbox";
 import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareModal } from "@/components/ShareModal";
+import { TrackPageView } from "@/components/TrackPageView";
 import { VehicleCard } from "@/components/VehicleCard";
 import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
@@ -81,6 +82,7 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <TrackPageView event="web_car_view" params={{ vehicleId: vehicle.id, brand: vehicle.brand, model: vehicle.model }} />
 
       <Link href="/" className="text-sm font-semibold text-accent">
         ← Volver a la búsqueda

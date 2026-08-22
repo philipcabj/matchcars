@@ -90,7 +90,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         <p className="text-sm text-muted-foreground">Autos usados de particulares y agencias verificadas.</p>
 
         <div className="xl:hidden">
-          <AppDownloadCard />
+          <AppDownloadCard source="home" />
         </div>
 
         <Link

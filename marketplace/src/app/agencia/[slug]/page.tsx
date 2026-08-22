@@ -2,6 +2,7 @@ import { AgencyStockTabs } from "@/components/AgencyStockTabs";
 import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareModal } from "@/components/ShareModal";
 import { StarRating } from "@/components/StarRating";
+import { TrackPageView } from "@/components/TrackPageView";
 import { getAgencyProfile } from "@/lib/agencies";
 import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerReviews, getSoldVehiclesBySeller, getVehiclesBySeller } from "@/lib/vehicles";
@@ -53,6 +54,7 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
+      <TrackPageView event="web_agency_view" params={{ agencyId: agency.id, agencyName: agency.name }} />
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="relative flex h-40 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-accent/25 via-primary/15 to-accent/10 sm:h-56">
           {agency.bannerUrl ? (

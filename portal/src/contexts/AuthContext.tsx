@@ -3,6 +3,7 @@
 
 import { getAvatarColorFromEmail } from "@/lib/avatar-color";
 import { auth, db } from "@/lib/firebase-client";
+import { trackPortalEvent } from "@/lib/ga";
 import {
   createUserWithEmailAndPassword,
   GoogleAuthProvider,
@@ -71,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = async (email: string, password: string) => {
     await signInWithEmailAndPassword(auth, email, password);
+    trackPortalEvent("portal_login", { method: "email" });
   };
 
   const resetPassword = async (email: string) => {
@@ -135,6 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithGoogle = async () => {
     const cred = await signInWithPopup(auth, new GoogleAuthProvider());
     await createUserDocIfMissing(cred, "google");
+    trackPortalEvent("portal_login", { method: "google" });
   };
 
   const loginWithApple = async () => {
@@ -143,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     provider.addScope("name");
     const cred = await signInWithPopup(auth, provider);
     await createUserDocIfMissing(cred, "apple");
+    trackPortalEvent("portal_login", { method: "apple" });
   };
 
   const logout = async () => {
