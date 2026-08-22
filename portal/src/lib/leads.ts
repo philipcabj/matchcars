@@ -24,11 +24,21 @@ export const LEAD_STAGE_BAR_COLOR: Record<LeadStatus, string> = {
   lost: "bg-error",
 };
 
+export type ManualContactSource = "whatsapp" | "phone" | "in_person" | "other";
+
+export const MANUAL_CONTACT_SOURCE_LABELS: Record<ManualContactSource, string> = {
+  whatsapp: "WhatsApp",
+  phone: "Teléfono",
+  in_person: "Presencial",
+  other: "Otro",
+};
+
 export interface ManualContact {
   name: string;
   phone?: string;
   email?: string;
   notes?: string;
+  contactSource?: ManualContactSource;
 }
 
 export interface LeadListItem {
@@ -88,6 +98,7 @@ export interface LeadDetail {
   assignedTo?: string | null;
   saleOperationId?: string | null;
   deliveryConfirmToken?: string | null;
+  activity?: LeadActivityEvent[];
 }
 
 export interface CreateManualLeadInput {
@@ -96,6 +107,17 @@ export interface CreateManualLeadInput {
   email?: string;
   notes?: string;
   vehicleId?: string;
+  contactSource: ManualContactSource;
+}
+
+// Evento del registro de actividad (activity-log.ts) filtrado a este lead —
+// mismo shape que devuelve GET /api/agency/activity, sin entityType/entityId
+// porque acá ya vienen filtrados a un solo lead.
+export interface LeadActivityEvent {
+  id: string;
+  actorName: string;
+  summary: string;
+  createdAt: string | null;
 }
 
 export interface LeadStats {

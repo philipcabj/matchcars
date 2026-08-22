@@ -11,11 +11,14 @@
 // eso queda ligado al flujo de venta de la app (mycars.tsx), no portado.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
+import { logActivity } from "@/lib/activity-log";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
-import { CreateManualLeadInput, SalesByMonth } from "@/lib/leads";
+import { CreateManualLeadInput, MANUAL_CONTACT_SOURCE_LABELS, ManualContactSource, SalesByMonth } from "@/lib/leads";
 import { FieldValue } from "firebase-admin/firestore";
+
+const MANUAL_CONTACT_SOURCES = Object.keys(MANUAL_CONTACT_SOURCE_LABELS) as ManualContactSource[];
 
 function monthKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -169,18 +172,23 @@ export const POST = withApiErrors(async (request) => {
     }
   }
 
+  const contactSource: ManualContactSource = MANUAL_CONTACT_SOURCES.includes(body.contactSource as ManualContactSource)
+    ? (body.contactSource as ManualContactSource)
+    : "other";
+
   const leadData = {
     sellerId: agencyId,
     buyerId: "",
     vehicleId: body.vehicleId || null,
     conversationId: "",
     status: "new",
-    source: "other",
+    source: contactSource,
     manualContact: {
       name,
       phone: body.phone?.trim() || null,
       email: body.email?.trim() || null,
       notes: body.notes?.trim() || null,
+      contactSource,
     },
     vehicleSnapshot,
     unreadCount: 0,
@@ -191,5 +199,15 @@ export const POST = withApiErrors(async (request) => {
   };
 
   const docRef = await adminDb.collection("leads").add(leadData);
+
+  const carLabel = vehicleSnapshot ? `${vehicleSnapshot.brand ?? ""} ${vehicleSnapshot.model ?? ""}`.trim() : "";
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "lead",
+    entityId: docRef.id,
+    summary: `Cargó un lead manual (${MANUAL_CONTACT_SOURCE_LABELS[contactSource]})${carLabel ? ` — ${carLabel}` : " — consulta general"}`,
+  });
+
   return Response.json({ id: docRef.id }, { status: 201 });
 });

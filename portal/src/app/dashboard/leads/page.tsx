@@ -6,7 +6,7 @@ import { AssigneeSelect } from "@/components/AssigneeSelect";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
-import { LEAD_STATUS_LABELS, LeadListItem, LeadStats, LeadStatus } from "@/lib/leads";
+import { LEAD_STATUS_LABELS, MANUAL_CONTACT_SOURCE_LABELS, LeadListItem, LeadStats, LeadStatus } from "@/lib/leads";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -270,6 +270,11 @@ export default function LeadsPage() {
                   <p className="truncate text-xs text-muted-foreground">
                     {buyerName}
                     {manual && <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">manual</span>}
+                    {manual?.contactSource && (
+                      <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                        {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
+                      </span>
+                    )}
                     {contactLine && <span> · {contactLine}</span>}
                   </p>
                   {manual?.notes && <p className="truncate text-xs italic text-muted-foreground">{manual.notes}</p>}

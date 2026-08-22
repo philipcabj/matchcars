@@ -5,6 +5,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
+import { MANUAL_CONTACT_SOURCE_LABELS, ManualContactSource } from "@/lib/leads";
 import { VehicleListItem } from "@/lib/vehicle";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -18,6 +19,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [vehicleId, setVehicleId] = useState("");
+  const [contactSource, setContactSource] = useState<ManualContactSource>("whatsapp");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
       const res = await fetch("/api/agency/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, phone, email, vehicleId: vehicleId || undefined, notes }),
+        body: JSON.stringify({ name, phone, email, vehicleId: vehicleId || undefined, notes, contactSource }),
       });
       await parseJsonResponse(res);
       onCreated();
@@ -81,6 +83,20 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
             {vehicles.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.brand} {v.model} {v.year}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">¿Cómo te contactó?</span>
+          <select
+            className={inputClass}
+            value={contactSource}
+            onChange={(e) => setContactSource(e.target.value as ManualContactSource)}
+          >
+            {Object.entries(MANUAL_CONTACT_SOURCE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>

@@ -80,6 +80,22 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     deliveryConfirmToken = saleSnap.exists ? saleSnap.data()?.deliveryConfirmToken ?? null : null;
   }
 
+  // Historial de este lead (avances, edición de contacto, cierre, etc.) —
+  // mismo registro que agencies/{agencyId}/activity, filtrado a este lead en
+  // vez de reusar GET /api/agency/activity (ese está gateado por el permiso
+  // manageTeam, más restrictivo que manageLeads, y no filtra por entidad).
+  const activitySnap = await adminDb
+    .collection(`agencies/${agencyId}/activity`)
+    .where("entityType", "==", "lead")
+    .where("entityId", "==", id)
+    .orderBy("createdAt", "desc")
+    .limit(20)
+    .get();
+  const activity = activitySnap.docs.map((d) => {
+    const a = d.data();
+    return { id: d.id, actorName: a.actorName as string, summary: a.summary as string, createdAt: toIso(a.createdAt) };
+  });
+
   return Response.json({
     id: snap.id,
     status: data.status || "new",
@@ -100,6 +116,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     createdAt: toIso(data.createdAt),
     assignedTo: data.assignedTo ?? null,
     saleOperationId: data.saleOperationId ?? null,
+    activity,
   });
 });
 
@@ -184,18 +201,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     if (nextStatus === "contacted" && !lead.contactedAt) updates.contactedAt = FieldValue.serverTimestamp();
     if (nextStatus === "negotiation" && !lead.negotiationAt) updates.negotiationAt = FieldValue.serverTimestamp();
 
-    if (note && lead.manualContact) {
-      const line = `[${new Date().toLocaleDateString("es-AR")}] → ${LEAD_STATUS_LABELS[nextStatus]}: ${note}`;
-      updates["manualContact.notes"] = lead.manualContact.notes ? `${lead.manualContact.notes}\n${line}` : line;
-    }
-
     await ref.update(updates);
     await logActivity({
       agencyId,
       actorUid: uid,
       entityType: "lead",
       entityId: id,
-      summary: `Avanzó el lead de ${carLabel()} a "${LEAD_STATUS_LABELS[nextStatus]}"`,
+      summary: `Avanzó el lead de ${carLabel()} a "${LEAD_STATUS_LABELS[nextStatus]}"${note ? `: ${note}` : ""}`,
     });
     return Response.json({ ok: true });
   }
@@ -331,6 +343,30 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     });
 
     return Response.json({ ok: true, deliveryConfirmToken });
+  }
+
+  if (action === "edit_contact") {
+    if (!lead.manualContact) {
+      return Response.json({ error: "Este lead no es manual." }, { status: 400 });
+    }
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) return Response.json({ error: "Falta el nombre del contacto." }, { status: 400 });
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim() : "";
+
+    await ref.update({
+      "manualContact.name": name,
+      "manualContact.phone": phone || null,
+      "manualContact.email": email || null,
+    });
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: `Editó el contacto de ${carLabel()}`,
+    });
+    return Response.json({ ok: true });
   }
 
   return Response.json({ error: "Acción inválida." }, { status: 400 });

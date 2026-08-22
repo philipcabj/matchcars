@@ -12,7 +12,7 @@ import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
-import { LEAD_STATUS_LABELS, LeadDetail, LeadMessage, LeadStatus } from "@/lib/leads";
+import { LEAD_STATUS_LABELS, MANUAL_CONTACT_SOURCE_LABELS, LeadDetail, LeadMessage, LeadStatus } from "@/lib/leads";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -39,6 +39,7 @@ export default function LeadDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prompt, setPrompt] = useState<{ action: "advance" | "lost"; text: string } | null>(null);
+  const [editContact, setEditContact] = useState<{ name: string; phone: string; email: string } | null>(null);
   const [counterPrompt, setCounterPrompt] = useState<{ amount: string; currency: "ARS" | "USD"; note: string } | null>(null);
   const [closePrompt, setClosePrompt] = useState<{ price: string; currency: "ARS" | "USD" } | null>(null);
   const [reply, setReply] = useState("");
@@ -170,6 +171,27 @@ export default function LeadDetailPage() {
     }
   };
 
+  const saveContact = async () => {
+    if (!editContact || !editContact.name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/leads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "edit_contact", ...editContact }),
+      });
+      await parseJsonResponse(res);
+      setEditContact(null);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const sendReply = async () => {
     const text = reply.trim();
     if (!text) return;
@@ -240,11 +262,47 @@ export default function LeadDetailPage() {
           <p className="text-sm text-muted-foreground">
             {buyerName}
             {manual && <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">manual</span>}
+            {manual?.contactSource && (
+              <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
+              </span>
+            )}
+            {manual && (
+              <button
+                onClick={() => setEditContact({ name: manual.name ?? "", phone: manual.phone ?? "", email: manual.email ?? "" })}
+                className="ml-1.5 text-[10px] font-semibold text-accent"
+              >
+                Editar
+              </button>
+            )}
           </p>
           {manual && (manual.phone || manual.email) && (
-            <p className="text-xs text-muted-foreground">{[manual.phone, manual.email].filter(Boolean).join(" · ")}</p>
+            <p className="text-xs text-muted-foreground">
+              {[manual.phone, manual.email].filter(Boolean).join(" · ")}
+              {manual.phone && (
+                <a
+                  href={`https://wa.me/${manual.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
+                    `Hola ${manual.name}, te escribo por tu consulta${veh?.brand ? ` sobre el ${veh.brand} ${veh.model}` : ""}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-1.5 font-semibold text-success"
+                >
+                  WhatsApp →
+                </a>
+              )}
+            </p>
           )}
           {manual?.notes && <p className="mt-1 text-xs italic text-muted-foreground">{manual.notes}</p>}
+          {lead.activity && lead.activity.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
+              {lead.activity.map((ev) => (
+                <p key={ev.id} className="text-[11px] text-muted-foreground">
+                  <span className="font-semibold">{ev.actorName}</span> · {ev.summary} · {fmtDateTime(ev.createdAt)}
+                </p>
+              ))}
+            </div>
+          )}
           {veh?.price && !(lead.status === "won" && lead.dealPrice) && (
             <p className="mt-1 text-sm font-semibold text-accent">
               {veh.currency} {Number(veh.price).toLocaleString("es-AR")}
@@ -319,6 +377,53 @@ export default function LeadDetailPage() {
             <span className="text-xs font-semibold text-accent">{startingOp ? "Creando…" : "Iniciar →"}</span>
           </button>
         ))}
+
+      {editContact && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
+          <p className="text-sm font-semibold">Editar contacto</p>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Nombre *</span>
+            <input
+              autoFocus
+              value={editContact.name}
+              onChange={(e) => setEditContact({ ...editContact, name: e.target.value })}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Teléfono</span>
+            <input
+              value={editContact.phone}
+              onChange={(e) => setEditContact({ ...editContact, phone: e.target.value })}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Email</span>
+            <input
+              type="email"
+              value={editContact.email}
+              onChange={(e) => setEditContact({ ...editContact, email: e.target.value })}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setEditContact(null)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={busy || !editContact.name.trim()}
+              onClick={saveContact}
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+            >
+              Guardar
+            </button>
+          </div>
+        </div>
+      )}
 
       {prompt && (
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">
