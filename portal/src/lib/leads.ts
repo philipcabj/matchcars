@@ -98,6 +98,8 @@ export interface LeadDetail {
   assignedTo?: string | null;
   saleOperationId?: string | null;
   deliveryConfirmToken?: string | null;
+  deletedAt?: string | null;
+  deletedReason?: string | null;
   activity?: LeadActivityEvent[];
 }
 

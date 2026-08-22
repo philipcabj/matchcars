@@ -40,6 +40,7 @@ export default function LeadDetailPage() {
   const [busy, setBusy] = useState(false);
   const [prompt, setPrompt] = useState<{ action: "advance" | "lost"; text: string } | null>(null);
   const [editContact, setEditContact] = useState<{ name: string; phone: string; email: string } | null>(null);
+  const [deleteReason, setDeleteReason] = useState<string | null>(null);
   const [counterPrompt, setCounterPrompt] = useState<{ amount: string; currency: "ARS" | "USD"; note: string } | null>(null);
   const [closePrompt, setClosePrompt] = useState<{ price: string; currency: "ARS" | "USD" } | null>(null);
   const [reply, setReply] = useState("");
@@ -192,6 +193,25 @@ export default function LeadDetailPage() {
     }
   };
 
+  const deleteLead = async () => {
+    if (!deleteReason || !deleteReason.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/leads/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ reason: deleteReason.trim() }),
+      });
+      await parseJsonResponse(res);
+      router.push("/dashboard/leads");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+      setBusy(false);
+    }
+  };
+
   const sendReply = async () => {
     const text = reply.trim();
     if (!text) return;
@@ -247,8 +267,9 @@ export default function LeadDetailPage() {
   const manual = lead.manualContact;
   const title = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim() : "Consulta general";
   const buyerName = manual?.name || (buyer?.firstName || buyer?.lastName ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim() : "Comprador");
-  const canAct = lead.status !== "won" && lead.status !== "lost";
+  const canAct = !lead.deletedAt && lead.status !== "won" && lead.status !== "lost";
   const isOrganic = !!lead.conversationId;
+  const canDelete = !lead.deletedAt && !!manual && !lead.saleOperationId;
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
@@ -267,12 +288,17 @@ export default function LeadDetailPage() {
                 {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
               </span>
             )}
-            {manual && (
+            {manual && !lead.deletedAt && (
               <button
                 onClick={() => setEditContact({ name: manual.name ?? "", phone: manual.phone ?? "", email: manual.email ?? "" })}
                 className="ml-1.5 text-[10px] font-semibold text-accent"
               >
                 Editar
+              </button>
+            )}
+            {canDelete && (
+              <button onClick={() => setDeleteReason("")} className="ml-1.5 text-[10px] font-semibold text-error">
+                Eliminar
               </button>
             )}
           </p>
@@ -315,6 +341,11 @@ export default function LeadDetailPage() {
           )}
           {lead.status === "lost" && lead.reasonLost && (
             <p className="mt-1 text-xs text-error">Motivo: {lead.reasonLost}</p>
+          )}
+          {lead.deletedAt && (
+            <p className="mt-1 text-xs font-semibold text-error">
+              Eliminado{lead.deletedReason ? `: ${lead.deletedReason}` : ""}
+            </p>
           )}
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -377,6 +408,37 @@ export default function LeadDetailPage() {
             <span className="text-xs font-semibold text-accent">{startingOp ? "Creando…" : "Iniciar →"}</span>
           </button>
         ))}
+
+      {deleteReason !== null && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-error/40 bg-error/5 p-4">
+          <p className="text-sm font-semibold text-error">Eliminar lead</p>
+          <p className="text-xs text-muted-foreground">
+            Esta acción no se puede deshacer — el lead deja de aparecer en la lista y en las estadísticas.
+          </p>
+          <textarea
+            autoFocus
+            value={deleteReason}
+            onChange={(e) => setDeleteReason(e.target.value)}
+            placeholder="Ej: lo cargué dos veces, era para otro auto, dato equivocado…"
+            className="min-h-16 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-error"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setDeleteReason(null)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground"
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={busy || !deleteReason.trim()}
+              onClick={deleteLead}
+              className="rounded-lg bg-error px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Eliminar definitivamente
+            </button>
+          </div>
+        </div>
+      )}
 
       {editContact && (
         <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4">

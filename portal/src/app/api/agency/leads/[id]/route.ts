@@ -116,6 +116,8 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     createdAt: toIso(data.createdAt),
     assignedTo: data.assignedTo ?? null,
     saleOperationId: data.saleOperationId ?? null,
+    deletedAt: toIso(data.deletedAt),
+    deletedReason: data.deletedReason ?? null,
     activity,
   });
 });
@@ -134,6 +136,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (!snap.exists) return Response.json({ error: "No encontrado" }, { status: 404 });
   const lead = snap.data()!;
   if (lead.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
+  if (lead.deletedAt) return Response.json({ error: "Este lead fue eliminado." }, { status: 400 });
 
   const body = await request.json();
   const action = body.action as "advance" | "lost" | "mark_won" | "mark_vehicle_sold" | "assign";
@@ -370,4 +373,53 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   }
 
   return Response.json({ error: "Acción inválida." }, { status: 400 });
+});
+
+// Baja de un lead manual mal cargado (duplicado, contacto equivocado, auto
+// que no era, etc.). Mismo criterio que la baja de vehículos (vehicles/[id]/
+// route.ts DELETE): soft-delete permanente vía deletedAt, sin deshacer — así
+// el lead sale de /dashboard/leads y de las estadísticas pero el registro
+// (y el motivo) quedan para auditoría. Solo para leads manuales: los
+// orgánicos vienen de una conversación real de la app, ahí "Perdido" es lo
+// que corresponde. No se puede borrar un lead que ya tiene una operación de
+// venta asociada — hay que resolver esa operación primero.
+export const DELETE = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]">) => {
+  const uid = await requireUid(request);
+  const { agencyId, role } = await resolveMembership(uid);
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+    return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
+  }
+  await requireCRMAccess(agencyId);
+
+  const { id } = await ctx.params;
+  const ref = adminDb.doc(`leads/${id}`);
+  const snap = await ref.get();
+  if (!snap.exists) return Response.json({ error: "No encontrado" }, { status: 404 });
+  const lead = snap.data()!;
+  if (lead.sellerId !== agencyId) return Response.json({ error: "No autorizado" }, { status: 403 });
+  if (lead.deletedAt) return Response.json({ ok: true });
+
+  if (!lead.manualContact) {
+    return Response.json({ error: "Solo se pueden eliminar leads cargados a mano — un lead orgánico se marca como perdido." }, { status: 400 });
+  }
+  if (lead.saleOperationId) {
+    return Response.json({ error: "Este lead tiene una operación de venta asociada — resolvela antes de eliminarlo." }, { status: 400 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (!reason) return Response.json({ error: "Contame por qué eliminás este lead." }, { status: 400 });
+
+  await ref.update({ deletedAt: FieldValue.serverTimestamp(), deletedReason: reason, deletedBy: uid });
+
+  const carLabel = `${lead.vehicleSnapshot?.brand ?? ""} ${lead.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "lead",
+    entityId: id,
+    summary: `Eliminó el lead manual de ${carLabel}: ${reason}`,
+  });
+
+  return Response.json({ ok: true });
 });

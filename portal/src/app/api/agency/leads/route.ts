@@ -79,8 +79,11 @@ export const GET = withApiErrors(async (request) => {
   await requireCRMAccess(agencyId);
 
   const snap = await adminDb.collection("leads").where("sellerId", "==", agencyId).get();
+  // Los eliminados (soft-delete, ver DELETE en [id]/route.ts) no cuentan acá
+  // ni en las estadísticas de abajo — solo quedan accesibles por su URL directa.
+  const activeDocs = snap.docs.filter((d) => !d.data().deletedAt);
 
-  const leads = snap.docs
+  const leads = activeDocs
     .map((d) => {
       const data = d.data();
       return {
@@ -111,7 +114,7 @@ export const GET = withApiErrors(async (request) => {
   const usdTotal = wonLeads.filter((l) => l.dealCurrency === "USD").reduce((s, l) => s + (l.dealPrice || 0), 0);
   const conversionRate = total > 0 ? Math.round((wonCount / total) * 100) : 0;
 
-  const allDocsData = snap.docs.map((d) => d.data());
+  const allDocsData = activeDocs.map((d) => d.data());
   const wonDocsData = allDocsData.filter((d) => d.status === "won");
   const salesByMonth = buildSalesByMonth(wonDocsData as { wonAt: unknown; dealPrice?: number; dealCurrency?: string }[]);
 
