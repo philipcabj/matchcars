@@ -282,7 +282,11 @@ export default function LeadDetailPage() {
           <p className="text-base font-bold">{title}</p>
           <p className="text-sm text-muted-foreground">
             {buyerName}
-            {manual && <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">manual</span>}
+            {isOrganic ? (
+              <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
+            ) : (
+              <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">Manual</span>
+            )}
             {manual?.contactSource && (
               <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
                 {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
@@ -303,21 +307,19 @@ export default function LeadDetailPage() {
             )}
           </p>
           {manual && (manual.phone || manual.email) && (
-            <p className="text-xs text-muted-foreground">
-              {[manual.phone, manual.email].filter(Boolean).join(" · ")}
-              {manual.phone && (
-                <a
-                  href={`https://wa.me/${manual.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
-                    `Hola ${manual.name}, te escribo por tu consulta${veh?.brand ? ` sobre el ${veh.brand} ${veh.model}` : ""}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ml-1.5 font-semibold text-success"
-                >
-                  WhatsApp →
-                </a>
-              )}
-            </p>
+            <p className="text-xs text-muted-foreground">{[manual.phone, manual.email].filter(Boolean).join(" · ")}</p>
+          )}
+          {manual?.phone && (
+            <a
+              href={`https://wa.me/${manual.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
+                `Hola ${manual.name}, te escribo por tu consulta${veh?.brand ? ` sobre el ${veh.brand} ${veh.model}` : ""}`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-success/40 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success"
+            >
+              💬 Contactar por WhatsApp
+            </a>
           )}
           {manual?.notes && <p className="mt-1 text-xs italic text-muted-foreground">{manual.notes}</p>}
           {lead.activity && lead.activity.length > 0 && (

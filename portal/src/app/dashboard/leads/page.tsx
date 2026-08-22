@@ -269,7 +269,11 @@ export default function LeadsPage() {
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {buyerName}
-                    {manual && <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">manual</span>}
+                    {manual ? (
+                      <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">Manual</span>
+                    ) : (
+                      <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
+                    )}
                     {manual?.contactSource && (
                       <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
                         {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
