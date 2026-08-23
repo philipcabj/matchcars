@@ -186,10 +186,18 @@ export const POST = withApiErrors(async (request) => {
     conversationId: "",
     status: "new",
     source: contactSource,
+    // Quien carga el lead manual es, en la enorme mayoría de los casos,
+    // quien lo está llevando (recibió el WhatsApp/llamada) — sin esto,
+    // los leads manuales quedaban sin vendedor asignado salvo que alguien
+    // lo hiciera a mano, y mark_vehicle_sold no calcula comisión sin
+    // assignedTo (ver leads/[id]/route.ts). Sigue siendo reasignable desde
+    // el selector "Asignado a" en la ficha del lead.
+    assignedTo: uid,
     manualContact: {
       name,
       phone: body.phone?.trim() || null,
       email: body.email?.trim() || null,
+      instagramHandle: body.instagramHandle?.trim() || null,
       notes: body.notes?.trim() || null,
       contactSource,
     },

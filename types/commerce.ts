@@ -65,7 +65,7 @@ export interface Offer extends OfferSummary {
   };
 }
 
-export type LeadSource = "search" | "favorite" | "share" | "alert" | "whatsapp" | "phone" | "in_person" | "other";
+export type LeadSource = "search" | "favorite" | "share" | "alert" | "whatsapp" | "instagram" | "phone" | "in_person" | "other";
 
 export interface Lead {
   sellerId: string;

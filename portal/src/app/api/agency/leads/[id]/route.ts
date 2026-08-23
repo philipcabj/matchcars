@@ -356,11 +356,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     if (!name) return Response.json({ error: "Falta el nombre del contacto." }, { status: 400 });
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const email = typeof body.email === "string" ? body.email.trim() : "";
+    const instagramHandle = typeof body.instagramHandle === "string" ? body.instagramHandle.trim() : "";
 
     await ref.update({
       "manualContact.name": name,
       "manualContact.phone": phone || null,
       "manualContact.email": email || null,
+      "manualContact.instagramHandle": instagramHandle || null,
     });
     await logActivity({
       agencyId,

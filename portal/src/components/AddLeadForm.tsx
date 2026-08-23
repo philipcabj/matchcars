@@ -18,6 +18,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [instagramHandle, setInstagramHandle] = useState("");
   const [vehicleId, setVehicleId] = useState("");
   const [contactSource, setContactSource] = useState<ManualContactSource>("whatsapp");
   const [notes, setNotes] = useState("");
@@ -45,7 +46,7 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
       const res = await fetch("/api/agency/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, phone, email, vehicleId: vehicleId || undefined, notes, contactSource }),
+        body: JSON.stringify({ name, phone, email, instagramHandle, vehicleId: vehicleId || undefined, notes, contactSource }),
       });
       await parseJsonResponse(res);
       onCreated();
@@ -75,6 +76,15 @@ export function AddLeadForm({ onCreated, onCancel }: { onCreated: () => void; on
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Email</span>
           <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Usuario de Instagram</span>
+          <input
+            className={inputClass}
+            value={instagramHandle}
+            onChange={(e) => setInstagramHandle(e.target.value)}
+            placeholder="@usuario"
+          />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Auto de interés</span>

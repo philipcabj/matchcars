@@ -217,7 +217,7 @@ export default function LeadsPage() {
             const manual = lead.manualContact;
             const title = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim() : "Consulta general";
             const buyerName = manual?.name || (buyer?.firstName || buyer?.lastName ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim() : "Comprador");
-            const contactLine = manual ? [manual.phone, manual.email].filter(Boolean).join(" · ") : "";
+            const contactLine = manual ? [manual.phone, manual.email, manual.instagramHandle].filter(Boolean).join(" · ") : "";
             const canAct = lead.status !== "won" && lead.status !== "lost";
             const days = daysSince(lead.lastMessageAt);
             const isStale = (lead.status === "contacted" || lead.status === "negotiation") && days !== null && days >= STALE_FOLLOWUP_DAYS;

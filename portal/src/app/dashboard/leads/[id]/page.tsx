@@ -39,7 +39,9 @@ export default function LeadDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [prompt, setPrompt] = useState<{ action: "advance" | "lost"; text: string } | null>(null);
-  const [editContact, setEditContact] = useState<{ name: string; phone: string; email: string } | null>(null);
+  const [editContact, setEditContact] = useState<{ name: string; phone: string; email: string; instagramHandle: string } | null>(
+    null
+  );
   const [deleteReason, setDeleteReason] = useState<string | null>(null);
   const [counterPrompt, setCounterPrompt] = useState<{ amount: string; currency: "ARS" | "USD"; note: string } | null>(null);
   const [closePrompt, setClosePrompt] = useState<{ price: string; currency: "ARS" | "USD" } | null>(null);
@@ -294,7 +296,14 @@ export default function LeadDetailPage() {
             )}
             {manual && !lead.deletedAt && (
               <button
-                onClick={() => setEditContact({ name: manual.name ?? "", phone: manual.phone ?? "", email: manual.email ?? "" })}
+                onClick={() =>
+                  setEditContact({
+                    name: manual.name ?? "",
+                    phone: manual.phone ?? "",
+                    email: manual.email ?? "",
+                    instagramHandle: manual.instagramHandle ?? "",
+                  })
+                }
                 className="ml-1.5 text-[10px] font-semibold text-accent"
               >
                 Editar
@@ -306,21 +315,35 @@ export default function LeadDetailPage() {
               </button>
             )}
           </p>
-          {manual && (manual.phone || manual.email) && (
-            <p className="text-xs text-muted-foreground">{[manual.phone, manual.email].filter(Boolean).join(" · ")}</p>
+          {manual && (manual.phone || manual.email || manual.instagramHandle) && (
+            <p className="text-xs text-muted-foreground">
+              {[manual.phone, manual.email, manual.instagramHandle].filter(Boolean).join(" · ")}
+            </p>
           )}
-          {manual?.phone && (
-            <a
-              href={`https://wa.me/${manual.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
-                `Hola ${manual.name}, te escribo por tu consulta${veh?.brand ? ` sobre el ${veh.brand} ${veh.model}` : ""}`
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-success/40 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success"
-            >
-              💬 Contactar por WhatsApp
-            </a>
-          )}
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {manual?.phone && (
+              <a
+                href={`https://wa.me/${manual.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
+                  `Hola ${manual.name}, te escribo por tu consulta${veh?.brand ? ` sobre el ${veh.brand} ${veh.model}` : ""}`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-success/40 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success"
+              >
+                💬 Contactar por WhatsApp
+              </a>
+            )}
+            {manual?.instagramHandle && (
+              <a
+                href={`https://ig.me/m/${manual.instagramHandle.replace(/^@/, "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-1.5 text-xs font-semibold text-fuchsia-600"
+              >
+                📷 Contactar por Instagram
+              </a>
+            )}
+          </div>
           {manual?.notes && <p className="mt-1 text-xs italic text-muted-foreground">{manual.notes}</p>}
           {lead.activity && lead.activity.length > 0 && (
             <div className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
@@ -468,6 +491,15 @@ export default function LeadDetailPage() {
               type="email"
               value={editContact.email}
               onChange={(e) => setEditContact({ ...editContact, email: e.target.value })}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Usuario de Instagram</span>
+            <input
+              value={editContact.instagramHandle}
+              onChange={(e) => setEditContact({ ...editContact, instagramHandle: e.target.value })}
+              placeholder="@usuario"
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
             />
           </label>

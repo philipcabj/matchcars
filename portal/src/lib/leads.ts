@@ -24,10 +24,11 @@ export const LEAD_STAGE_BAR_COLOR: Record<LeadStatus, string> = {
   lost: "bg-error",
 };
 
-export type ManualContactSource = "whatsapp" | "phone" | "in_person" | "other";
+export type ManualContactSource = "whatsapp" | "instagram" | "phone" | "in_person" | "other";
 
 export const MANUAL_CONTACT_SOURCE_LABELS: Record<ManualContactSource, string> = {
   whatsapp: "WhatsApp",
+  instagram: "Instagram",
   phone: "Teléfono",
   in_person: "Presencial",
   other: "Otro",
@@ -37,6 +38,7 @@ export interface ManualContact {
   name: string;
   phone?: string;
   email?: string;
+  instagramHandle?: string;
   notes?: string;
   contactSource?: ManualContactSource;
 }
@@ -107,6 +109,7 @@ export interface CreateManualLeadInput {
   name: string;
   phone?: string;
   email?: string;
+  instagramHandle?: string;
   notes?: string;
   vehicleId?: string;
   contactSource: ManualContactSource;
