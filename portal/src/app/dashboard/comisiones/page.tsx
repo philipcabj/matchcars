@@ -41,6 +41,9 @@ export default function ComisionesPage() {
   });
   const [entries, setEntries] = useState<CommissionEntryRow[] | null>(null);
   const [bySeller, setBySeller] = useState<{ sellerUid: string; arsTotal: number; usdTotal: number; count: number }[]>([]);
+  const [performance, setPerformance] = useState<
+    { sellerUid: string; leadsAssigned: number; leadsWon: number; conversionRate: number; avgDaysToClose: number | null }[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
 
   const [rule, setRule] = useState<CommissionRule | null>(null);
@@ -52,15 +55,18 @@ export default function ComisionesPage() {
       try {
         const token = await getIdToken();
         const headers = { Authorization: `Bearer ${token}` };
-        const [commRes, ruleRes] = await Promise.all([
+        const [commRes, ruleRes, perfRes] = await Promise.all([
           fetch(`/api/agency/commissions?month=${month}`, { headers }),
           fetch("/api/agency/commission-rules", { headers }),
+          fetch(`/api/agency/seller-performance?month=${month}`, { headers }),
         ]);
         const commData = await parseJsonResponse<{ entries: CommissionEntryRow[]; bySeller: typeof bySeller }>(commRes);
         setEntries(commData.entries);
         setBySeller(commData.bySeller);
         const ruleData = await parseJsonResponse<{ rule: CommissionRule }>(ruleRes);
         setRule(ruleData.rule);
+        const perfData = await parseJsonResponse<{ bySeller: typeof performance }>(perfRes);
+        setPerformance(perfData.bySeller);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Error desconocido");
       }
@@ -265,6 +271,36 @@ export default function ComisionesPage() {
               {s.usdTotal > 0 && <p className="text-lg font-extrabold">USD {s.usdTotal.toLocaleString("es-AR")}</p>}
             </div>
           ))}
+        </div>
+      )}
+
+      {performance.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <p className="mb-3 text-sm font-semibold">Performance del equipo</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-2 pr-3 font-medium">Vendedor</th>
+                  <th className="pb-2 pr-3 font-medium">Asignados</th>
+                  <th className="pb-2 pr-3 font-medium">Ganados</th>
+                  <th className="pb-2 pr-3 font-medium">Conversión</th>
+                  <th className="pb-2 font-medium">Días prom. de cierre</th>
+                </tr>
+              </thead>
+              <tbody>
+                {performance.map((p) => (
+                  <tr key={p.sellerUid} className="border-t border-border">
+                    <td className="py-2 pr-3 font-semibold">{memberName(p.sellerUid)}</td>
+                    <td className="py-2 pr-3">{p.leadsAssigned}</td>
+                    <td className="py-2 pr-3">{p.leadsWon}</td>
+                    <td className="py-2 pr-3">{p.conversionRate}%</td>
+                    <td className="py-2">{p.avgDaysToClose ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
