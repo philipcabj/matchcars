@@ -91,7 +91,7 @@ export const GET = withApiErrors(async (request) => {
     avatarUrl: ownerData.logoUrl || ownerData.photoURL || null,
     plan,
     planLabel: getPlanLabel(plan),
-    isDealerPlan: /pro_dealer|dealer_pro_plus/.test(plan),
+    isDealerPlan: /pro_dealer/.test(plan),
     hasCRM: canAccessCRM(plan),
     features: getPlanFeatures(plan),
     usage: {

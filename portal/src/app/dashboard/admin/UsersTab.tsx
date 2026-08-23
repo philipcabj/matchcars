@@ -35,8 +35,6 @@ const PLAN_COLORS: Record<string, string> = {
   pro_plus_annual: "#4F46E5",
   pro_dealer_monthly: "#10B981",
   pro_dealer_annual: "#059669",
-  dealer_pro_plus_monthly: "#0D9488",
-  dealer_pro_plus_annual: "#0F766E",
   pro_dealer: "#9CA3AF",
 };
 

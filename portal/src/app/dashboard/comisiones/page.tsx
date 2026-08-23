@@ -99,15 +99,6 @@ export default function ComisionesPage() {
     }
   };
 
-  if (agency && !agency.isDealerPlan) {
-    return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-border bg-card p-8 text-center">
-        <p className="font-semibold">Función exclusiva de planes Dealer</p>
-        <p className="mt-2 text-sm text-muted-foreground">Las comisiones de equipo están disponibles desde el plan Dealer.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div>

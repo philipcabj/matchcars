@@ -91,7 +91,7 @@ export const POST = withApiErrors(async (request) => {
   const kmNum = body.km ? Number(body.km) : 0;
   const currency = body.currency === "USD" ? "USD" : "ARS";
   const toggles = body.toggles ?? {};
-  const isDealer = /pro_dealer|dealer_pro_plus/.test(plan);
+  const isDealer = /pro_dealer/.test(plan);
   const userName = isDealer && userData.agencyName ? userData.agencyName : userData.displayName || userData.email || "Agencia";
 
   const vehicleData = {

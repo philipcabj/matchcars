@@ -21,8 +21,6 @@ export type SubscriptionPlan =
   | "pro_plus_annual"
   | "pro_dealer_monthly"
   | "pro_dealer_annual"
-  | "dealer_pro_plus_monthly"
-  | "dealer_pro_plus_annual"
   | "pro_dealer"; // Fallback/legacy
 
 export const PLAN_LABELS: Record<SubscriptionPlan, string> = {
@@ -33,8 +31,6 @@ export const PLAN_LABELS: Record<SubscriptionPlan, string> = {
   pro_plus_annual: "Pro+ Anual",
   pro_dealer_monthly: "Dealer Mensual",
   pro_dealer_annual: "Dealer Anual",
-  dealer_pro_plus_monthly: "Dealer Pro+ Mensual",
-  dealer_pro_plus_annual: "Dealer Pro+ Anual",
   pro_dealer: "Pro Dealer",
 };
 
@@ -74,96 +70,97 @@ export function can(role: AgencyRole, permission: keyof AgencyRolePermissions): 
 
 /**
  * Asientos de equipo incluidos por plan (cuántos usuarios puede tener la agencia).
- * Decisión de negocio (2026-08-17): no cobrar por asiento adicional — en vez
- * de vender "+N usuarios" como add-on de tienda (mucho más trabajo de
- * ingeniería/revisión de store), se compite en funcionalidad (Reportes
- * avanzados, Comisiones, Panel comparativo) y se suben los topes incluidos
- * para que la cantidad de gente deje de ser el techo real de una agencia
- * grande. Pro/Pro Plus quedan en 1 a propósito: son planes individuales, sin
- * equipo a quien asignarle un lead (ver canManageCommissions).
+ * Reestructuración de planes: el portal se vende entero desde Pro (nada queda
+ * como upsell exclusivo de Dealer) — el único eje de diferenciación entre
+ * planes son estos tres números (autos, destacados, usuarios), no el acceso
+ * a funciones.
  */
 export function getIncludedSeats(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
-  if (plan.includes("dealer_pro_plus")) return 10;
-  if (plan.includes("pro_dealer")) return 5;
-  return 1; // Planes no-dealer: solo el dueño de la cuenta, sin equipo.
+  if (plan.includes("pro_dealer")) return 30;
+  if (plan.includes("pro_plus")) return 10;
+  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
+  return 1; // Free.
 }
 
 // ─── Feature checks (copia de lib/planChecks.ts) ────────────────────────────
 
 export function getMaxCars(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
-  if (plan.includes("dealer_pro_plus")) return Infinity;
-  if (plan.includes("pro_dealer")) return 30;
-  if (plan.includes("pro_plus")) return 7;
-  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 3;
+  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_plus")) return 40;
+  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 15;
   return 1;
 }
 
+// Identidad de negocio (nombre de fantasía, auto-featured al publicar) — NO
+// gatea funciones del portal, esas son universales en cualquier plan pago.
 export function isDealerPlan(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return plan.includes("pro_dealer");
 }
 
+// Disponible en cualquier plan pago.
 export function canBulkImport(plan: SubscriptionPlan | string): boolean {
-  return isDealerPlan(plan);
+  if (!plan) return false;
+  return plan !== "free";
 }
 
-// Desde Pro Plus es un CRM personal (sin equipo — getIncludedSeats da 1
-// asiento para planes no-dealer, así que no hay a quién asignarle un lead);
-// desde Pro Dealer se suma la asignación entre vendedores.
+// Disponible en cualquier plan pago — el portal se vende entero desde Pro.
 export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return plan !== "free";
 }
 
-// "Reportes avanzados" (sección "necesitan atención") — exclusivo Dealer+,
-// a diferencia de las métricas básicas que ve cualquier plan pago.
+// Disponible en cualquier plan pago.
 export function hasAdvancedReports(plan: SubscriptionPlan | string): boolean {
-  return isDealerPlan(plan);
+  if (!plan) return false;
+  return plan !== "free";
 }
 
-// Panel comparativo (tu agencia vs. el promedio de otras agencias Dealer) —
-// exclusivo de Dealer Pro Plus, el escalón de tope.
+// Panel comparativo (tu agencia vs. el promedio de otras agencias pagas) —
+// disponible en cualquier plan pago; el pool de comparación (reports/route.ts)
+// incluye a todas las agencias pagas, no solo Dealer.
 export function hasPeerComparison(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return plan.includes("dealer_pro_plus");
+  return plan !== "free";
 }
 
 export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some((p) => plan.includes(p));
 }
 
+// Disponible en cualquier plan pago.
 export function canExportPDF(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return plan !== "free";
 }
 
 export function canUseWatermark(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some((p) => plan.includes(p));
 }
 
-// Gastos por unidad / margen — útil incluso para un vendedor solo (Pro+),
-// no requiere equipo. Free queda afuera, es una herramienta de gestión.
+// Gastos por unidad / margen — útil incluso para un vendedor solo, no
+// requiere equipo. Free queda afuera, es una herramienta de gestión.
 export function canTrackExpenses(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
   return plan !== "free";
 }
 
-// Comisiones — a diferencia de gastos/margen, no tiene sentido sin equipo a
-// quien pagarle (getIncludedSeats da 1 asiento para planes no-dealer).
+// Disponible en cualquier plan pago — todos tienen equipo (getIncludedSeats)
+// a quien pagarle comisión.
 export function canManageCommissions(plan: SubscriptionPlan | string): boolean {
-  return isDealerPlan(plan);
+  if (!plan) return false;
+  return plan !== "free";
 }
 
 export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): number {
   if (!plan) return 0;
-  if (plan.includes("dealer_pro_plus")) return Infinity;
   if (plan.includes("pro_dealer")) return Infinity;
-  if (plan.includes("pro_plus")) return 5;
-  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 2;
+  if (plan.includes("pro_plus")) return 15;
+  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
   return 0;
 }
 
@@ -190,23 +187,17 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
   if (canExportPDF(plan)) features.push("📄 Ficha PDF con QR");
 
   const seats = getIncludedSeats(plan);
-  // Portal ya es accesible para cualquier plan pago hoy (getIncludedSeats da
-  // 1 asiento incluso a Pro/Pro Plus) — antes no se comunicaba nada de esto
-  // en la lista, parecía exclusivo de Dealer. Para seats > 1 la línea de
-  // "Hasta N usuarios de portal" de más abajo ya lo deja claro, así que acá
-  // solo hace falta el caso de un solo asiento.
-  if (seats === 1) features.push("💻 Acceso al Portal de Agencias");
-  if (canAccessCRM(plan)) features.push(seats > 1 ? "📞 CRM de Leads con equipo" : "📞 CRM personal de consultas");
-  if (canBulkImport(plan)) features.push("💻 Carga Masiva (CSV)");
-  if (seats > 1) features.push(`👥 Hasta ${seats} usuarios de portal`);
-  if (hasAdvancedReports(plan)) features.push("📊 Reportes avanzados");
-  if (hasPeerComparison(plan)) features.push("📈 Panel comparativo vs. otras agencias");
-  // Gestión de venta (checklist + documentos PDF + financiación + parte de
-  // pago) y postventa automática — mismo gate que el CRM, no tiene sentido
-  // gestionar operaciones sin poder cargar el lead que las origina.
-  if (canAccessCRM(plan)) features.push("📋 Gestión de venta: checklist, documentos PDF y postventa automática");
+  features.push(`👥 Hasta ${seats} usuarios de portal`);
+
+  // El portal se vende entero desde Pro — un solo bloque en vez de listar
+  // CRM/gestión de venta/comisiones/reportes como líneas sueltas (eran el
+  // mismo producto, no features independientes).
+  if (canAccessCRM(plan)) {
+    features.push(
+      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas, reportes avanzados y panel comparativo"
+    );
+  }
   if (canTrackExpenses(plan)) features.push("💵 Control de gastos y margen por unidad");
-  if (canManageCommissions(plan)) features.push("🧮 Comisiones automáticas por vendedor");
 
   return features;
 }

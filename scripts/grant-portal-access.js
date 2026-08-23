@@ -14,7 +14,6 @@ const VALID_PLANS = [
   "pro_monthly", "pro_annual",
   "pro_plus_monthly", "pro_plus_annual",
   "pro_dealer_monthly", "pro_dealer_annual",
-  "dealer_pro_plus_monthly", "dealer_pro_plus_annual",
 ];
 
 async function run() {

@@ -1,16 +1,16 @@
 // portal/src/app/api/agency/reports/route.ts
 // GET -> métricas de stock de la agencia: totales, desglose por estado,
-// ranking de autos más vistos. Dos secciones de plan pago:
+// ranking de autos más vistos. Dos secciones de plan pago (universales desde
+// la reestructuración de planes — cualquier plan pago, no solo Dealer):
 // - needsAttention ("necesitan atención"): cruce vehicles x leads por
-//   vehicleId — Dealer+ (hasAdvancedReports). No hay series de tiempo
-//   guardadas en ningún lado, así que no se puede armar un gráfico de
-//   tendencia real de vistas/likes sin inventar datos; por eso no hay uno
-//   acá, pero sí se puede señalar qué autos activos nunca generaron un lead.
-// - peerComparison: tu agencia vs. el promedio de otras agencias en planes
-//   Dealer — exclusivo Dealer Pro Plus (hasPeerComparison). Requiere un
-//   mínimo de agencias en el promedio (MIN_PEERS_FOR_COMPARISON) para no
-//   terminar mostrando, en la práctica, el número exacto de una sola agencia
-//   competidora bajo la forma de "promedio".
+//   vehicleId (hasAdvancedReports). No hay series de tiempo guardadas en
+//   ningún lado, así que no se puede armar un gráfico de tendencia real de
+//   vistas/likes sin inventar datos; por eso no hay uno acá, pero sí se puede
+//   señalar qué autos activos nunca generaron un lead.
+// - peerComparison: tu agencia vs. el promedio de otras agencias pagas
+//   (hasPeerComparison). Requiere un mínimo de agencias en el promedio
+//   (MIN_PEERS_FOR_COMPARISON) para no terminar mostrando, en la práctica, el
+//   número exacto de una sola agencia competidora bajo la forma de "promedio".
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -24,7 +24,18 @@ const HIGH_VIEWS_THRESHOLD = 15;
 const STALE_DAYS_THRESHOLD = 30;
 const MAX_ATTENTION_ITEMS = 6;
 const MIN_PEERS_FOR_COMPARISON = 3;
-const DEALER_PLAN_VALUES = ["pro_dealer", "pro_dealer_monthly", "pro_dealer_annual", "dealer_pro_plus_monthly", "dealer_pro_plus_annual"];
+// Pool del panel comparativo (peerComparison) — cualquier plan pago, no solo
+// Dealer, desde que el portal se vende entero desde Pro.
+const PAID_PLAN_VALUES = [
+  "pro",
+  "pro_monthly",
+  "pro_annual",
+  "pro_plus_monthly",
+  "pro_plus_annual",
+  "pro_dealer",
+  "pro_dealer_monthly",
+  "pro_dealer_annual",
+];
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
@@ -102,7 +113,7 @@ export const GET = withApiErrors(async (request) => {
 
   let peerComparison: PeerComparison | null = null;
   if (hasPeerComparison(plan)) {
-    const peerSnap = await adminDb.collection("vehicles").where("userPlan", "in", DEALER_PLAN_VALUES).get();
+    const peerSnap = await adminDb.collection("vehicles").where("userPlan", "in", PAID_PLAN_VALUES).get();
     const byAgency = new Map<string, { activeCount: number; totalViews: number; daysSum: number; daysCount: number }>();
     for (const d of peerSnap.docs) {
       const v = d.data();

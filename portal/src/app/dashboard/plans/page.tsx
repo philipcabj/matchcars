@@ -17,15 +17,13 @@ function fmtUsd(n: number): string {
 
 export default function PlansPage() {
   const { data: agency } = useAgencyMe();
-  const currentPlanId = agency?.plan?.includes("dealer_pro_plus")
-    ? "dealer_pro_plus"
-    : agency?.plan?.includes("pro_dealer")
-      ? "pro_dealer"
-      : agency?.plan?.includes("pro_plus")
-        ? "pro_plus"
-        : agency?.plan?.includes("pro")
-          ? "pro"
-          : "free";
+  const currentPlanId = agency?.plan?.includes("pro_dealer")
+    ? "pro_dealer"
+    : agency?.plan?.includes("pro_plus")
+      ? "pro_plus"
+      : agency?.plan?.includes("pro")
+        ? "pro"
+        : "free";
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
