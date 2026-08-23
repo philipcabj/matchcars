@@ -26,7 +26,6 @@ type PlanDefinition = {
   maxCars: number; // Infinity = ilimitados
   featuredPerMonth: number; // Infinity = ilimitados
   seats: number;
-  extras: string[];
   color: string;
   recommended?: boolean;
   packageIdMonthly: string; // ID en RevenueCat
@@ -36,6 +35,19 @@ type PlanDefinition = {
   hasTrial?: boolean;
   comingSoon?: boolean; // New flag for future plans
 };
+
+// Bloque destacado "Portal de Agencias — todo incluido" — mismo contenido en
+// los 3 planes pagos, ver comparativa expandible (COMPARISON_ROWS) para el
+// resto de diferencias puntuales entre planes (boost, badges, flyers).
+const PORTAL_ITEMS = [
+  "CRM de leads: WhatsApp, Instagram, teléfono",
+  "Gestión de venta y postventa automática",
+  "Comisiones automáticas por vendedor",
+  "Reportes avanzados + performance de equipo",
+  "Panel comparativo vs. otras agencias",
+  "Carga masiva (CSV)",
+];
+const PLAN_EXTRAS = ["📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "📄 Ficha PDF con QR"];
 
 const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
@@ -49,7 +61,6 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     maxCars: 15,
     featuredPerMonth: 5,
     seats: 5,
-    extras: ["🚀 Posicionamiento mejorado", "🏷️ Badge PRO", "📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "💵 Control de gastos y margen por unidad"],
     color: "#4A90E2",
     hasTrial: true,
   },
@@ -64,7 +75,6 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     maxCars: 40,
     featuredPerMonth: 15,
     seats: 10,
-    extras: ["🚀 Boost automático fines de semana", "🏷️ Badge PRO Plus", "📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "📄 Ficha PDF con QR", "💵 Control de gastos y margen por unidad"],
     color: "#50E3C2",
     recommended: true,
     hasTrial: true,
@@ -80,15 +90,6 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     maxCars: 100,
     featuredPerMonth: Infinity,
     seats: 30,
-    extras: [
-      "🚀 Boost automático fines de semana",
-      "✅ Badge Agencia Verificada",
-      "📸 Generador de flyers para redes/WhatsApp",
-      "📹 Video Walkaround",
-      "✨ Mejorar foto y tapar patente (IA)",
-      "📄 Ficha PDF con QR",
-      "💵 Control de gastos y margen por unidad",
-    ],
     color: "#9013FE",
     hasTrial: true,
   },
@@ -700,15 +701,20 @@ export default function SubscribeScreen() {
                   )}
 
                   {!planDef.comingSoon && (
-                    <View style={{ marginTop: 12, backgroundColor: `${planDef.color}18`, borderWidth: 1, borderColor: planDef.color, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10 }}>
-                      <Text style={{ color: planDef.color, fontWeight: "700", fontSize: 13, textAlign: "center" }}>
-                        💻 Portal de Agencias completo
+                    <View style={{ marginTop: 12, backgroundColor: `${planDef.color}18`, borderWidth: 1, borderColor: planDef.color, borderRadius: 10, padding: 10, gap: 6 }}>
+                      <Text style={{ color: planDef.color, fontWeight: "800", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3 }}>
+                        Portal de Agencias — todo incluido
                       </Text>
+                      {PORTAL_ITEMS.map((item, i) => (
+                        <Text key={i} style={{ color: theme.text, fontSize: 12.5 }}>
+                          • {item}
+                        </Text>
+                      ))}
                     </View>
                   )}
 
                   <View style={{ marginTop: 12, gap: 8 }}>
-                    {(planDef.comingSoon ? [] : planDef.extras).map((feature, i) => (
+                    {(planDef.comingSoon ? [] : PLAN_EXTRAS).map((feature, i) => (
                       <View key={i} style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
                         <Ionicons name="checkmark-circle" size={16} color={planDef.color} />
                         <Text style={{ color: theme.text, fontSize: 13, flex: 1 }}>{feature}</Text>
