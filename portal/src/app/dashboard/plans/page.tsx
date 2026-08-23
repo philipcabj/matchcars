@@ -130,20 +130,35 @@ export default function PlansPage() {
               )}
             </div>
 
-            {plan.comingSoon ? (
-              <p className="text-lg font-extrabold text-muted-foreground">Próximamente</p>
-            ) : (
-              <div>
-                <p className="text-2xl font-extrabold">
-                  {fmtUsd(plan.priceMonthly)}
-                  <span className="text-xs font-normal text-muted-foreground"> /mes</span>
-                </p>
-                <p className="text-xs text-muted-foreground">o {fmtUsd(plan.priceAnnual)} /año</p>
+            <div className="flex divide-x divide-border border-y border-border py-2">
+              <div className="flex flex-1 flex-col items-center gap-0.5">
+                <span className="text-xl font-extrabold">{Number.isFinite(plan.maxCars) ? plan.maxCars : "∞"}</span>
+                <span className="text-center text-[10px] text-muted-foreground">autos activos</span>
               </div>
-            )}
+              <div className="flex flex-1 flex-col items-center gap-0.5">
+                <span className="text-xl font-extrabold">{Number.isFinite(plan.featuredPerMonth) ? plan.featuredPerMonth : "∞"}</span>
+                <span className="text-center text-[10px] text-muted-foreground">destacados/mes</span>
+              </div>
+              <div className="flex flex-1 flex-col items-center gap-0.5">
+                <span className="text-xl font-extrabold">{plan.seats}</span>
+                <span className="text-center text-[10px] text-muted-foreground">usuarios de portal</span>
+              </div>
+            </div>
 
-            <ul className="flex flex-1 flex-col gap-1.5 text-xs">
-              {plan.features.map((f) => (
+            <div>
+              <p className="text-2xl font-extrabold">
+                {fmtUsd(plan.priceMonthly)}
+                <span className="text-xs font-normal text-muted-foreground"> /mes</span>
+              </p>
+              <p className="text-xs text-muted-foreground">o {fmtUsd(plan.priceAnnual)} /año</p>
+            </div>
+
+            <p className="rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-center text-xs font-semibold text-accent">
+              💻 Portal de Agencias completo
+            </p>
+
+            <ul className="flex flex-1 flex-col gap-1.5 text-xs text-muted-foreground">
+              {plan.extras.map((f) => (
                 <li key={f}>{f}</li>
               ))}
             </ul>

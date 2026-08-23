@@ -14,12 +14,19 @@ import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity
 import { PurchasesPackage } from "react-native-purchases";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// Definición de la estructura visual de los planes
+// Definición de la estructura visual de los planes.
+// maxCars/featuredPerMonth/seats van separados de "extras" a propósito — son
+// el único eje real de diferenciación entre planes (portal completo en los
+// 3), así que se muestran como stats grandes en vez de mezclarse en una
+// lista larga de checks que hacía ilegible la card.
 type PlanDefinition = {
   id: string; // Base ID (e.g., 'pro', 'pro_plus')
   title: string;
   subtitle?: string; // e.g. "Recomendado", "Para agencias"
-  features: string[];
+  maxCars: number; // Infinity = ilimitados
+  featuredPerMonth: number; // Infinity = ilimitados
+  seats: number;
+  extras: string[];
   color: string;
   recommended?: boolean;
   packageIdMonthly: string; // ID en RevenueCat
@@ -39,17 +46,10 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     packageIdAnnual: "matchcars_pro_anual",
     fallbackPriceMonthly: 9.99,
     fallbackPriceAnnual: 79.99,
-    features: [
-      "🚗 Hasta 15 autos activos",
-      "⭐ 5 destacados por mes (7 días c/u)",
-      "🚀 Posicionamiento mejorado",
-      "🏷️ Badge PRO",
-      "📹 Video Walkaround",
-      "✨ Mejorar foto y tapar patente (IA)",
-      "💵 Control de gastos y margen por unidad",
-      "👥 Hasta 5 usuarios de portal",
-      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
-    ],
+    maxCars: 15,
+    featuredPerMonth: 5,
+    seats: 5,
+    extras: ["🚀 Posicionamiento mejorado", "🏷️ Badge PRO", "📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "💵 Control de gastos y margen por unidad"],
     color: "#4A90E2",
     hasTrial: true,
   },
@@ -61,18 +61,10 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     packageIdAnnual: "matchcars_pro_plus_anual",
     fallbackPriceMonthly: 19.99,
     fallbackPriceAnnual: 169.99,
-    features: [
-      "🚗 Hasta 40 autos activos",
-      "⭐ 15 destacados por mes",
-      "🚀 Boost automático fines de semana",
-      "🏷️ Badge PRO Plus",
-      "📹 Video Walkaround",
-      "✨ Mejorar foto y tapar patente (IA)",
-      "📄 Ficha PDF con QR",
-      "💵 Control de gastos y margen por unidad",
-      "👥 Hasta 10 usuarios de portal",
-      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
-    ],
+    maxCars: 40,
+    featuredPerMonth: 15,
+    seats: 10,
+    extras: ["🚀 Boost automático fines de semana", "🏷️ Badge PRO Plus", "📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "📄 Ficha PDF con QR", "💵 Control de gastos y margen por unidad"],
     color: "#50E3C2",
     recommended: true,
     hasTrial: true,
@@ -85,9 +77,10 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     packageIdAnnual: "matchcars_dealer_anual",
     fallbackPriceMonthly: 59.99,
     fallbackPriceAnnual: 499.99,
-    features: [
-      "🚗 Hasta 100 autos activos",
-      "⭐ Destacados ilimitados",
+    maxCars: 100,
+    featuredPerMonth: Infinity,
+    seats: 30,
+    extras: [
       "🚀 Boost automático fines de semana",
       "✅ Badge Agencia Verificada",
       "📸 Generador de flyers para redes/WhatsApp",
@@ -95,8 +88,6 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
       "✨ Mejorar foto y tapar patente (IA)",
       "📄 Ficha PDF con QR",
       "💵 Control de gastos y margen por unidad",
-      "👥 Hasta 30 usuarios de portal",
-      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
     ],
     color: "#9013FE",
     hasTrial: true,
@@ -687,11 +678,40 @@ export default function SubscribeScreen() {
                       )}
                   </View>
                   
-                  <View style={{ marginTop: 16, gap: 10 }}>
-                    {planDef.features.map((feature, i) => (
+                  {!planDef.comingSoon && (
+                    <View style={{ flexDirection: "row", marginTop: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: theme.badgeBorder, paddingVertical: 10 }}>
+                      <View style={{ flex: 1, alignItems: "center" }}>
+                        <Text style={{ color: theme.text, fontWeight: "800", fontSize: 18 }}>
+                          {Number.isFinite(planDef.maxCars) ? planDef.maxCars : "∞"}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 10, textAlign: "center" }}>autos activos</Text>
+                      </View>
+                      <View style={{ flex: 1, alignItems: "center", borderLeftWidth: 1, borderColor: theme.badgeBorder }}>
+                        <Text style={{ color: theme.text, fontWeight: "800", fontSize: 18 }}>
+                          {Number.isFinite(planDef.featuredPerMonth) ? planDef.featuredPerMonth : "∞"}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 10, textAlign: "center" }}>destacados/mes</Text>
+                      </View>
+                      <View style={{ flex: 1, alignItems: "center", borderLeftWidth: 1, borderColor: theme.badgeBorder }}>
+                        <Text style={{ color: theme.text, fontWeight: "800", fontSize: 18 }}>{planDef.seats}</Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 10, textAlign: "center" }}>usuarios de portal</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {!planDef.comingSoon && (
+                    <View style={{ marginTop: 12, backgroundColor: `${planDef.color}18`, borderWidth: 1, borderColor: planDef.color, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10 }}>
+                      <Text style={{ color: planDef.color, fontWeight: "700", fontSize: 13, textAlign: "center" }}>
+                        💻 Portal de Agencias completo
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={{ marginTop: 12, gap: 8 }}>
+                    {(planDef.comingSoon ? [] : planDef.extras).map((feature, i) => (
                       <View key={i} style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-                        <Ionicons name="checkmark-circle" size={18} color={planDef.color} />
-                        <Text style={{ color: theme.text, fontSize: 14, flex: 1 }}>{feature}</Text>
+                        <Ionicons name="checkmark-circle" size={16} color={planDef.color} />
+                        <Text style={{ color: theme.text, fontSize: 13, flex: 1 }}>{feature}</Text>
                       </View>
                     ))}
                   </View>
