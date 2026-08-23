@@ -21,7 +21,7 @@ import { collection, doc, documentId, getDoc, getDocs, query, serverTimestamp, u
 import { formatNumber } from "@/utils/format";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function ProfileScreen() {
@@ -1262,6 +1262,16 @@ onPress={() => router.push("/(screens)/alerts" as any)}
                   <Ionicons name="shield-checkmark" size={14} color="#10B981" />
                   <Text style={{ color: "#10B981", fontWeight: "600", fontSize: 12 }}>Identidad verificada</Text>
                 </View>
+              )}
+
+              {isPro && (
+                <TouchableOpacity
+                  onPress={() => Linking.openURL("https://portal.matchcars.app").catch(() => {})}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: theme.buttonBackground, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}
+                >
+                  <Ionicons name="business-outline" size={14} color={theme.buttonText} />
+                  <Text style={{ color: theme.buttonText, fontWeight: "600", fontSize: 12 }}>Portal de Agencias</Text>
+                </TouchableOpacity>
               )}
 
               {(profile?.plan?.includes("pro_dealer") || profile?.plan?.includes("dealer_pro_plus") || profile?.role === "admin") && (

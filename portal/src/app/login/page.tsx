@@ -88,7 +88,7 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="flex flex-1 items-center justify-center px-4">
+    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-8">
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-sm">
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm">
@@ -203,6 +203,32 @@ export default function LoginPage() {
           </svg>
           {appleLoading ? "Ingresando…" : "Continuar con Apple"}
         </button>
+      </div>
+
+      <div className="w-full max-w-sm rounded-2xl border border-dashed border-border bg-card p-5 text-center">
+        <p className="text-sm font-semibold">¿No tenés cuenta o plan todavía?</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          El Portal de Agencias se activa con la misma cuenta de la app MatchCars. Descargala, creá tu cuenta, contratá un
+          plan pago y volvé acá con el mismo mail.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <a
+            href="https://play.google.com/store/apps/details?id=com.matchcars.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold transition hover:bg-card"
+          >
+            Google Play
+          </a>
+          <a
+            href="https://apps.apple.com/ar/app/matchcars/id6757968664"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold transition hover:bg-card"
+          >
+            App Store
+          </a>
+        </div>
       </div>
     </main>
   );
