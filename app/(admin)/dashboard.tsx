@@ -26,8 +26,6 @@ const PLAN_LABELS: Record<SubscriptionPlan, string> = {
   pro_plus_annual: "Pro+ Anual",
   pro_dealer_monthly: "Dealer Mensual",
   pro_dealer_annual: "Dealer Anual",
-  dealer_pro_plus_monthly: "Dealer Pro+ Mensual",
-  dealer_pro_plus_annual: "Dealer Pro+ Anual",
   pro_dealer: "Pro Dealer",
 };
 
@@ -39,8 +37,6 @@ const PLAN_COLORS: Record<SubscriptionPlan, string> = {
   pro_plus_annual: "#4F46E5",
   pro_dealer_monthly: "#10B981",
   pro_dealer_annual: "#059669",
-  dealer_pro_plus_monthly: "#0D9488",
-  dealer_pro_plus_annual: "#0F766E",
   pro_dealer: "#9CA3AF",
 };
 

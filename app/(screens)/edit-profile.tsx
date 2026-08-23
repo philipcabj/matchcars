@@ -55,7 +55,7 @@ export default function EditProfileScreen() {
   const { user, profile } = useAuth();
   const router = useRouter();
 
-  const isDealer = profile?.plan && (profile.plan.includes("pro_dealer") || profile.plan.includes("dealer_pro_plus"));
+  const isDealer = profile?.plan && profile.plan.includes("pro_dealer");
   const canWatermark = canUseWatermark(profile?.plan || "free");
 
   const [firstName, setFirstName] = useState(profile?.firstName || "");

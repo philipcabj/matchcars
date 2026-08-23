@@ -108,19 +108,17 @@ export default function MyCarsTab() {
   
   const getFeaturedLimit = () => {
     const p = profile?.plan || "free";
-    if (p.includes("dealer_pro_plus")) return Infinity;
     if (p.includes("pro_dealer")) return Infinity;
-    if (p.includes("pro_plus")) return 5;
-    if (p.includes("pro")) return 2;
+    if (p.includes("pro_plus")) return 15;
+    if (p.includes("pro")) return 5;
     return 0;
   };
 
   const getPublicationLimit = () => {
     const p = profile?.plan || "free";
-    if (p.includes("dealer_pro_plus")) return Infinity;
-    if (p.includes("pro_dealer")) return 30;
-    if (p.includes("pro_plus")) return 7;
-    if (p.includes("pro")) return 3;
+    if (p.includes("pro_dealer")) return 100;
+    if (p.includes("pro_plus")) return 40;
+    if (p.includes("pro")) return 15;
     return 1;
   };
 
@@ -700,7 +698,7 @@ export default function MyCarsTab() {
                   hideLike
                   showEdit
                   showMetrics={item.published && !!(profile?.plan && profile.plan !== 'free')}
-                  showPriceAnalysis={item.published && !!(profile?.plan && ['pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => profile.plan.includes(p)))}
+                  showPriceAnalysis={item.published && !!(profile?.plan && ['pro_plus', 'pro_dealer'].some(p => profile.plan.includes(p)))}
                 />
                 {/* Stats row */}
                 {item.published && item.status === "available" && (

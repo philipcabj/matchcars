@@ -69,7 +69,7 @@ export default function LeadsScreen() {
     );
   }
 
-  const isDealer = !!profile?.plan && (profile.plan.includes("pro_dealer") || profile.plan.includes("dealer_pro_plus"));
+  const isDealer = !!profile?.plan && profile.plan.includes("pro_dealer");
   // El CRM (esta pantalla entera: ver/gestionar leads, ofertas, marcar
   // vendido) es una feature de plan desde Pro Plus — antes esto solo
   // gateaba el header con KPIs de acá abajo, así que cualquier usuario

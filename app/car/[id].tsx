@@ -2419,7 +2419,7 @@ export default function CarDetailsScreen() {
   };
 
   const handleGenerateDescription = async () => {
-    if (!profile?.plan || !['pro_plus', 'pro_dealer', 'dealer_pro_plus'].some(p => profile.plan.includes(p))) {
+    if (!profile?.plan || !['pro_plus', 'pro_dealer'].some(p => profile.plan.includes(p))) {
         showAlert("Función Premium", "La generación de descripción con IA es exclusiva para usuarios Pro Plus o superiores. ¡Mejorá tu plan para acceder!", "info", () => router.push("/(screens)/subscribe"));
         return;
     }

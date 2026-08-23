@@ -245,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
               justifyContent: "center",
               overflow: "hidden",
               borderWidth: profile?.plan && profile.plan !== "free" ? 2 : 0,
-              borderColor: (profile?.plan?.includes("dealer_pro_plus") || profile?.plan?.includes("pro_dealer")) ? "#9013FE" : profile?.plan?.includes("pro_plus") ? "#50E3C2" : theme.accent,
+              borderColor: profile?.plan?.includes("pro_dealer") ? "#9013FE" : profile?.plan?.includes("pro_plus") ? "#50E3C2" : theme.accent,
             }}>
               {profile?.photoURL ? (
                 <Image
@@ -268,13 +268,13 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
                 position: "absolute",
                 bottom: -4,
                 right: -4,
-                backgroundColor: (profile.plan.includes("dealer_pro_plus") || profile.plan.includes("pro_dealer")) ? "#9013FE" : profile.plan.includes("pro_plus") ? "#50E3C2" : theme.accent,
+                backgroundColor: profile.plan.includes("pro_dealer") ? "#9013FE" : profile.plan.includes("pro_plus") ? "#50E3C2" : theme.accent,
                 borderRadius: 4,
                 paddingHorizontal: 3,
                 paddingVertical: 1,
               }}>
                 <Text style={{ color: "#fff", fontSize: 7, fontWeight: "800", letterSpacing: 0.3 }}>
-                  {(profile.plan.includes("dealer_pro_plus") || profile.plan.includes("pro_dealer")) ? "DLR" : profile.plan.includes("pro_plus") ? "PRO+" : "PRO"}
+                  {profile.plan.includes("pro_dealer") ? "DLR" : profile.plan.includes("pro_plus") ? "PRO+" : "PRO"}
                 </Text>
               </View>
             )}
@@ -314,7 +314,7 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
                     </Text>
                     {profile?.plan && (
                       <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 1 }}>
-                        Plan {profile.plan === "free" ? "Gratuito" : (profile.plan.includes("dealer_pro_plus")) ? "Dealer PRO+" : profile.plan.includes("pro_dealer") ? "Dealer" : profile.plan.includes("pro_plus") ? "PRO Plus" : "PRO"}
+                        Plan {profile.plan === "free" ? "Gratuito" : profile.plan.includes("pro_dealer") ? "Dealer" : profile.plan.includes("pro_plus") ? "PRO Plus" : "PRO"}
                       </Text>
                     )}
                   </View>

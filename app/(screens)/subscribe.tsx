@@ -40,15 +40,15 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     fallbackPriceMonthly: 9.99,
     fallbackPriceAnnual: 79.99,
     features: [
-      "🚗 Hasta 3 autos activos",
-      "⭐ 2 destacados por mes (7 días c/u)",
+      "🚗 Hasta 15 autos activos",
+      "⭐ 5 destacados por mes (7 días c/u)",
       "🚀 Posicionamiento mejorado",
-      "📊 Métricas básicas (Vistas y Likes)",
       "🏷️ Badge PRO",
       "📹 Video Walkaround",
-      "✨ Mejorar foto (encuadre IA)",
-      "💻 Acceso al Portal de Agencias",
+      "✨ Mejorar foto y tapar patente (IA)",
       "💵 Control de gastos y margen por unidad",
+      "👥 Hasta 5 usuarios de portal",
+      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
     ],
     color: "#4A90E2",
     hasTrial: true,
@@ -62,18 +62,16 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     fallbackPriceMonthly: 19.99,
     fallbackPriceAnnual: 169.99,
     features: [
-      "🚗 Hasta 7 autos activos",
-      "⭐ 5 destacados por mes",
+      "🚗 Hasta 40 autos activos",
+      "⭐ 15 destacados por mes",
       "🚀 Boost automático fines de semana",
-      "✨ Tapar patente automáticamente (IA)",
-      "📄 Ficha PDF con QR",
-      "💻 Acceso al Portal de Agencias",
-      "📞 CRM personal de consultas",
-      "📋 Gestión de venta: checklist, documentos PDF y postventa automática",
-      "📹 Video Walkaround",
       "🏷️ Badge PRO Plus",
-      "✨ Mejorar foto (encuadre IA)",
+      "📹 Video Walkaround",
+      "✨ Mejorar foto y tapar patente (IA)",
+      "📄 Ficha PDF con QR",
       "💵 Control de gastos y margen por unidad",
+      "👥 Hasta 10 usuarios de portal",
+      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
     ],
     color: "#50E3C2",
     recommended: true,
@@ -88,75 +86,48 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
     fallbackPriceMonthly: 59.99,
     fallbackPriceAnnual: 499.99,
     features: [
-      "🚗 Hasta 30 autos activos",
+      "🚗 Hasta 100 autos activos",
       "⭐ Destacados ilimitados",
-      "📞 CRM de Leads con equipo (asignación entre vendedores)",
-      "💻 Portal web con 5 usuarios incluidos",
-      "📥 Carga Masiva (CSV)",
-      "📸 Generador de flyers para redes/WhatsApp",
-      "📋 Gestión de venta: checklist, documentos PDF y postventa automática",
-      "🧮 Comisiones automáticas por vendedor",
-      "💵 Control de gastos y margen por unidad",
+      "🚀 Boost automático fines de semana",
       "✅ Badge Agencia Verificada",
-      "📊 Reportes avanzados",
-      "✨ Mejorar foto (encuadre IA)",
-      "✨ Tapar patente automáticamente (IA)",
+      "📸 Generador de flyers para redes/WhatsApp",
+      "📹 Video Walkaround",
+      "✨ Mejorar foto y tapar patente (IA)",
+      "📄 Ficha PDF con QR",
+      "💵 Control de gastos y margen por unidad",
+      "👥 Hasta 30 usuarios de portal",
+      "💻 Portal de Agencias completo: CRM de leads, gestión de venta, comisiones automáticas y reportes",
     ],
     color: "#9013FE",
     hasTrial: true,
   },
-  {
-    id: "dealer_pro_plus",
-    title: "Dealer PRO Plus",
-    subtitle: "Máxima Exposición",
-    packageIdMonthly: "matchcars_dealer_pro_plus_mensual",
-    packageIdAnnual: "matchcars_dealer_pro_plus_anual",
-    fallbackPriceMonthly: 99,
-    fallbackPriceAnnual: 899,
-    features: [
-      "🚗 Autos activos ILIMITADOS",
-      "🚀 Prioridad absoluta en búsquedas",
-      "🏠 Presencia destacada en Home",
-      "📈 Panel comparativo: tu agencia vs. el promedio",
-      "👥 Portal web con 10 usuarios incluidos",
-      "📞 CRM de Leads con equipo",
-      "📋 Gestión de venta: checklist, documentos PDF y postventa automática",
-      "🧮 Comisiones automáticas por vendedor",
-      "💵 Control de gastos y margen por unidad",
-      "✨ Mejorar foto (encuadre IA)",
-      "✨ Tapar patente automáticamente (IA)",
-    ],
-    color: "#FFD700",
-    comingSoon: true, // Volvemos a ponerlo como Coming Soon (Consultar)
-    hasTrial: false,
-  },
 ];
 
 const COMPARISON_ROWS = [
-  { label: "Autos activos",     free: "1",        pro: "3",        proPlus: "7",         dealer: "30",      dealerPro: "∞" },
-  { label: "Destacados / mes",  free: "—",        pro: "2",        proPlus: "5",         dealer: "∞",       dealerPro: "∞" },
-  { label: "Métricas",          free: "—",        pro: "Básicas",  proPlus: "Básicas",   dealer: "Avanzadas", dealerPro: "Avanzadas" },
-  { label: "Boost fin de sem.", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Video walkaround",  free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Mejorar foto (IA)", free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Tapar patente (IA)", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Marca de agua (logo)", free: "—",      pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "CRM de Leads",      free: "—",        pro: "—",        proPlus: "Personal",  dealer: "Con equipo", dealerPro: "Con equipo" },
-  { label: "Carga masiva CSV",  free: "—",        pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Acceso al Portal de Agencias", free: "—", pro: "✓",     proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Usuarios de equipo en el portal", free: "—", pro: "1", proPlus: "1",         dealer: "5",       dealerPro: "10" },
-  { label: "Generador de flyers", free: "—",      pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Panel comparativo", free: "—",        pro: "—",        proPlus: "—",         dealer: "—",       dealerPro: "✓" },
-  { label: "Gestión de venta (checklist+PDF)", free: "—", pro: "—", proPlus: "✓",        dealer: "✓",       dealerPro: "✓" },
-  { label: "Postventa automática", free: "—",     pro: "—",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Control de gastos/margen", free: "—", pro: "✓",        proPlus: "✓",         dealer: "✓",       dealerPro: "✓" },
-  { label: "Comisiones automáticas", free: "—",   pro: "—",        proPlus: "—",         dealer: "✓",       dealerPro: "✓" },
+  { label: "Autos activos",     free: "1",        pro: "15",       proPlus: "40",        dealer: "100" },
+  { label: "Destacados / mes",  free: "—",        pro: "5",        proPlus: "15",        dealer: "∞" },
+  { label: "Métricas",          free: "—",        pro: "Avanzadas", proPlus: "Avanzadas", dealer: "Avanzadas" },
+  { label: "Boost fin de sem.", free: "—",        pro: "—",        proPlus: "✓",         dealer: "✓" },
+  { label: "Video walkaround",  free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Mejorar foto (IA)", free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Tapar patente (IA)", free: "—",       pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Marca de agua (logo)", free: "—",     pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "CRM de Leads",      free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Carga masiva CSV",  free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Acceso al Portal de Agencias", free: "—", pro: "✓",     proPlus: "✓",         dealer: "✓" },
+  { label: "Usuarios de equipo en el portal", free: "—", pro: "5", proPlus: "10",        dealer: "30" },
+  { label: "Generador de flyers", free: "—",      pro: "—",        proPlus: "—",         dealer: "✓" },
+  { label: "Panel comparativo", free: "—",        pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Gestión de venta (checklist+PDF)", free: "—", pro: "✓", proPlus: "✓",        dealer: "✓" },
+  { label: "Postventa automática", free: "—",     pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Control de gastos/margen", free: "—", pro: "✓",        proPlus: "✓",         dealer: "✓" },
+  { label: "Comisiones automáticas", free: "—",   pro: "✓",        proPlus: "✓",         dealer: "✓" },
 ];
 
 function ComparisonTable({ theme }: { theme: any }) {
   const [expanded, setExpanded] = React.useState(false);
-  const cols = ["Gratis", "PRO", "PRO+", "Dealer", "D.Pro+"];
-  const colColors = ["#888", "#4A90E2", "#50E3C2", "#9013FE", "#FFD700"];
+  const cols = ["Gratis", "PRO", "PRO+", "Dealer"];
+  const colColors = ["#888", "#4A90E2", "#50E3C2", "#9013FE"];
 
   return (
     <View style={{ marginBottom: 24 }}>
@@ -189,7 +160,7 @@ function ComparisonTable({ theme }: { theme: any }) {
               <View style={{ flex: 2, padding: 8, justifyContent: "center" }}>
                 <Text style={{ color: theme.text, fontSize: 11 }}>{row.label}</Text>
               </View>
-              {[row.free, row.pro, row.proPlus, row.dealer, row.dealerPro].map((val, i) => (
+              {[row.free, row.pro, row.proPlus, row.dealer].map((val, i) => (
                 <View key={i} style={{ flex: 1.5, padding: 8, alignItems: "center", justifyContent: "center" }}>
                   <Text style={{ color: val === "—" ? theme.textMuted : val === "✓" ? "#2ECC71" : colColors[i], fontSize: 11, fontWeight: val !== "—" ? "700" : "400" }}>
                     {val}

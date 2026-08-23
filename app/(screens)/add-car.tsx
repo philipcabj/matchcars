@@ -2262,8 +2262,8 @@ export default function AddCarScreen() {
         published: false,
         status: "pending_review",
         likedBy: [],
-        isFeatured: sellerProfile?.plan?.includes('pro_dealer') || sellerProfile?.plan?.includes('dealer_pro_plus') || false,
-        featuredAt: (sellerProfile?.plan?.includes('pro_dealer') || sellerProfile?.plan?.includes('dealer_pro_plus')) ? serverTimestamp() : null,
+        isFeatured: sellerProfile?.plan?.includes('pro_dealer') || false,
+        featuredAt: sellerProfile?.plan?.includes('pro_dealer') ? serverTimestamp() : null,
         views: 0,
         likesCount: 0,
         flags: {

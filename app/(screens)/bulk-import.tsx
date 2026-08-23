@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { app, db, storage } from '@/lib/firebase';
 import { logger } from '@/lib/logger';
-import { isDealerPlan } from '@/lib/planChecks';
+import { canBulkImport } from '@/lib/planChecks';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
@@ -42,21 +42,22 @@ export default function BulkImportScreen() {
   const { theme } = useTheme();
   const router = useRouter();
 
-  // Security check: Only Dealer plans and admins
-  const hasAccess = isDealerPlan(profile?.plan) || profile?.role === 'admin';
+  // Disponible en cualquier plan pago (y admins) desde la reestructuración
+  // de planes — antes era exclusivo Dealer.
+  const hasAccess = canBulkImport(profile?.plan || "") || profile?.role === 'admin';
 
   if (!hasAccess) {
     return (
       <WebContainer>
         <View style={{ padding: 40, alignItems: 'center' }}>
           <Ionicons name="lock-closed" size={64} color={theme.textMuted} />
-          <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Función exclusiva para Agencias</Text>
-          <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 10 }}>La carga masiva por CSV está disponible únicamente para planes Dealer y Dealer Plus.</Text>
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Función exclusiva de planes pagos</Text>
+          <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 10 }}>La carga masiva por CSV está disponible desde el plan Pro.</Text>
           <TouchableOpacity
             onPress={() => router.push('/(screens)/subscribe')}
             style={{ backgroundColor: theme.primary, padding: 15, borderRadius: 10, marginTop: 20 }}
           >
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver Planes Dealer</Text>
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver planes</Text>
           </TouchableOpacity>
         </View>
       </WebContainer>

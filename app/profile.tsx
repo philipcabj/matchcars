@@ -701,7 +701,7 @@ export default function ProfileScreen() {
       <WebContainer>
         <Header />
         <ScrollView ref={scrollViewRef} contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-          {Platform.OS === 'web' && !(profile?.plan?.includes('pro_dealer') || profile?.plan?.includes('dealer_pro_plus')) && (
+          {Platform.OS === 'web' && !profile?.plan?.includes('pro_dealer') && (
             <View style={{ marginBottom: 16 }}>
               <DownloadAppBanner message="Descargá la App para la mejor experiencia" />
             </View>
@@ -792,11 +792,11 @@ export default function ProfileScreen() {
           >
              <Ionicons name="create-outline" size={16} color={theme.text} />
              <Text style={{ color: theme.text, fontWeight: "600", fontSize: 14 }}>
-               {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) ? "Configurar Agencia" : "Editar Perfil"}
+               {profile?.plan && profile.plan.includes('pro_dealer') ? "Configurar Agencia" : "Editar Perfil"}
              </Text>
           </TouchableOpacity>
 
-          {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) && (
+          {profile?.plan && profile.plan.includes('pro_dealer') && (
              <TouchableOpacity 
                 onPress={() => router.push(`/(screens)/user-profile/${user.uid}` as any)}
                 style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
@@ -808,7 +808,7 @@ export default function ProfileScreen() {
         </View>
 
         <View style={{ marginTop: 16, gap: 12 }}>
-          {profile?.plan && (profile.plan.includes('pro_dealer') || profile.plan.includes('dealer_pro_plus')) && (
+          {profile?.plan && profile.plan.includes('pro_dealer') && (
             <View style={{ backgroundColor: theme.card, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#9013FE' }}>
               <View style={{ backgroundColor: '#9013FE', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                  <Ionicons name="bar-chart" size={20} color="#FFF" />
@@ -1274,7 +1274,7 @@ onPress={() => router.push("/(screens)/alerts" as any)}
                 </TouchableOpacity>
               )}
 
-              {(profile?.plan?.includes("pro_dealer") || profile?.plan?.includes("dealer_pro_plus") || profile?.role === "admin") && (
+              {(isPro || profile?.role === "admin") && (
                 Platform.OS === "web" ? (
                   <TouchableOpacity
                     onPress={() => router.push("/(screens)/bulk-import" as any)}
