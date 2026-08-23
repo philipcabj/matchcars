@@ -232,7 +232,11 @@ export default function LeadsPage() {
                 key={lead.id}
                 onClick={() => router.push(`/dashboard/leads/${lead.id}`)}
                 className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-3 transition hover:border-accent sm:flex-row sm:items-center ${
-                  isUnread ? "border-accent/50 bg-accent/5" : "border-border bg-card"
+                  isUnread
+                    ? "border-accent/50 bg-accent/5"
+                    : manual
+                      ? "border-amber-500/30 bg-amber-500/5"
+                      : "border-border bg-card"
                 }`}
               >
                 <div className="relative shrink-0">

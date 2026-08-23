@@ -174,6 +174,25 @@ export default function LeadDetailPage() {
     }
   };
 
+  const recalculateCommission = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/leads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "recalculate_commission" }),
+      });
+      await parseJsonResponse(res);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveContact = async () => {
     if (!editContact || !editContact.name.trim()) return;
     setBusy(true);
@@ -279,7 +298,11 @@ export default function LeadDetailPage() {
         ← Volver a Leads
       </Link>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-card p-4">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl border p-4 ${
+          manual ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
+        }`}
+      >
         <div>
           <p className="text-base font-bold">{title}</p>
           <p className="text-sm text-muted-foreground">
@@ -743,6 +766,25 @@ export default function LeadDetailPage() {
           {lead.buyerId && lead.deliveryConfirmToken && (
             <DeliveryQrCode vehicleId={lead.vehicleId} token={lead.deliveryConfirmToken} />
           )}
+        </div>
+      )}
+
+      {lead.status === "won" && lead.vehicleId && lead.vehicleStatus === "sold" && lead.assignedTo && lead.saleHasCommission === false && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-error/30 bg-error/10 p-4">
+          <div>
+            <p className="text-sm font-semibold text-error">Esta venta no tiene comisión calculada</p>
+            <p className="text-xs text-muted-foreground">
+              Puede pasar si el vendedor se reasignó después de cerrar la venta. Recalculala con el vendedor asignado
+              actual.
+            </p>
+          </div>
+          <button
+            disabled={busy}
+            onClick={recalculateCommission}
+            className="rounded-lg bg-error px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            Recalcular comisión
+          </button>
         </div>
       )}
 
