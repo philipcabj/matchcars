@@ -53,7 +53,7 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro",
     title: "Plan PRO",
-    subtitle: "Ideal para particulares activos",
+    subtitle: "Para agencias chicas",
     packageIdMonthly: "matchcars_pro_mensual",
     packageIdAnnual: "matchcars_pro_anual",
     fallbackPriceMonthly: 9.99,
@@ -67,7 +67,7 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro_plus",
     title: "Plan PRO Plus",
-    subtitle: "Todo lo de PRO + más potencia",
+    subtitle: "Para agencias en crecimiento",
     packageIdMonthly: "matchcars_pro_plus_mensual",
     packageIdAnnual: "matchcars_pro_plus_anual",
     fallbackPriceMonthly: 19.99,
@@ -82,7 +82,7 @@ const PLAN_DEFINITIONS: PlanDefinition[] = [
   {
     id: "pro_dealer",
     title: "Plan PRO Dealer",
-    subtitle: "Solución para Agencias",
+    subtitle: "Para agencias de alto volumen",
     packageIdMonthly: "matchcars_dealer_mensual",
     packageIdAnnual: "matchcars_dealer_anual",
     fallbackPriceMonthly: 59.99,
@@ -701,8 +701,8 @@ export default function SubscribeScreen() {
                   )}
 
                   {!planDef.comingSoon && (
-                    <View style={{ marginTop: 12, backgroundColor: `${planDef.color}18`, borderWidth: 1, borderColor: planDef.color, borderRadius: 10, padding: 10, gap: 6 }}>
-                      <Text style={{ color: planDef.color, fontWeight: "800", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3 }}>
+                    <View style={{ marginTop: 12, backgroundColor: `${theme.accent}18`, borderWidth: 1, borderColor: theme.accent, borderRadius: 10, padding: 10, gap: 6 }}>
+                      <Text style={{ color: theme.accent, fontWeight: "800", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.3 }}>
                         Portal de Agencias — todo incluido
                       </Text>
                       {PORTAL_ITEMS.map((item, i) => (

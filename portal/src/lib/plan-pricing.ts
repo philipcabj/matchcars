@@ -49,11 +49,62 @@ export const PORTAL_ITEMS = [
 // debajo del bloque de portal.
 export const PLAN_EXTRAS = ["📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "📄 Ficha PDF con QR"];
 
+// Detalle completo de PORTAL_ITEMS, para la sección de referencia debajo de
+// las cards — mismo contenido agrupado en categorías, mismo tratamiento
+// visual (accent) que el bloque "Portal de Agencias" de cada card.
+export const PORTAL_CAPABILITIES: { title: string; items: string[] }[] = [
+  {
+    title: "CRM de leads",
+    items: [
+      "Leads orgánicos desde el chat de la app (mensaje u oferta)",
+      "Leads manuales: WhatsApp, Instagram, teléfono, presencial",
+      "Historial de actividad por lead y edición de contacto",
+      "Asignación de leads a vendedores del equipo",
+    ],
+  },
+  {
+    title: "Gestión de venta",
+    items: [
+      "Checklist de trámites (transferencia, verificación, etc.)",
+      "Financiación y parte de pago (usado como parte del pago)",
+      "Documentos y ficha PDF con QR",
+      "Postventa automática con confirmación del comprador",
+    ],
+  },
+  {
+    title: "Equipo y comisiones",
+    items: [
+      "Roles: dueño/a, gerente, vendedor/a",
+      "Registro de actividad del equipo (quién hizo qué)",
+      "Reglas de comisión configurables (%, fijo, escalonado)",
+      "Cálculo automático de comisión por venta cerrada",
+    ],
+  },
+  {
+    title: "Reportes",
+    items: [
+      "Métricas de stock: vistas, likes, días publicado",
+      "Reportes avanzados de qué necesita atención",
+      "Performance de vendedores: leads, conversión, tiempo de cierre",
+      "Panel comparativo vs. el promedio de otras agencias",
+    ],
+  },
+  {
+    title: "Stock y publicaciones",
+    items: [
+      "Alta, edición y baja de vehículos",
+      "Carga masiva por CSV",
+      "Control de gastos y margen por unidad",
+      "Historial de precios por vehículo",
+    ],
+  },
+];
+
 export const PLAN_PRICING: PlanPricing[] = [
   {
     id: "pro",
     title: "Plan PRO",
-    subtitle: "Ideal para particulares activos",
+    subtitle: "Para agencias chicas",
     priceMonthly: 9.99,
     priceAnnual: 79.99,
     maxCars: 15,
@@ -64,7 +115,7 @@ export const PLAN_PRICING: PlanPricing[] = [
   {
     id: "pro_plus",
     title: "Plan PRO Plus",
-    subtitle: "Todo lo de PRO + más potencia",
+    subtitle: "Para agencias en crecimiento",
     priceMonthly: 19.99,
     priceAnnual: 169.99,
     maxCars: 40,
@@ -76,7 +127,7 @@ export const PLAN_PRICING: PlanPricing[] = [
   {
     id: "pro_dealer",
     title: "Plan PRO Dealer",
-    subtitle: "Solución para Agencias",
+    subtitle: "Para agencias de alto volumen",
     priceMonthly: 59.99,
     priceAnnual: 499.99,
     maxCars: 100,

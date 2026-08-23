@@ -6,7 +6,7 @@
 "use client";
 
 import { useAgencyMe } from "@/hooks/useAgencyMe";
-import { FREE_PLAN, PLAN_EXTRAS, PLAN_PRICING, PORTAL_ITEMS } from "@/lib/plan-pricing";
+import { FREE_PLAN, PLAN_EXTRAS, PLAN_PRICING, PORTAL_CAPABILITIES, PORTAL_ITEMS } from "@/lib/plan-pricing";
 
 const APPLE_URL = "https://apps.apple.com/ar/app/matchcars/id6757968664";
 const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
@@ -62,65 +62,87 @@ export default function PlansPage() {
           )}
         </div>
 
-        {PLAN_PRICING.map((plan) => (
-          <div
-            key={plan.id}
-            className={`flex flex-col gap-3 rounded-2xl border p-5 ${
-              currentPlanId === plan.id ? "border-accent ring-2 ring-accent/30" : "border-border"
-            }`}
-            style={{ borderTopColor: plan.color, borderTopWidth: 3 }}
-          >
-            <div className="flex items-start justify-between gap-2">
+        {PLAN_PRICING.map((plan) => {
+          const isCurrent = currentPlanId === plan.id;
+          return (
+            <div
+              key={plan.id}
+              className={`flex flex-col gap-3 rounded-2xl border p-5 ${
+                isCurrent ? "border-accent ring-2 ring-accent/30" : plan.recommended ? "border-2 border-accent" : "border-border"
+              }`}
+            >
               <div>
+                {plan.recommended && (
+                  <span className="mb-1.5 inline-block rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-accent-foreground">
+                    Recomendado
+                  </span>
+                )}
                 <p className="text-sm font-bold">{plan.title}</p>
                 <p className="text-xs text-muted-foreground">{plan.subtitle}</p>
               </div>
-              {plan.recommended && (
-                <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-accent-foreground">Recomendado</span>
-              )}
-            </div>
 
-            <div className="flex divide-x divide-border border-y border-border py-2">
-              <div className="flex flex-1 flex-col items-center gap-0.5">
-                <span className="text-xl font-extrabold">{Number.isFinite(plan.maxCars) ? plan.maxCars : "∞"}</span>
-                <span className="text-center text-[10px] text-muted-foreground">autos activos</span>
+              <div className="flex divide-x divide-border border-y border-border py-2">
+                <div className="flex flex-1 flex-col items-center gap-0.5">
+                  <span className="text-xl font-extrabold">{Number.isFinite(plan.maxCars) ? plan.maxCars : "∞"}</span>
+                  <span className="text-center text-[10px] text-muted-foreground">autos activos</span>
+                </div>
+                <div className="flex flex-1 flex-col items-center gap-0.5">
+                  <span className="text-xl font-extrabold">{Number.isFinite(plan.featuredPerMonth) ? plan.featuredPerMonth : "∞"}</span>
+                  <span className="text-center text-[10px] text-muted-foreground">destacados/mes</span>
+                </div>
+                <div className="flex flex-1 flex-col items-center gap-0.5">
+                  <span className="text-xl font-extrabold">{plan.seats}</span>
+                  <span className="text-center text-[10px] text-muted-foreground">usuarios de portal</span>
+                </div>
               </div>
-              <div className="flex flex-1 flex-col items-center gap-0.5">
-                <span className="text-xl font-extrabold">{Number.isFinite(plan.featuredPerMonth) ? plan.featuredPerMonth : "∞"}</span>
-                <span className="text-center text-[10px] text-muted-foreground">destacados/mes</span>
-              </div>
-              <div className="flex flex-1 flex-col items-center gap-0.5">
-                <span className="text-xl font-extrabold">{plan.seats}</span>
-                <span className="text-center text-[10px] text-muted-foreground">usuarios de portal</span>
-              </div>
-            </div>
 
-            <div>
-              <p className="text-2xl font-extrabold">
-                {fmtUsd(plan.priceMonthly)}
-                <span className="text-xs font-normal text-muted-foreground"> /mes</span>
-              </p>
-              <p className="text-xs text-muted-foreground">o {fmtUsd(plan.priceAnnual)} /año</p>
-            </div>
+              <div>
+                <p className="text-2xl font-extrabold">
+                  {fmtUsd(plan.priceMonthly)}
+                  <span className="text-xs font-normal text-muted-foreground"> /mes</span>
+                </p>
+                <p className="text-xs text-muted-foreground">o {fmtUsd(plan.priceAnnual)} /año</p>
+              </div>
 
-            <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-accent">Portal de Agencias — todo incluido</p>
-              <ul className="mt-1.5 flex flex-col gap-1 text-xs text-foreground">
-                {PORTAL_ITEMS.map((item) => (
-                  <li key={item}>{item}</li>
+              <div className="rounded-lg border border-accent/40 bg-accent/5 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-accent">Portal de Agencias — todo incluido</p>
+                <ul className="mt-1.5 flex flex-col gap-1 text-xs text-foreground">
+                  {PORTAL_ITEMS.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <ul className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+                {PLAN_EXTRAS.map((f) => (
+                  <li key={f}>{f}</li>
                 ))}
               </ul>
-            </div>
 
-            <ul className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-              {PLAN_EXTRAS.map((f) => (
-                <li key={f}>{f}</li>
+              {isCurrent && (
+                <span className="w-fit rounded-full bg-accent px-2.5 py-1 text-[11px] font-bold text-accent-foreground">Plan actual</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <h2 className="text-lg font-bold">Todo lo que incluye el Portal de Agencias</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          El detalle del bloque de arriba — no varía por plan, es el mismo portal completo desde Pro.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {PORTAL_CAPABILITIES.map((cat) => (
+          <div key={cat.title} className="rounded-lg border border-accent/40 bg-accent/5 p-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-accent">{cat.title}</p>
+            <ul className="mt-1.5 flex flex-col gap-1 text-xs text-foreground">
+              {cat.items.map((item) => (
+                <li key={item}>{item}</li>
               ))}
             </ul>
-
-            {currentPlanId === plan.id && (
-              <span className="w-fit rounded-full bg-accent px-2.5 py-1 text-[11px] font-bold text-accent-foreground">Plan actual</span>
-            )}
           </div>
         ))}
       </div>
