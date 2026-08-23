@@ -254,7 +254,7 @@ export default function LeadsPage() {
                     <p className={`truncate text-sm ${isUnread ? "font-bold" : "font-semibold"}`}>{title}</p>
                     <div className="flex shrink-0 items-center gap-1.5">
                       {manual ? (
-                        <span className="rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">Manual</span>
+                        <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">Manual</span>
                       ) : (
                         <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
                       )}

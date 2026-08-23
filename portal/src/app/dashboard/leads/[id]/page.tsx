@@ -287,7 +287,7 @@ export default function LeadDetailPage() {
             {isOrganic ? (
               <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
             ) : (
-              <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">Manual</span>
+              <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">Manual</span>
             )}
             {manual?.contactSource && (
               <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
