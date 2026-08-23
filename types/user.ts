@@ -1,16 +1,14 @@
 import { TrustLevel } from "./commerce";
 
 export type UserRole = "user" | "moderator" | "admin";
-export type SubscriptionPlan = 
-  | "free" 
-  | "pro_monthly" 
-  | "pro_annual" 
-  | "pro_plus_monthly" 
-  | "pro_plus_annual" 
-  | "pro_dealer_monthly" 
+export type SubscriptionPlan =
+  | "free"
+  | "pro_monthly"
+  | "pro_annual"
+  | "pro_plus_monthly"
+  | "pro_plus_annual"
+  | "pro_dealer_monthly"
   | "pro_dealer_annual"
-  | "dealer_pro_plus_monthly"
-  | "dealer_pro_plus_annual"
   | "pro_dealer"; // Fallback/Legacy
 
 export interface UserProfile {

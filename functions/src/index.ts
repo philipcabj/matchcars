@@ -34,20 +34,19 @@ const FEATURED_DURATION_DAYS = 7;
 
 function getMaxCars(plan: string): number {
   if (!plan || plan === "free") return 1;
-  if (plan.includes("dealer_pro_plus")) return Infinity;
-  if (plan.includes("pro_dealer")) return 30;
-  if (plan.includes("pro_plus")) return 7;
+  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_plus")) return 40;
   if (
     plan.includes("pro_monthly") ||
     plan.includes("pro_annual") ||
     plan === "pro"
   )
-    return 3;
+    return 15;
   return 1;
 }
 
 function hasUnlimitedFeatured(plan: string): boolean {
-  return plan.includes("pro_dealer") || plan.includes("dealer_pro_plus");
+  return plan.includes("pro_dealer");
 }
 
 // ─── enforceVehicleLimit ─────────────────────────────────────────────────────
@@ -753,7 +752,7 @@ export const sendMetaConversionEvent = onCall(
 // siga funcionando una vez que la foto quede mejorada.
 
 function canUseWatermarkPlan(plan: string): boolean {
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some((p) => plan.includes(p));
 }
 
 async function fetchBuffer(url: string): Promise<Buffer | null> {
@@ -933,8 +932,16 @@ export const autoEnhancePhoto = onObjectFinalized(
 // progreso incremental en bulkImportJobs/{jobId}, que el cliente escucha con
 // onSnapshot.
 
+// Identidad de negocio (dealer) — solo gatea el auto-featured al importar,
+// no el acceso a la carga masiva en sí (ver canBulkImportServer, universal).
 function isDealerPlanServer(plan: string): boolean {
-  return ["pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+  return plan.includes("pro_dealer");
+}
+
+// Carga masiva (CSV): disponible en cualquier plan pago, ya no exclusiva de
+// Dealer — reestructuración de planes, el portal se vende entero desde Pro.
+function canBulkImportServer(plan: string): boolean {
+  return !!plan && plan !== "free";
 }
 
 interface BulkImportRow {
@@ -1001,10 +1008,10 @@ export const startBulkImport = onCall(
     const userSnap = await db.doc(`users/${uid}`).get();
     const userData = userSnap.data() || {};
     const plan: string = userData.plan || "free";
-    if (!isDealerPlanServer(plan) && userData.role !== "admin") {
+    if (!canBulkImportServer(plan) && userData.role !== "admin") {
       throw new HttpsError(
         "permission-denied",
-        "La carga masiva está disponible solo para planes Dealer."
+        "La carga masiva está disponible solo para planes pagos."
       );
     }
 

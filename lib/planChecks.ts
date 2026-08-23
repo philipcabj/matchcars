@@ -10,11 +10,10 @@ import { SubscriptionPlan } from "@/types/user";
  */
 export function getMaxCars(plan: SubscriptionPlan | string): number {
   if (!plan) return 1; // Default for free/undefined
-  
-  if (plan.includes("dealer_pro_plus")) return Infinity;
-  if (plan.includes("pro_dealer")) return 30;
-  if (plan.includes("pro_plus")) return 7;
-  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 3;
+
+  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_plus")) return 40;
+  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 15;
   return 1; // Free or unknown
 }
 
@@ -23,7 +22,7 @@ export function getMaxCars(plan: SubscriptionPlan | string): number {
  */
 export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some(p => plan.includes(p));
 }
 
 /**
@@ -32,16 +31,16 @@ export function canUploadVideo(plan: SubscriptionPlan | string): boolean {
  */
 export function canEnhancePhoto(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some(p => plan.includes(p));
 }
 
 /**
  * Check if plan allows AI tools (tapar patente automáticamente).
- * Exclusivo de PRO Plus en adelante.
+ * Disponible en cualquier plan pago.
  */
 export function canUseAITools(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return plan !== "free";
 }
 
 /**
@@ -50,42 +49,43 @@ export function canUseAITools(plan: SubscriptionPlan | string): boolean {
  */
 export function canUseWatermark(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some(p => plan.includes(p));
 }
 
 /**
- * Check if plan allows PDF export with QR
+ * Check if plan allows PDF export with QR. Disponible en cualquier plan pago.
  */
 export function canExportPDF(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return plan !== "free";
 }
 
 /**
- * Check if plan has access to dealer/agency tools
+ * Check if plan has access to dealer/agency tools (identidad de negocio —
+ * nombre de fantasía, auto-featured al publicar, badge en el marketplace.
+ * NO gatea funciones del Portal de Agencias, esas son universales en
+ * cualquier plan pago desde la reestructuración de planes).
  */
 export function isDealerPlan(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return plan.includes("pro_dealer");
 }
 
 /**
- * Check if plan allows bulk import via CSV
+ * Check if plan allows bulk import via CSV. Disponible en cualquier plan pago.
  */
 export function canBulkImport(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return isDealerPlan(plan);
+  return plan !== "free";
 }
 
 /**
- * Check if plan has access to CRM/Leads. Desde Pro Plus es un CRM personal
- * (sin equipo — getIncludedSeats da 1 asiento para planes no-dealer, así que
- * no hay a quién asignarle un lead); desde Pro Dealer se suma la asignación
- * entre vendedores del equipo.
+ * Check if plan has access al Portal de Agencias / CRM de Leads.
+ * Disponible en cualquier plan pago.
  */
 export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return plan !== "free";
 }
 
 /**
@@ -93,7 +93,7 @@ export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
  */
 export function hasUnlimitedFeatured(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return plan.includes("pro_dealer");
 }
 
 /**
@@ -101,7 +101,7 @@ export function hasUnlimitedFeatured(plan: SubscriptionPlan | string): boolean {
  */
 export function canFeatureListings(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return ["pro", "pro_plus", "pro_dealer"].some(p => plan.includes(p));
 }
 
 /**
@@ -110,11 +110,10 @@ export function canFeatureListings(plan: SubscriptionPlan | string): boolean {
  */
 export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): number {
   if (!plan) return 0; // Free
-  
-  if (plan.includes("dealer_pro_plus")) return Infinity;
+
   if (plan.includes("pro_dealer")) return Infinity;
-  if (plan.includes("pro_plus")) return 5;
-  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 2;
+  if (plan.includes("pro_plus")) return 15;
+  if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
   return 0; // Free
 }
 
@@ -123,7 +122,7 @@ export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): nu
  */
 export function hasWeekendBoost(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return ["pro_plus", "pro_dealer", "dealer_pro_plus"].some(p => plan.includes(p));
+  return ["pro_plus", "pro_dealer"].some(p => plan.includes(p));
 }
 
 /**
@@ -132,8 +131,7 @@ export function hasWeekendBoost(plan: SubscriptionPlan | string): boolean {
  */
 export function getBoostScoreMultiplier(plan: SubscriptionPlan | string): number {
   if (!plan) return 0; // Free
-  
-  if (plan.includes("dealer_pro_plus")) return 2000;
+
   if (plan.includes("pro_dealer")) return 1000;
   if (plan.includes("pro_plus")) return 200;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 100;
@@ -157,15 +155,7 @@ export function getPlanBadgeInfo(plan: SubscriptionPlan | string): {
   textColor: string;
 } | null {
   if (!plan || plan === "free") return null;
-  
-  if (plan.includes("dealer_pro_plus")) {
-    return {
-      label: "DEALER PLUS",
-      color: "#FFD700",
-      textColor: "#000",
-    };
-  }
-  
+
   if (plan.includes("pro_dealer")) {
     return {
       label: "AGENCIA",
@@ -223,9 +213,8 @@ export function getSuggestedUpgrade(
   reason?: "hit_car_limit" | "need_ai" | "need_crm"
 ): SubscriptionPlan | null {
   if (!currentPlan) return "pro_monthly";
-  
-  if (currentPlan.includes("dealer_pro_plus")) return null; // Already at top
-  if (currentPlan.includes("pro_dealer")) return reason === "need_ai" ? "pro_dealer" : "dealer_pro_plus_monthly";
+
+  if (currentPlan.includes("pro_dealer")) return null; // Already at top
   if (currentPlan.includes("pro_plus")) return "pro_dealer_monthly";
   if (currentPlan.includes("pro")) return "pro_plus_monthly";
   return "pro_monthly"; // Free
@@ -283,12 +272,8 @@ export function getPlanFeatures(plan: SubscriptionPlan | string): string[] {
   }
   
   if (canAccessCRM(plan)) {
-    features.push("📞 CRM de Leads");
+    features.push("💻 Portal de Agencias completo: CRM, gestión de venta, comisiones y reportes");
   }
-  
-  if (canBulkImport(plan)) {
-    features.push("💻 Carga Masiva (CSV)");
-  }
-  
+
   return features;
 }

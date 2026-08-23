@@ -68,20 +68,18 @@ const FEATURED_DURATION_DAYS = 7;
 function getMaxCars(plan) {
     if (!plan || plan === "free")
         return 1;
-    if (plan.includes("dealer_pro_plus"))
-        return Infinity;
     if (plan.includes("pro_dealer"))
-        return 30;
+        return 100;
     if (plan.includes("pro_plus"))
-        return 7;
+        return 40;
     if (plan.includes("pro_monthly") ||
         plan.includes("pro_annual") ||
         plan === "pro")
-        return 3;
+        return 15;
     return 1;
 }
 function hasUnlimitedFeatured(plan) {
-    return plan.includes("pro_dealer") || plan.includes("dealer_pro_plus");
+    return plan.includes("pro_dealer");
 }
 // ─── enforceVehicleLimit ─────────────────────────────────────────────────────
 exports.enforceVehicleLimit = (0, firestore_1.onDocumentCreated)("vehicles/{vehicleId}", async (event) => {
@@ -654,7 +652,7 @@ exports.sendMetaConversionEvent = (0, https_1.onCall)({ secrets: [metaCapiToken]
 // para que la URL que el cliente ya haya obtenido con getDownloadURL()
 // siga funcionando una vez que la foto quede mejorada.
 function canUseWatermarkPlan(plan) {
-    return ["pro", "pro_plus", "pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+    return ["pro", "pro_plus", "pro_dealer"].some((p) => plan.includes(p));
 }
 async function fetchBuffer(url) {
     try {
@@ -815,8 +813,15 @@ exports.autoEnhancePhoto = (0, storage_1.onObjectFinalized)({ region: "us-centra
 // en el navegador y se perdía si el usuario cerraba la pestaña) y reporta
 // progreso incremental en bulkImportJobs/{jobId}, que el cliente escucha con
 // onSnapshot.
+// Identidad de negocio (dealer) — solo gatea el auto-featured al importar,
+// no el acceso a la carga masiva en sí (ver canBulkImportServer, universal).
 function isDealerPlanServer(plan) {
-    return ["pro_dealer", "dealer_pro_plus"].some((p) => plan.includes(p));
+    return plan.includes("pro_dealer");
+}
+// Carga masiva (CSV): disponible en cualquier plan pago, ya no exclusiva de
+// Dealer — reestructuración de planes, el portal se vende entero desde Pro.
+function canBulkImportServer(plan) {
+    return !!plan && plan !== "free";
 }
 function mapCsvRow(row) {
     const currencyRaw = (row.currency || row.moneda || "USD").toString().toUpperCase();
@@ -858,8 +863,8 @@ exports.startBulkImport = (0, https_1.onCall)({ memory: "1GiB", timeoutSeconds: 
     const userSnap = await db.doc(`users/${uid}`).get();
     const userData = userSnap.data() || {};
     const plan = userData.plan || "free";
-    if (!isDealerPlanServer(plan) && userData.role !== "admin") {
-        throw new https_1.HttpsError("permission-denied", "La carga masiva está disponible solo para planes Dealer.");
+    if (!canBulkImportServer(plan) && userData.role !== "admin") {
+        throw new https_1.HttpsError("permission-denied", "La carga masiva está disponible solo para planes pagos.");
     }
     const bucket = admin.storage().bucket();
     const jobRef = db.doc(`bulkImportJobs/${jobId}`);
