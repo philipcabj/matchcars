@@ -192,7 +192,9 @@ async function enrichWithSellerInfo(vehicles: PublicVehicle[]): Promise<PublicVe
     if (!snap.exists) return;
     const data = snap.data()!;
     const plan: string = data.plan || "free";
-    infoByUid.set(userIds[i], { isDealer: /pro_dealer/.test(plan), logoUrl: data.logoUrl || data.avatarUrl || null });
+    // isDealer = "tiene ficha pública de agencia" (cualquier plan pago desde
+    // la reestructuración de planes), no literalmente "es plan Dealer".
+    infoByUid.set(userIds[i], { isDealer: plan !== "free", logoUrl: data.logoUrl || data.avatarUrl || null });
   });
 
   return vehicles.map((v) => {
@@ -319,7 +321,7 @@ export async function getSellerProfile(userId: string): Promise<SellerProfile | 
     displayName: data.agencyName || data.displayName || "Vendedor",
     avatarUrl: data.avatarUrl || data.logoUrl || null,
     plan,
-    isDealer: /pro_dealer/.test(plan),
+    isDealer: plan !== "free",
     whatsapp: data.whatsapp || "",
     email: data.email || "",
     slug: data.slug || null,
@@ -361,7 +363,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
     description: data.description || "",
     rating: typeof data.sellerRating === "number" ? data.sellerRating : 0,
     reviewCount: data.sellerReviewCount || 0,
-    isDealer: /pro_dealer/.test(plan),
+    isDealer: plan !== "free",
     slug: data.slug || null,
     whatsapp: data.whatsapp || "",
     email: data.email || "",

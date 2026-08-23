@@ -21,7 +21,7 @@ import { db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { sendNotificationEmail } from "@/lib/mail";
 import { sendPushNotification } from "@/lib/notifications";
-import { canExportPDF } from "@/lib/planChecks";
+import { canExportPDF, canHavePublicAgencyPage } from "@/lib/planChecks";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { playLikeSound } from "@/lib/sounds";
 import { formatNumber, parseNumber } from "@/utils/format";
@@ -1029,7 +1029,7 @@ export default function CarDetailsScreen() {
   // Use current profile plan if owner, else stored vehicle plan for accurate permission check
   const effectivePlan = isOwner ? profile?.plan : vehicle.userPlan;
   
-  const isDealer = effectivePlan && effectivePlan.includes('pro_dealer');
+  const isVerifiedAgency = canHavePublicAgencyPage(effectivePlan || "");
   const showMetrics = effectivePlan && (effectivePlan.includes('pro_plus') || effectivePlan.includes('pro_dealer'));
   const effectiveAvg = priceSuggestion.avg;
   
@@ -1841,7 +1841,7 @@ export default function CarDetailsScreen() {
       )}
 
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        {isDealer && (
+        {isVerifiedAgency && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#9013FE', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
                 <Ionicons name="checkmark-circle" size={12} color="#FFF" />
                 <Text style={{ fontSize: 10, color: '#FFF', fontWeight: '800' }}>AGENCIA VERIFICADA</Text>
@@ -2118,13 +2118,13 @@ export default function CarDetailsScreen() {
                     <Text style={styles.ownerName} numberOfLines={1}>
                       {vehicle.userName || "Usuario desconocido"}
                     </Text>
-                    {(ownerProfile?.plan?.includes('pro_dealer') || vehicle.userPlan?.includes('pro_dealer')) && (
+                    {(canHavePublicAgencyPage(ownerProfile?.plan || "") || canHavePublicAgencyPage(vehicle.userPlan || "")) && (
                         <Ionicons name="checkmark-circle" size={14} color="#9013FE" />
                     )}
                 </View>
-                
+
                 {/* Reputation / Status */}
-                {(ownerProfile?.plan?.includes('pro_dealer') || vehicle.userPlan?.includes('pro_dealer')) ? (
+                {(canHavePublicAgencyPage(ownerProfile?.plan || "") || canHavePublicAgencyPage(vehicle.userPlan || "")) ? (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
                         <Text style={{ color: "#9013FE", fontSize: 12, fontWeight: "700" }}>Agencia Verificada</Text>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>

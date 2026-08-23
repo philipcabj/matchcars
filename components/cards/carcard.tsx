@@ -4,7 +4,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { usePriceSuggestion } from "@/hooks/usePriceSuggestion";
 import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
-import { getPlanBadgeInfo, isDealerPlan } from "@/lib/planChecks";
+import { canHavePublicAgencyPage, getPlanBadgeInfo, isDealerPlan } from "@/lib/planChecks";
 import { playLikeSound } from "@/lib/sounds";
 import type { Vehicle } from "@/types/vehicle";
 import { formatTimeAgo } from "@/utils/dateUtils";
@@ -138,7 +138,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
   // Helper to render Trust Badge
   const renderTrustBadge = () => {
       // Priority: Agency -> Rating -> TrustLevel
-      const isAgency = isDealerPlan(vehicle.userPlan);
+      const isAgency = canHavePublicAgencyPage(vehicle.userPlan);
       const rating = vehicle.sellerRating;
       const reviewCount = vehicle.sellerReviewCount || 0;
       const trustLevel = vehicle.sellerTrustLevel || "new"; 
@@ -511,7 +511,7 @@ export function CarCard({ vehicle, liked = false, likeDisabled = false, onToggle
               <Text style={{ color: theme.title, fontSize: compact ? 16 : 18, fontWeight: "700", flex: 1, flexWrap: 'wrap' }}>
                 {(vehicle.brand ?? "")} {(vehicle.model ?? "")} {(vehicle.version ?? "")}
               </Text>
-               {isDealerPlan(vehicle.userPlan) && (
+               {canHavePublicAgencyPage(vehicle.userPlan) && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#9013FE', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 4, alignSelf: 'flex-start' }}>
                     <Ionicons name="checkmark-circle" size={10} color="#FFF" />
                     <Text style={{ fontSize: 9, color: '#FFF', fontWeight: '800' }}>AGENCIA</Text>

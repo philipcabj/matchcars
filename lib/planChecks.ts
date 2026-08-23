@@ -62,13 +62,27 @@ export function canExportPDF(plan: SubscriptionPlan | string): boolean {
 
 /**
  * Check if plan has access to dealer/agency tools (identidad de negocio —
- * nombre de fantasía, auto-featured al publicar, badge en el marketplace.
- * NO gatea funciones del Portal de Agencias, esas son universales en
- * cualquier plan pago desde la reestructuración de planes).
+ * nombre de fantasía, auto-featured al publicar. NO gatea funciones del
+ * Portal de Agencias ni la ficha pública de agencia, esas son universales
+ * en cualquier plan pago desde la reestructuración de planes — ver
+ * canHavePublicAgencyPage).
  */
 export function isDealerPlan(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
   return plan.includes("pro_dealer");
+}
+
+/**
+ * Ficha pública de agencia en el marketplace (badge "Agencia Verificada",
+ * página /agencia/[slug], listado en /agencias) — disponible en cualquier
+ * plan pago desde la reestructuración de planes. Antes era exclusivo
+ * pro_dealer (isDealerPlan); se separa en una función propia porque
+ * isDealerPlan sigue siendo pro_dealer-only para otras cosas (auto-featured,
+ * nombre de fantasía).
+ */
+export function canHavePublicAgencyPage(plan: SubscriptionPlan | string): boolean {
+  if (!plan) return false;
+  return plan !== "free";
 }
 
 /**

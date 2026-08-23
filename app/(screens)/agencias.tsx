@@ -73,9 +73,19 @@ export default function AgenciesDirectoryScreen() {
     const fetchAgencies = async () => {
       try {
         const col = collection(db, "users");
+        // Cualquier plan pago tiene ficha pública de agencia desde la
+        // reestructuración de planes (antes era exclusivo pro_dealer).
         const q = query(
           col,
-          where("plan", "in", ["pro_dealer", "pro_dealer_monthly", "pro_dealer_annual"])
+          where("plan", "in", [
+            "pro_monthly",
+            "pro_annual",
+            "pro_plus_monthly",
+            "pro_plus_annual",
+            "pro_dealer",
+            "pro_dealer_monthly",
+            "pro_dealer_annual",
+          ])
         );
         const snap = await getDocs(q);
         const items: Agency[] = [];

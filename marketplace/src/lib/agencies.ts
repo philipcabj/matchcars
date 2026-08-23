@@ -1,7 +1,9 @@
 // marketplace/src/lib/agencies.ts
 // Directorio de agencias — mismo criterio que app/(screens)/agencias.tsx:
-// users con plan pro_dealer*, cantidad de autos activos, filtro por
+// users con cualquier plan pago, cantidad de autos activos, filtro por
 // nombre/ciudad/provincia/marca, orden A-Z / rating / cantidad de autos.
+// Ficha pública (getAgencyProfile) disponible para cualquier plan pago desde
+// la reestructuración de planes — antes era exclusivo pro_dealer.
 import "server-only";
 
 import { adminDb } from "@/lib/firebase-admin";
@@ -23,19 +25,29 @@ export interface Agency {
   plan: string;
 }
 
-const DEALER_PLANS = ["pro_dealer", "pro_dealer_monthly", "pro_dealer_annual"];
+const PAID_PLANS = [
+  "pro_monthly",
+  "pro_annual",
+  "pro_plus_monthly",
+  "pro_plus_annual",
+  "pro_dealer",
+  "pro_dealer_monthly",
+  "pro_dealer_annual",
+];
 
 // Jerarquía de planes — mismo criterio que getBoostScoreMultiplier en
 // lib/planChecks.ts (raíz), portado acá porque ese archivo no es importable
-// desde el marketplace (paquete separado). Solo importan los planes que
-// puede tener una entrada de este directorio (ver DEALER_PLANS arriba);
-// dealer_pro_plus queda por si algún día se suma a esa lista.
+// desde el marketplace (paquete separado). Determina el orden en
+// getFeaturedAgencies (mayor plan primero) — no gatea nada, cualquier
+// entrada de PAID_PLANS ya tiene ficha propia (ver getAgencyProfile).
 const PLAN_RANK: Record<string, number> = {
-  dealer_pro_plus_annual: 2,
-  dealer_pro_plus_monthly: 2,
-  pro_dealer: 1,
-  pro_dealer_monthly: 1,
-  pro_dealer_annual: 1,
+  pro_dealer: 3,
+  pro_dealer_monthly: 3,
+  pro_dealer_annual: 3,
+  pro_plus_monthly: 2,
+  pro_plus_annual: 2,
+  pro_monthly: 1,
+  pro_annual: 1,
 };
 
 function planRank(plan: string): number {
@@ -44,7 +56,7 @@ function planRank(plan: string): number {
 
 const fetchAgencies = cache(async (): Promise<Agency[]> => {
   const [snap, carCounts] = await Promise.all([
-    adminDb.collection("users").where("plan", "in", DEALER_PLANS).get(),
+    adminDb.collection("users").where("plan", "in", PAID_PLANS).get(),
     getVehicleCountsByUser(),
   ]);
 
