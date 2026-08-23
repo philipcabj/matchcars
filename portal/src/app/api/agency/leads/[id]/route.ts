@@ -75,9 +75,16 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
   // al marcar como entregado (ver mark_vehicle_sold acá abajo). Se expone
   // acá para poder re-mostrar el mismo QR si se recarga la página.
   let deliveryConfirmToken: string | null = null;
-  if (vehicleStatus === "reserved" && data.vehicleId) {
+  // Si ya se vendió pero la venta no tiene comisión calculada (típicamente
+  // porque se reasignó el vendedor después de cerrar, antes de que
+  // existiera el bloqueo de reasignar leads cerrados) — la ficha ofrece
+  // recalcularla a mano con el vendedor actual, ver acción
+  // "recalculate_commission" más abajo.
+  let saleHasCommission: boolean | null = null;
+  if (data.vehicleId && (vehicleStatus === "reserved" || vehicleStatus === "sold")) {
     const saleSnap = await adminDb.doc(`sales/${data.vehicleId}`).get();
     deliveryConfirmToken = saleSnap.exists ? saleSnap.data()?.deliveryConfirmToken ?? null : null;
+    saleHasCommission = saleSnap.exists ? !!saleSnap.data()?.commission : null;
   }
 
   // Historial de este lead (avances, edición de contacto, cierre, etc.) —
@@ -105,6 +112,7 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     vehicleStatus,
     vehicleSnapshot,
     deliveryConfirmToken,
+    saleHasCommission,
     buyerSnapshot: data.buyerSnapshot ?? null,
     manualContact: data.manualContact ?? null,
     lastMessage: data.lastMessage ?? null,
@@ -353,6 +361,58 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     });
 
     return Response.json({ ok: true, deliveryConfirmToken });
+  }
+
+  // Recalcula la comisión de una venta ya cerrada usando el vendedor actual
+  // — cubre el caso de un lead que se reasignó después de vendido (antes de
+  // que existiera el bloqueo de reasignar leads cerrados, ver acción
+  // "assign" más arriba) y se quedó con la comisión sin calcular. No
+  // sobreescribe una comisión que ya existe — para eso hay que resolverlo a
+  // mano, esto es solo para completar la que falta.
+  if (action === "recalculate_commission") {
+    if (current !== "won" || !lead.vehicleId) {
+      return Response.json({ error: "Este lead no tiene una venta cerrada para recalcular." }, { status: 400 });
+    }
+    if (!lead.assignedTo || lead.assignedTo === agencyId) {
+      return Response.json({ error: "Este lead no tiene un vendedor del equipo asignado." }, { status: 400 });
+    }
+    const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+    if (!canManageCommissions(ownerSnap.data()?.plan || "free")) {
+      return Response.json({ error: "Las comisiones no están disponibles en tu plan." }, { status: 403 });
+    }
+    const saleRef = adminDb.doc(`sales/${lead.vehicleId}`);
+    const saleSnap = await saleRef.get();
+    if (!saleSnap.exists) {
+      return Response.json({ error: "Este auto todavía no se marcó como vendido." }, { status: 400 });
+    }
+    if (saleSnap.data()?.commission) {
+      return Response.json({ error: "Esta venta ya tiene una comisión calculada." }, { status: 400 });
+    }
+
+    const dealPrice = lead.dealPrice || saleSnap.data()?.finalPrice || 0;
+    const dealCurrency = lead.dealCurrency || saleSnap.data()?.currency || "ARS";
+    const ruleSnap = await adminDb.doc(`agencies/${agencyId}/settings/commissionRule`).get();
+    const rule: CommissionRule = ruleSnap.exists ? (ruleSnap.data() as CommissionRule) : DEFAULT_COMMISSION_RULE;
+    const vehicleSnap = await adminDb.doc(`vehicles/${lead.vehicleId}`).get();
+    const purchasePrice = vehicleSnap.data()?.purchasePrice;
+    const expensesTotal = vehicleSnap.data()?.expensesTotal || 0;
+    const margin = typeof purchasePrice === "number" ? dealPrice - purchasePrice - expensesTotal : null;
+    const commission = {
+      sellerUid: lead.assignedTo,
+      amount: calculateCommission(rule, dealPrice, margin),
+      currency: dealCurrency,
+      margin,
+      rule,
+    };
+    await saleRef.set({ commission }, { merge: true });
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "lead",
+      entityId: id,
+      summary: `Recalculó la comisión de ${carLabel()}`,
+    });
+    return Response.json({ ok: true });
   }
 
   if (action === "edit_contact") {
