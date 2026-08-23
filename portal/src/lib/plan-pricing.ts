@@ -8,12 +8,14 @@
 // salir del portal. Si cambian precios o features en subscribe.tsx, hay que
 // replicarlo acá a mano.
 //
-// Los 3 números (autos/destacados/usuarios) van separados del resto a
-// propósito — son el único eje real de diferenciación entre planes desde la
-// reestructuración de planes (portal completo en los 3). PORTAL_ITEMS y
-// PLAN_EXTRAS son idénticos en pro/pro_plus/pro_dealer (mismo criterio que el
-// mockup aprobado: un solo bloque de portal, no una lista larga repetida y
-// variada por plan).
+// Los 3 números (autos/destacados/usuarios) son el ÚNICO eje real de
+// diferenciación entre planes desde la reestructuración de planes — todo lo
+// demás (PORTAL_ITEMS) es idéntico en pro/pro_plus/pro_dealer, por eso se
+// cuenta una sola vez en una banda compartida en vez de repetirse por card.
+// "Boost automático fines de semana" queda deliberadamente afuera de esta
+// lista — sigue funcionando igual en el producto (pro_plus+), pero no se
+// promociona en la página de planes (decisión del 2026-08-23: no aportaba
+// claridad como diferenciador).
 export interface PlanPricing {
   id: string; // Coincide con el prefijo de SubscriptionPlan en plans.ts (pro, pro_plus, pro_dealer)
   title: string;
@@ -34,24 +36,26 @@ export const FREE_PLAN = {
   features: ["🚗 1 auto activo", "📊 Métricas básicas"],
 };
 
-// El bloque destacado "Portal de Agencias — todo incluido" de cada card —
-// mismo contenido en los 3 planes pagos.
-export const PORTAL_ITEMS = [
-  "CRM de leads: WhatsApp, Instagram, teléfono",
-  "Gestión de venta y postventa automática",
-  "Comisiones automáticas por vendedor",
-  "Reportes avanzados + performance de equipo",
-  "Panel comparativo vs. otras agencias",
-  "Carga masiva (CSV)",
+// Banda "Portal de Agencias completo" — un ícono + label corto por ítem,
+// mismo contenido en los 3 planes pagos. Incluye tanto el portal (CRM,
+// ventas, comisiones, reportes) como el resto de herramientas que también
+// son universales hoy (video, IA, PDF, flyers, ficha pública de agencia).
+export const PORTAL_ITEMS: { icon: string; label: string; sub: string }[] = [
+  { icon: "💬", label: "CRM de leads", sub: "WhatsApp, Instagram, teléfono" },
+  { icon: "📋", label: "Gestión de venta", sub: "y postventa automática" },
+  { icon: "🧮", label: "Comisiones", sub: "automáticas por vendedor" },
+  { icon: "📊", label: "Reportes avanzados", sub: "+ performance de equipo" },
+  { icon: "📈", label: "Panel comparativo", sub: "vs. otras agencias" },
+  { icon: "📥", label: "Carga masiva", sub: "por CSV" },
+  { icon: "🏅", label: "Ficha pública", sub: "de agencia en el marketplace" },
+  { icon: "📸", label: "Generador de flyers", sub: "para redes y WhatsApp" },
+  { icon: "📹", label: "Video Walkaround", sub: "en cada publicación" },
+  { icon: "✨", label: "Mejora de fotos (IA)", sub: "y tapado de patente" },
+  { icon: "📄", label: "Ficha PDF", sub: "con QR para compartir" },
 ];
 
-// Lo demás que también es igual en los 3 (video, IA, PDF) — chico, sin caja,
-// debajo del bloque de portal.
-export const PLAN_EXTRAS = ["📹 Video Walkaround", "✨ Mejorar foto y tapar patente (IA)", "📄 Ficha PDF con QR"];
-
-// Detalle completo de PORTAL_ITEMS, para la sección de referencia debajo de
-// las cards — mismo contenido agrupado en categorías, mismo tratamiento
-// visual (accent) que el bloque "Portal de Agencias" de cada card.
+// Mismo contenido que PORTAL_ITEMS, agrupado en categorías con más detalle
+// — para la sección expandible "Ver el detalle completo".
 export const PORTAL_CAPABILITIES: { title: string; items: string[] }[] = [
   {
     title: "CRM de leads",
@@ -87,6 +91,16 @@ export const PORTAL_CAPABILITIES: { title: string; items: string[] }[] = [
       "Reportes avanzados de qué necesita atención",
       "Performance de vendedores: leads, conversión, tiempo de cierre",
       "Panel comparativo vs. el promedio de otras agencias",
+    ],
+  },
+  {
+    title: "Marketing y presencia",
+    items: [
+      "Ficha pública de agencia en el marketplace",
+      "Generador de flyers para redes y WhatsApp",
+      "Video Walkaround en cada publicación",
+      "Mejora de fotos y tapado de patente automático (IA)",
+      "Ficha PDF con QR para compartir",
     ],
   },
   {

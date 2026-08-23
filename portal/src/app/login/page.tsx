@@ -3,6 +3,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import QRCode from "qrcode";
@@ -272,6 +273,10 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-4 text-[11px] text-muted-foreground">Escaneá con la cámara de tu celular, o tocá para abrir el link.</p>
+
+        <Link href="/planes" className="mt-3 inline-block text-xs font-semibold text-accent hover:underline">
+          Ver los planes →
+        </Link>
       </div>
     </main>
   );

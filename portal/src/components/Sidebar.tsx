@@ -11,7 +11,7 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
 
-type Gate = "none" | "crm" | "dealer";
+type Gate = "none" | "crm";
 
 const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; gate: Gate }[] = [
   { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true, gate: "none" },
@@ -21,13 +21,17 @@ const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; 
   { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm" },
   { label: "Operaciones", href: "/dashboard/operaciones", icon: "📋", enabled: true, gate: "crm" },
   { label: "Postventa", href: "/dashboard/postventa", icon: "🔄", enabled: true, gate: "crm" },
-  { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "dealer" },
+  // Comisiones ya es universal (canManageCommissions = cualquier plan pago,
+  // ver plans.ts) -- mismo gate "crm" que el resto del CRM, no "dealer"
+  // (ese gate quedaba mostrando "🔒 Dealer" a Pro/Pro Plus aunque la
+  // pantalla ya los dejaba entrar).
+  { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "crm" },
   { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none" },
   { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
 ];
 
 const ADMIN_NAV_ITEM = { label: "Administración", href: "/dashboard/admin", icon: "🛡️", enabled: true, gate: "none" as Gate };
-const GATE_LABEL: Record<Gate, string> = { none: "", crm: "🔒 Pro Plus", dealer: "🔒 Dealer" };
+const GATE_LABEL: Record<Gate, string> = { none: "", crm: "🔒 Plan pago" };
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -69,9 +73,7 @@ export function Sidebar() {
         {navItems.map((item) => {
           const active = item.href === "/dashboard" ? pathname === item.href : pathname?.startsWith(item.href);
           const unread = item.href === "/dashboard/leads" ? agency?.unreadLeadsCount ?? 0 : 0;
-          const locked =
-            !!agency &&
-            ((item.gate === "crm" && !agency.hasCRM) || (item.gate === "dealer" && !agency.isDealerPlan));
+          const locked = !!agency && item.gate === "crm" && !agency.hasCRM;
           const className = `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
             active ? "bg-accent/10 text-accent" : item.enabled ? "text-foreground hover:bg-background" : "cursor-default text-muted-foreground/60"
           }`;
