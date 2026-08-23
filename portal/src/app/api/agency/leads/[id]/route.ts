@@ -145,6 +145,13 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   const carLabel = () => `${lead.vehicleSnapshot?.brand ?? ""} ${lead.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
 
   if (action === "assign") {
+    // Una vez cerrado (ganado o perdido) el vendedor asignado queda fijo —
+    // cambiarlo después movería a quién se le atribuye la comisión y la
+    // performance de ese cierre. Reasignar sigue permitido en cualquier
+    // etapa previa; cada reasignación ya queda en el activity log.
+    if (current === "won" || current === "lost") {
+      return Response.json({ error: "Este lead ya está cerrado — no se puede reasignar." }, { status: 400 });
+    }
     const assignedTo = typeof body.assignedTo === "string" && body.assignedTo ? body.assignedTo : null;
     let assignedName = "sin asignar";
     if (assignedTo) {

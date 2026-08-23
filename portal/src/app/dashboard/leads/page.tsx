@@ -301,6 +301,7 @@ export default function LeadsPage() {
                       leadId={lead.id}
                       assignedTo={lead.assignedTo}
                       members={agency.members}
+                      locked={lead.status === "won" || lead.status === "lost"}
                       onAssigned={(uid) =>
                         setLeads((prev) => prev && prev.map((l) => (l.id === lead.id ? { ...l, assignedTo: uid } : l)))
                       }

@@ -382,6 +382,7 @@ export default function LeadDetailPage() {
               leadId={lead.id}
               assignedTo={lead.assignedTo}
               members={agency.members}
+              locked={lead.status === "won" || lead.status === "lost"}
               onAssigned={(uid) => setLead((prev) => (prev ? { ...prev, assignedTo: uid } : prev))}
             />
           )}
@@ -782,6 +783,7 @@ export default function LeadDetailPage() {
                 leadId={lead.id}
                 assignedTo={lead.assignedTo}
                 members={agency.members}
+                locked={lead.status === "won" || lead.status === "lost"}
                 onAssigned={(uid) => setLead((prev) => (prev ? { ...prev, assignedTo: uid } : prev))}
               />
             </div>

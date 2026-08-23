@@ -15,12 +15,17 @@ export function AssigneeSelect({
   members,
   onAssigned,
   className,
+  locked,
 }: {
   leadId: string;
   assignedTo: string | null | undefined;
   members: AgencyMember[];
   onAssigned: (uid: string | null) => void;
   className?: string;
+  // Lead ganado o perdido: el vendedor queda fijo (ver leads/[id]/route.ts
+  // "assign") para no mover a quién se le atribuye la comisión/performance
+  // de un cierre ya hecho.
+  locked?: boolean;
 }) {
   const { getIdToken } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -43,6 +48,21 @@ export function AssigneeSelect({
       setBusy(false);
     }
   };
+
+  if (locked) {
+    const name = members.find((m) => m.uid === assignedTo)?.name || members.find((m) => m.uid === assignedTo)?.email;
+    return (
+      <span
+        title="Lead cerrado — el vendedor asignado ya no se puede cambiar"
+        className={
+          className ??
+          "rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-muted-foreground"
+        }
+      >
+        🔒 {name || "Sin asignar"}
+      </span>
+    );
+  }
 
   return (
     <select
