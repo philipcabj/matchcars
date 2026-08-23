@@ -4,11 +4,33 @@
 import { useAuth } from "@/contexts/AuthContext";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import QRCode from "qrcode";
+
+const APPLE_URL = "https://apps.apple.com/ar/app/matchcars/id6757968664";
+const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
+
+// Mismo paquete y patrón que DeliveryQrCode.tsx — generado en el cliente, sin
+// depender de ningún servicio externo de QR.
+function useQrDataUrl(url: string): string | null {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    QRCode.toDataURL(url, { margin: 1, width: 160, color: { dark: "#0E1117", light: "#FFFFFF" } }).then((d) => {
+      if (!cancelled) setDataUrl(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+  return dataUrl;
+}
 
 export default function LoginPage() {
   const { loginWithEmail, resetPassword, loginWithGoogle, loginWithApple } = useAuth();
   const router = useRouter();
+  const appleQr = useQrDataUrl(APPLE_URL);
+  const playQr = useQrDataUrl(PLAY_URL);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -205,30 +227,51 @@ export default function LoginPage() {
         </button>
       </div>
 
-      <div className="w-full max-w-sm rounded-2xl border border-dashed border-border bg-card p-5 text-center">
-        <p className="text-sm font-semibold">¿No tenés cuenta o plan todavía?</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          El Portal de Agencias se activa con la misma cuenta de la app MatchCars. Descargala, creá tu cuenta, contratá un
-          plan pago y volvé acá con el mismo mail.
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 text-center shadow-sm">
+        <p className="text-sm font-bold">¿No tenés cuenta o plan todavía?</p>
+        <p className="mx-auto mt-1.5 max-w-[30ch] text-xs text-muted-foreground">
+          El Portal de Agencias se activa con la misma cuenta de la app MatchCars — descargala, creá tu cuenta, contratá
+          un plan pago y volvé acá con el mismo mail.
         </p>
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-          <a
-            href="https://play.google.com/store/apps/details?id=com.matchcars.app"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold transition hover:bg-card"
-          >
-            Google Play
+
+        <div className="mt-5 flex items-start justify-center gap-6">
+          <a href={APPLE_URL} target="_blank" rel="noopener noreferrer" className="group flex flex-col items-center gap-2">
+            <div className="flex h-[92px] w-[92px] items-center justify-center rounded-xl border border-border bg-white p-2 shadow-sm transition group-hover:border-accent">
+              {appleQr ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={appleQr} alt="Código QR para descargar en App Store" width={76} height={76} />
+              ) : (
+                <div className="h-[76px] w-[76px] animate-pulse rounded bg-muted/30" />
+              )}
+            </div>
+            <span className="flex items-center gap-1 text-xs font-semibold text-foreground">
+              <svg width="12" height="12" viewBox="0 0 384 512" fill="currentColor">
+                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5c0 26.2 4.8 53.3 14.4 81.2 12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
+              </svg>
+              App Store
+            </span>
           </a>
-          <a
-            href="https://apps.apple.com/ar/app/matchcars/id6757968664"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold transition hover:bg-card"
-          >
-            App Store
+
+          <a href={PLAY_URL} target="_blank" rel="noopener noreferrer" className="group flex flex-col items-center gap-2">
+            <div className="flex h-[92px] w-[92px] items-center justify-center rounded-xl border border-border bg-white p-2 shadow-sm transition group-hover:border-accent">
+              {playQr ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={playQr} alt="Código QR para descargar en Google Play" width={76} height={76} />
+              ) : (
+                <div className="h-[76px] w-[76px] animate-pulse rounded bg-muted/30" />
+              )}
+            </div>
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4 3.5v17c0 .4.2.8.6.9l10.9-9.4L4.6 2.6c-.4.1-.6.5-.6.9z" />
+                <path d="M17.6 13.9 20.5 12l-2.9-1.9-2.4 1.9 2.4 1.9z" />
+              </svg>
+              Google Play
+            </span>
           </a>
         </div>
+
+        <p className="mt-4 text-[11px] text-muted-foreground">Escaneá con la cámara de tu celular, o tocá para abrir el link.</p>
       </div>
     </main>
   );
