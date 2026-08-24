@@ -49,3 +49,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # DSN público de Sentry (no es secreto — identifica el proyecto, no
+  # autentica nada) — ver portal/src/instrumentation-client.ts,
+  # sentry.server.config.ts y sentry.edge.config.ts.
+  - variable: NEXT_PUBLIC_SENTRY_DSN
+    value: https://91f32ab717e0a9c4e75bc834beed4710@o4511967088541696.ingest.us.sentry.io/4511967170265089
+    availability:
+      - BUILD
+      - RUNTIME

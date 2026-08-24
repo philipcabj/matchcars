@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   // El repo raíz también tiene su propio package-lock.json (la app Expo).
@@ -16,4 +17,12 @@ const nextConfig: NextConfig = {
   // acceso a la consola de IAM. Subdominio propio lo evita del todo.
 };
 
-export default nextConfig;
+// Sin SENTRY_AUTH_TOKEN el plugin no sube sourcemaps (los errores igual
+// llegan a Sentry, solo que con el código minificado) — no rompe el build
+// si todavía no cargamos ese token en apphosting.yaml.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: true,
+});
