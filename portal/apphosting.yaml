@@ -57,3 +57,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # @sentry/cli (dependencia de @sentry/nextjs) baja un binario nativo en el
+  # postinstall — sin SENTRY_AUTH_TOKEN no lo necesitamos para nada (solo
+  # sirve para subir sourcemaps) y esa descarga es la sospecha más probable
+  # de por qué el build en Cloud Build fallaba sin un motivo legible.
+  - variable: SENTRYCLI_SKIP_DOWNLOAD
+    value: "1"
+    availability:
+      - BUILD
