@@ -7,8 +7,11 @@
 //         sin esto la pantalla de Leads nunca se llenaría sola.
 //
 // Gap conocido a propósito: acá no se replica la negociación de ofertas
-// (aceptar/rechazar/contraofertar) ni marcar "vendido" con precio de cierre —
-// eso queda ligado al flujo de venta de la app (mycars.tsx), no portado.
+// (aceptar/rechazar/contraofertar) del chat de la app — no aplica a un lead
+// manual porque no hay una cuenta de comprador del otro lado con quien
+// negociar in-app. Cerrar con precio acordado sí está cubierto para
+// cualquier lead (manual u orgánico): ver acción "mark_won" en
+// leads/[id]/route.ts, que guarda dealPrice/dealCurrency igual para los dos.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { logActivity } from "@/lib/activity-log";

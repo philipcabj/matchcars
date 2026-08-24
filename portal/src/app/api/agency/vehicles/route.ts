@@ -13,6 +13,7 @@ import { resolveMembership } from "@/lib/agency-server";
 import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canUploadVideo, getMaxCars } from "@/lib/plans";
+import { evaluateVehicleRiskServer } from "@/lib/risk-scoring";
 import { EXCLUDED_STATUSES, VehicleFormValues } from "@/lib/vehicle";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -94,6 +95,24 @@ export const POST = withApiErrors(async (request) => {
   const isDealer = /pro_dealer/.test(plan);
   const userName = isDealer && userData.agencyName ? userData.agencyName : userData.displayName || userData.email || "Agencia";
 
+  // Igual que en la app: análisis adicional, no bloqueante — si falla, se publica igual sin flags.
+  let risk = { flags: [] as string[], score: 0 };
+  try {
+    risk = await evaluateVehicleRiskServer({
+      brand: body.brand.trim(),
+      model: body.model.trim(),
+      year: yearNum,
+      price: priceNum,
+      currency,
+      description: body.description || "",
+      userId: agencyId,
+      trustLevel: userData.trustLevel || "new",
+      coverImage: body.coverImage,
+    });
+  } catch (e) {
+    console.error("Error evaluando riesgo (no bloqueante):", e);
+  }
+
   const vehicleData = {
     userId: agencyId,
     userName,
@@ -142,11 +161,8 @@ export const POST = withApiErrors(async (request) => {
     views: 0,
     likesCount: 0,
     flags: { forSale: true, tradeIn: !!toggles.acceptsTradeIn },
-    // TODO: portar lib/riskScoring.ts (evaluación de riesgo) al backend del
-    // portal — por ahora se publica sin flags, igual que quedaría cualquier
-    // publicación si esa evaluación fallara silenciosamente en la app.
-    riskFlags: [],
-    riskScore: 0,
+    riskFlags: risk.flags,
+    riskScore: risk.score,
     createdAt: FieldValue.serverTimestamp(),
   };
 
