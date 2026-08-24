@@ -11,6 +11,7 @@ import Image from "next/image";
 import { notFound } from "next/navigation";
 
 const APP_BASE_URL = "https://matchcars.app";
+const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "http://localhost:3000";
 
 async function loadPageData(slug: string) {
   const agency = await getAgencyProfile(slug);
@@ -189,6 +190,17 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
               )}
             </div>
           )}
+
+          {/* Esta ficha ya implica plan pago (getAgencyProfile la filtra
+              así) — no es una venta, es un recordatorio de activación para
+              el dueño si todavía no usa el portal que ya tiene incluido. */}
+          <a
+            href={PORTAL_URL}
+            className="flex items-center justify-between gap-2 rounded-2xl border border-dashed border-border bg-card px-4 py-3 text-xs text-muted-foreground transition hover:border-accent hover:text-accent"
+          >
+            <span>¿Sos el dueño de {agency.name}? Entrá al Portal de Agencias</span>
+            <span className="shrink-0 font-bold">→</span>
+          </a>
         </div>
       </div>
     </div>

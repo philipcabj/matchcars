@@ -9,6 +9,7 @@ import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 
 const APP_BASE_URL = "https://matchcars.app";
+const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "http://localhost:3000";
 
 type PageData =
   | { kind: "redirect"; to: string }
@@ -129,12 +130,34 @@ export default async function UserProfilePage({ params }: { params: Promise<{ ui
           )}
         </div>
 
-        <div className="rounded-2xl border border-border bg-card p-5">
-          <SellerContactButtons
-            whatsapp={profile.whatsapp}
-            email={profile.email}
-            waMessage={`Hola! Vi tu perfil en MatchCars y quería consultarte.`}
-          />
+        <div className="flex flex-col gap-4">
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <SellerContactButtons
+              whatsapp={profile.whatsapp}
+              email={profile.email}
+              waMessage={`Hola! Vi tu perfil en MatchCars y quería consultarte.`}
+            />
+          </div>
+
+          {/* Este perfil es exclusivamente de vendedores en plan free (los
+              pagos redirigen a /agencia/[slug] más arriba), y el plan free
+              tiene tope de 1 auto activo (getMaxCars) — no hay forma de que
+              este perfil tenga 2+ publicaciones a la vez, así que el CTA no
+              puede depender de eso. Se muestra siempre, apuntando al límite
+              real que resuelve pasarse a agencia. */}
+          <div className="flex flex-col gap-2 rounded-2xl border border-accent/40 bg-accent/5 p-5">
+            <p className="text-sm font-extrabold">🏢 ¿Necesitás publicar más de un auto?</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              El plan gratis permite 1 auto activo a la vez. Convertite en agencia: ficha propia verificada, más
+              cupo y el Portal de Agencias para gestionar tus ventas.
+            </p>
+            <a
+              href={`${PORTAL_URL}/planes`}
+              className="mt-1 rounded-lg bg-accent px-3 py-2 text-center text-xs font-bold text-accent-foreground transition hover:opacity-90"
+            >
+              Ver planes →
+            </a>
+          </div>
         </div>
       </div>
     </div>

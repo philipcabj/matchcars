@@ -1,4 +1,5 @@
 import { AgencyCard } from "@/components/AgencyCard";
+import { AgencyPromoCard } from "@/components/AgencyPromoCard";
 import { AppDownloadCard } from "@/components/AppDownloadCard";
 import { FilterBar } from "@/components/FilterBar";
 import { VehicleCard } from "@/components/VehicleCard";
@@ -146,6 +147,10 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             ))}
           </nav>
         )}
+
+        <div className="xl:hidden">
+          <AgencyPromoCard source="home_mobile" />
+        </div>
       </div>
 
       <aside className="hidden w-72 shrink-0 flex-col gap-4 xl:flex">
@@ -214,6 +219,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             ))}
           </div>
         )}
+
+        <AgencyPromoCard source="home_sidebar" />
       </aside>
     </div>
   );
