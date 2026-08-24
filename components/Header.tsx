@@ -6,7 +6,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
-import { Modal, Platform, Text, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
+import { Linking, Modal, Platform, Text, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { db } from "@/lib/firebase";
@@ -363,6 +363,23 @@ export const Header: React.FC<HeaderProps> = ({ title, showBack, onBackPress, cu
                       </View>
                     )}
                   </TouchableOpacity>
+
+                  {/* Portal de Agencias — cualquier plan pago, mismo criterio que el
+                      chip de "Configuración y Accesos" en profile.tsx */}
+                  {!!profile?.plan && profile.plan !== "free" && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setMenuVisible(false);
+                        Linking.openURL("https://portal.matchcars.app").catch(() => {});
+                      }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10 }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="grid-outline" size={20} color={theme.text} />
+                      <Text style={{ color: theme.text, fontSize: 14, flex: 1 }} numberOfLines={1}>Portal de Agencias</Text>
+                      <Ionicons name="open-outline" size={14} color={theme.textMuted} />
+                    </TouchableOpacity>
+                  )}
 
                   {/* Panel Admin (solo admins/moderadores) */}
                   {isAdmin && (
