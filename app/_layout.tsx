@@ -190,19 +190,18 @@ function RootStackContent() {
     return <Redirect href="/terms" />;
   }
 
-  // WEB GUARD: Restrict usage to Dealers only
-   // If user is logged in on Web but is NOT a 'pro_dealer', we block access.
-   // We check if plan starts with 'pro_dealer' to cover both monthly and annual plans
-   
+  // WEB GUARD: Restrict usage to paying agencies (any of the 3 paid plans, not just Dealer)
+   // If user is logged in on Web but is on the free plan, we block access.
+
    const isPublicShowroomRoute =
      pathname?.startsWith('/embed/') ||
      pathname?.startsWith('/agencia/') ||
      pathname?.startsWith('/user-profile/');
 
    if (Platform.OS === 'web' && user && profile && !isPublicShowroomRoute) {
-     const isDealer = profile.plan && (profile.plan === 'pro_dealer' || profile.plan.startsWith('pro_dealer'));
+     const isPaidPlan = !!profile.plan && profile.plan !== 'free';
 
-     if (!isDealer) {
+     if (!isPaidPlan) {
         return (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background, padding: 20 }}>
             <View style={{ maxWidth: 500, alignItems: 'center' }}>
