@@ -34,7 +34,7 @@ const FEATURED_DURATION_DAYS = 7;
 
 function getMaxCars(plan: string): number {
   if (!plan || plan === "free") return 1;
-  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return 100;
   if (plan.includes("pro_plus")) return 40;
   if (
     plan.includes("pro_monthly") ||
@@ -46,7 +46,7 @@ function getMaxCars(plan: string): number {
 }
 
 function hasUnlimitedFeatured(plan: string): boolean {
-  return plan.includes("pro_dealer");
+  return plan.includes("pro_dealer") || plan === "pro_internal";
 }
 
 // ─── enforceVehicleLimit ─────────────────────────────────────────────────────

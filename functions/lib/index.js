@@ -68,7 +68,7 @@ const FEATURED_DURATION_DAYS = 7;
 function getMaxCars(plan) {
     if (!plan || plan === "free")
         return 1;
-    if (plan.includes("pro_dealer"))
+    if (plan.includes("pro_dealer") || plan === "pro_internal")
         return 100;
     if (plan.includes("pro_plus"))
         return 40;
@@ -79,7 +79,7 @@ function getMaxCars(plan) {
     return 1;
 }
 function hasUnlimitedFeatured(plan) {
-    return plan.includes("pro_dealer");
+    return plan.includes("pro_dealer") || plan === "pro_internal";
 }
 // ─── enforceVehicleLimit ─────────────────────────────────────────────────────
 exports.enforceVehicleLimit = (0, firestore_1.onDocumentCreated)("vehicles/{vehicleId}", async (event) => {

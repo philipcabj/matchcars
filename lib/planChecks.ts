@@ -11,7 +11,7 @@ import { SubscriptionPlan } from "@/types/user";
 export function getMaxCars(plan: SubscriptionPlan | string): number {
   if (!plan) return 1; // Default for free/undefined
 
-  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return 100;
   if (plan.includes("pro_plus")) return 40;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 15;
   return 1; // Free or unknown
@@ -82,6 +82,7 @@ export function isDealerPlan(plan: SubscriptionPlan | string): boolean {
  */
 export function canHavePublicAgencyPage(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
+  if (plan === "pro_internal") return false; // asignado solo por admin, nunca público
   return plan !== "free";
 }
 
@@ -107,7 +108,7 @@ export function canAccessCRM(plan: SubscriptionPlan | string): boolean {
  */
 export function hasUnlimitedFeatured(plan: SubscriptionPlan | string): boolean {
   if (!plan) return false;
-  return plan.includes("pro_dealer");
+  return plan.includes("pro_dealer") || plan === "pro_internal";
 }
 
 /**
@@ -125,7 +126,7 @@ export function canFeatureListings(plan: SubscriptionPlan | string): boolean {
 export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): number {
   if (!plan) return 0; // Free
 
-  if (plan.includes("pro_dealer")) return Infinity;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return Infinity;
   if (plan.includes("pro_plus")) return 15;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
   return 0; // Free

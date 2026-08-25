@@ -161,7 +161,10 @@ function fmt(q) {
   const portalPlans = portalTypeMatch
     ? Array.from(portalTypeMatch[1].matchAll(/"([a-z_]+)"/g)).map((m) => m[1])
     : [];
-  const portalPaidPlans = portalPlans.filter((p) => p !== "free").sort();
+  // pro_internal es intencionalmente NO público — asignado solo por un admin
+  // para dar acceso al portal sin aparecer como agencia, así que a propósito
+  // no está (ni debe estar) en marketplace.PAID_PLANS.
+  const portalPaidPlans = portalPlans.filter((p) => p !== "free" && p !== "pro_internal").sort();
 
   const marketplaceMatch = src.marketplace.match(/const PAID_PLANS = \[([\s\S]*?)\];/);
   const marketplacePlans = marketplaceMatch

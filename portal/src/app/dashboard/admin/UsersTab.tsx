@@ -36,6 +36,7 @@ const PLAN_COLORS: Record<string, string> = {
   pro_dealer_monthly: "#10B981",
   pro_dealer_annual: "#059669",
   pro_dealer: "#9CA3AF",
+  pro_internal: "#7C3AED",
 };
 
 export function UsersTab() {

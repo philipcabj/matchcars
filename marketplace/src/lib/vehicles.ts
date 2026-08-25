@@ -193,8 +193,13 @@ async function enrichWithSellerInfo(vehicles: PublicVehicle[]): Promise<PublicVe
     const data = snap.data()!;
     const plan: string = data.plan || "free";
     // isDealer = "tiene ficha pública de agencia" (cualquier plan pago desde
-    // la reestructuración de planes), no literalmente "es plan Dealer".
-    infoByUid.set(userIds[i], { isDealer: plan !== "free", logoUrl: data.logoUrl || data.avatarUrl || null });
+    // la reestructuración de planes, salvo pro_internal — asignado a mano por
+    // un admin para dar acceso al portal sin exposición pública), no
+    // literalmente "es plan Dealer".
+    infoByUid.set(userIds[i], {
+      isDealer: plan !== "free" && plan !== "pro_internal",
+      logoUrl: data.logoUrl || data.avatarUrl || null,
+    });
   });
 
   return vehicles.map((v) => {
@@ -321,7 +326,7 @@ export async function getSellerProfile(userId: string): Promise<SellerProfile | 
     displayName: data.agencyName || data.displayName || "Vendedor",
     avatarUrl: data.avatarUrl || data.logoUrl || null,
     plan,
-    isDealer: plan !== "free",
+    isDealer: plan !== "free" && plan !== "pro_internal",
     whatsapp: data.whatsapp || "",
     email: data.email || "",
     slug: data.slug || null,
@@ -363,7 +368,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
     description: data.description || "",
     rating: typeof data.sellerRating === "number" ? data.sellerRating : 0,
     reviewCount: data.sellerReviewCount || 0,
-    isDealer: plan !== "free",
+    isDealer: plan !== "free" && plan !== "pro_internal",
     slug: data.slug || null,
     whatsapp: data.whatsapp || "",
     email: data.email || "",

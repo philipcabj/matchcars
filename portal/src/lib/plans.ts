@@ -21,7 +21,10 @@ export type SubscriptionPlan =
   | "pro_plus_annual"
   | "pro_dealer_monthly"
   | "pro_dealer_annual"
-  | "pro_dealer"; // Fallback/legacy
+  | "pro_dealer" // Fallback/legacy
+  // Acceso interno asignado a mano por un admin (portal completo, sin
+  // aparecer como agencia pública) — nunca se vende, no existe en RevenueCat.
+  | "pro_internal";
 
 export const PLAN_LABELS: Record<SubscriptionPlan, string> = {
   free: "Gratis",
@@ -32,6 +35,7 @@ export const PLAN_LABELS: Record<SubscriptionPlan, string> = {
   pro_dealer_monthly: "Dealer Mensual",
   pro_dealer_annual: "Dealer Anual",
   pro_dealer: "Pro Dealer",
+  pro_internal: "Interno (acceso full)",
 };
 
 // ─── Roles de agencia (nuevo) ────────────────────────────────────────────────
@@ -77,7 +81,7 @@ export function can(role: AgencyRole, permission: keyof AgencyRolePermissions): 
  */
 export function getIncludedSeats(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
-  if (plan.includes("pro_dealer")) return 30;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return 30;
   if (plan.includes("pro_plus")) return 10;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
   return 1; // Free.
@@ -87,7 +91,7 @@ export function getIncludedSeats(plan: SubscriptionPlan | string): number {
 
 export function getMaxCars(plan: SubscriptionPlan | string): number {
   if (!plan) return 1;
-  if (plan.includes("pro_dealer")) return 100;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return 100;
   if (plan.includes("pro_plus")) return 40;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 15;
   return 1;
@@ -158,7 +162,7 @@ export function canManageCommissions(plan: SubscriptionPlan | string): boolean {
 
 export function getMonthlyFeaturedAllowance(plan: SubscriptionPlan | string): number {
   if (!plan) return 0;
-  if (plan.includes("pro_dealer")) return Infinity;
+  if (plan.includes("pro_dealer") || plan === "pro_internal") return Infinity;
   if (plan.includes("pro_plus")) return 15;
   if (plan.includes("pro_monthly") || plan.includes("pro_annual") || plan === "pro") return 5;
   return 0;

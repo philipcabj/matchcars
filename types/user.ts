@@ -9,7 +9,11 @@ export type SubscriptionPlan =
   | "pro_plus_annual"
   | "pro_dealer_monthly"
   | "pro_dealer_annual"
-  | "pro_dealer"; // Fallback/Legacy
+  | "pro_dealer" // Fallback/Legacy
+  // Acceso interno asignado a mano por un admin (portal completo, sin
+  // aparecer como agencia pública) — nunca se vende, no aparece en
+  // subscribe.tsx ni en ningún flujo de compra/RevenueCat.
+  | "pro_internal";
 
 export interface UserProfile {
   id: string;

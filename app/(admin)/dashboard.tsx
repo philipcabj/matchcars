@@ -27,6 +27,7 @@ const PLAN_LABELS: Record<SubscriptionPlan, string> = {
   pro_dealer_monthly: "Dealer Mensual",
   pro_dealer_annual: "Dealer Anual",
   pro_dealer: "Pro Dealer",
+  pro_internal: "Interno (acceso full)",
 };
 
 const PLAN_COLORS: Record<SubscriptionPlan, string> = {
@@ -38,6 +39,7 @@ const PLAN_COLORS: Record<SubscriptionPlan, string> = {
   pro_dealer_monthly: "#10B981",
   pro_dealer_annual: "#059669",
   pro_dealer: "#9CA3AF",
+  pro_internal: "#7C3AED",
 };
 
 interface Report {
