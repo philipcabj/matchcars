@@ -1,4 +1,5 @@
 import { CompareTray } from "@/components/CompareTray";
+import { Footer } from "@/components/Footer";
 import { NavBar } from "@/components/NavBar";
 import { CompareProvider } from "@/contexts/CompareContext";
 import type { Metadata } from "next";
@@ -84,6 +85,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <CompareProvider>
           <NavBar />
           <div className="flex-1 pb-16">{children}</div>
+          <Footer />
           <CompareTray />
         </CompareProvider>
       </body>
