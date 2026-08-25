@@ -122,7 +122,7 @@ export async function listAgencies(filters: AgencyFilters = {}): Promise<{ agenc
 // Mayor plan primero, y a igual plan, más autos publicados — no usa el
 // mismo "sort" que el directorio general (que ordena por lo que elige el
 // usuario ahí: nombre/rating/autos).
-export async function getFeaturedAgencies(take = 4): Promise<Agency[]> {
+export async function getFeaturedAgencies(take = 8): Promise<Agency[]> {
   const agencies = await fetchAgencies();
   const sorted = [...agencies].sort((a, b) => planRank(b.plan) - planRank(a.plan) || b.activeCars - a.activeCars);
   return sorted.slice(0, take);

@@ -8,6 +8,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://matchcars.app";
+
 export default function LoginPage() {
   const { loginWithEmail, resetPassword, loginWithGoogle, loginWithApple } = useAuth();
   const router = useRouter();
@@ -91,6 +93,12 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 px-4 py-8">
+      <a
+        href={MARKETPLACE_URL}
+        className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-accent"
+      >
+        ← Volver a la web
+      </a>
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-sm">
         <div className="mb-6 text-center">
           <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-xl bg-white p-1.5 shadow-sm">
