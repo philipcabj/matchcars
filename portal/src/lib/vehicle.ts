@@ -39,6 +39,10 @@ export interface VehicleFormValues {
   description: string;
   province: string;
   city: string;
+  // Pin del picker de mapa (LocationPicker) — opcional, autos cargados sin
+  // usarlo simplemente no lo tienen. Ver VehicleForm.tsx.
+  latitude: number | null;
+  longitude: number | null;
   coverImage: string;
   gallery: string[];
   video: string;
@@ -59,6 +63,8 @@ export const EMPTY_VEHICLE_FORM: VehicleFormValues = {
   description: "",
   province: "",
   city: "",
+  latitude: null,
+  longitude: null,
   coverImage: "",
   gallery: [],
   video: "",

@@ -50,6 +50,8 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     description: data.description ?? "",
     province: data.location?.province ?? "",
     city: data.location?.city ?? "",
+    latitude: typeof data.location?.latitude === "number" ? data.location.latitude : null,
+    longitude: typeof data.location?.longitude === "number" ? data.location.longitude : null,
     coverImage: data.images?.cover ?? "",
     gallery: data.images?.gallery ?? [],
     video: data.video ?? "",
@@ -117,6 +119,9 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (!body.brand?.trim() || !body.model?.trim() || !body.year || !body.price) {
     return Response.json({ error: "Marca, modelo, año y precio son obligatorios." }, { status: 400 });
   }
+  if (!body.province || !body.city) {
+    return Response.json({ error: "Provincia y ciudad son obligatorias." }, { status: 400 });
+  }
 
   const priceNum = Number(body.price);
   const currency = body.currency === "USD" ? "USD" : "ARS";
@@ -145,7 +150,12 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     vtvValid: !!toggles.vtvValid,
     papersUpToDate: !!toggles.papersUpToDate,
     warranty: !!toggles.warranty,
-    location: { province: body.province || null, city: body.city || null },
+    location: {
+      province: body.province || null,
+      city: body.city || null,
+      latitude: typeof body.latitude === "number" ? body.latitude : null,
+      longitude: typeof body.longitude === "number" ? body.longitude : null,
+    },
     images: { cover: body.coverImage, gallery: body.gallery ?? [] },
     video: canUploadVideo(plan) ? body.video || null : null,
     acceptsFinancing: !!toggles.acceptsFinancing,

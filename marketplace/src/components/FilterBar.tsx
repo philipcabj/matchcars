@@ -14,13 +14,19 @@ const FUEL_OPTIONS = ["Nafta", "Diésel", "Híbrido", "Eléctrico", "GNC"];
 export function FilterBar({
   brands,
   provinces,
+  cities,
   current,
 }: {
   brands: string[];
   provinces: string[];
+  // No encadenada a la provincia elegida (ver getFilterOptions en
+  // lib/vehicles.ts) — lista plana de todas las ciudades/barrios con algún
+  // auto publicado, sin importar la provincia.
+  cities: string[];
   current: {
     brand?: string;
     province?: string;
+    city?: string;
     fuelType?: string;
     minPrice?: string;
     maxPrice?: string;
@@ -59,6 +65,22 @@ export function FilterBar({
           {provinces.map((p) => (
             <option key={p} value={p}>
               {p}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground sm:w-auto">
+        Ciudad/Barrio
+        <select
+          name="city"
+          defaultValue={current.city ?? ""}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground sm:w-auto"
+        >
+          <option value="">Todas</option>
+          {cities.map((c) => (
+            <option key={c} value={c}>
+              {c}
             </option>
           ))}
         </select>
@@ -138,6 +160,7 @@ export function FilterBar({
       </button>
       {(current.brand ||
         current.province ||
+        current.city ||
         current.fuelType ||
         current.minPrice ||
         current.maxPrice ||

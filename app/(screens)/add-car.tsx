@@ -2402,7 +2402,8 @@ export default function AddCarScreen() {
     }
   };
 
-  const canSubmit = !loading && !coverUploading && gallery.every((g) => !g.uploading) && !!brand && !!model && !!year && !!price;
+  const canSubmit =
+    !loading && !coverUploading && gallery.every((g) => !g.uploading) && !!brand && !!model && !!year && !!price && !!province && !!city;
 
   const coverCount = coverLocalUri || coverImage ? 1 : 0;
 

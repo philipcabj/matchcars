@@ -153,6 +153,7 @@ export interface VehicleFilters {
   brand?: string;
   model?: string;
   province?: string;
+  city?: string;
   fuelType?: string;
   minPrice?: number;
   maxPrice?: number;
@@ -214,6 +215,7 @@ export async function listVehicles(filters: VehicleFilters = {}): Promise<Vehicl
   if (filters.brand) vehicles = vehicles.filter((v) => v.brand === filters.brand);
   if (filters.model) vehicles = vehicles.filter((v) => v.model === filters.model);
   if (filters.province) vehicles = vehicles.filter((v) => v.province === filters.province);
+  if (filters.city) vehicles = vehicles.filter((v) => v.city === filters.city);
   if (filters.fuelType) vehicles = vehicles.filter((v) => v.fuelType === filters.fuelType);
   if (filters.minPrice) vehicles = vehicles.filter((v) => v.price >= filters.minPrice!);
   if (filters.maxPrice) vehicles = vehicles.filter((v) => v.price <= filters.maxPrice!);
@@ -410,11 +412,15 @@ export async function getVehicleCountsByUser(): Promise<Record<string, number>> 
   return counts;
 }
 
-export async function getFilterOptions(): Promise<{ brands: string[]; provinces: string[] }> {
+export async function getFilterOptions(): Promise<{ brands: string[]; provinces: string[]; cities: string[] }> {
   const vehicles = await fetchPublishedVehicles();
   const brands = Array.from(new Set(vehicles.map((v) => v.brand).filter(Boolean))).sort();
   const provinces = Array.from(new Set(vehicles.map((v) => v.province).filter(Boolean))).sort();
-  return { brands, provinces };
+  // No queda encadenado a la provincia elegida (requeriría convertir
+  // FilterBar en client component, ver comentario ahí) — lista plana de
+  // todas las ciudades/barrios que aparecen en algún auto publicado.
+  const cities = Array.from(new Set(vehicles.map((v) => v.city).filter(Boolean))).sort();
+  return { brands, provinces, cities };
 }
 
 // Para el widget "Autos destacados" del sidebar — reusa el mismo lote

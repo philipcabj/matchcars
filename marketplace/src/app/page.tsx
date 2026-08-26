@@ -37,6 +37,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const filters: VehicleFilters = {
     brand: asString(sp.brand),
     province: asString(sp.province),
+    city: asString(sp.city),
     fuelType: asString(sp.fuelType),
     minPrice: asNumber(sp.minPrice),
     maxPrice: asNumber(sp.maxPrice),
@@ -47,7 +48,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     page: asNumber(sp.page) ?? 1,
   };
 
-  const [{ vehicles, total, page, totalPages }, { brands, provinces }, featuredAgencies, featuredVehicles, popularBrands, usdRate] =
+  const [{ vehicles, total, page, totalPages }, { brands, provinces, cities }, featuredAgencies, featuredVehicles, popularBrands, usdRate] =
     await Promise.all([
       listVehicles(filters),
       getFilterOptions(),
@@ -61,6 +62,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     const params = new URLSearchParams();
     if (filters.brand) params.set("brand", filters.brand);
     if (filters.province) params.set("province", filters.province);
+    if (filters.city) params.set("city", filters.city);
     if (filters.fuelType) params.set("fuelType", filters.fuelType);
     if (filters.minPrice) params.set("minPrice", String(filters.minPrice));
     if (filters.maxPrice) params.set("maxPrice", String(filters.maxPrice));
@@ -76,6 +78,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   const currentFilters = {
     brand: filters.brand,
     province: filters.province,
+    city: filters.city,
     fuelType: filters.fuelType,
     minPrice: filters.minPrice ? String(filters.minPrice) : undefined,
     maxPrice: filters.maxPrice ? String(filters.maxPrice) : undefined,
@@ -108,14 +111,14 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         </Link>
 
         <div className="hidden md:block">
-          <FilterBar brands={brands} provinces={provinces} current={currentFilters} />
+          <FilterBar brands={brands} provinces={provinces} cities={cities} current={currentFilters} />
         </div>
         <details className="group flex flex-col gap-3 md:hidden">
           <summary className="flex cursor-pointer list-none items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 text-sm font-semibold">
             Filtros
             <span className="text-muted-foreground transition group-open:rotate-180">⌄</span>
           </summary>
-          <FilterBar brands={brands} provinces={provinces} current={currentFilters} />
+          <FilterBar brands={brands} provinces={provinces} cities={cities} current={currentFilters} />
         </details>
 
         <p className="text-sm text-muted-foreground">{total.toLocaleString("es-AR")} autos encontrados</p>

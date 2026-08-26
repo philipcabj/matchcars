@@ -20,25 +20,41 @@ const NOMINATIM_HEADERS = {
   "Accept-Language": "es-AR",
 };
 
+// Subset de lo que trae Nominatim con addressdetails=1 — solo los campos que
+// nos importan para reconciliar provincia/ciudad/barrio (ver
+// matchProvinceAndCity en lib/locations.ts, que hace esa reconciliación en
+// vez de esta ruta, para no acoplar el proxy al dataset de provincias).
+interface NominatimAddressRaw {
+  state?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  suburb?: string;
+  neighbourhood?: string;
+  city_district?: string;
+}
+
 export const GET = withApiErrors(async (request) => {
   const lat = request.nextUrl.searchParams.get("lat");
   const lon = request.nextUrl.searchParams.get("lon");
 
   if (lat && lon) {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&addressdetails=1&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
     const res = await fetch(url, { headers: NOMINATIM_HEADERS });
     if (!res.ok) return Response.json({ error: "Nominatim no respondió" }, { status: 502 });
-    const data: { display_name?: string } = await res.json();
-    return Response.json({ label: data.display_name ?? null });
+    const data: { display_name?: string; address?: NominatimAddressRaw } = await res.json();
+    return Response.json({ label: data.display_name ?? null, address: data.address ?? null });
   }
 
   const q = request.nextUrl.searchParams.get("q")?.trim();
   if (!q) return Response.json({ error: "Falta el parámetro q (o lat/lon)" }, { status: 400 });
 
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=ar&q=${encodeURIComponent(q)}`;
+  const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=ar&q=${encodeURIComponent(q)}`;
   const res = await fetch(url, { headers: NOMINATIM_HEADERS });
   if (!res.ok) return Response.json({ error: "Nominatim no respondió" }, { status: 502 });
 
-  const data: { display_name: string; lat: string; lon: string }[] = await res.json();
-  return Response.json(data.map((r) => ({ label: r.display_name, lat: Number(r.lat), lon: Number(r.lon) })));
+  const data: { display_name: string; lat: string; lon: string; address?: NominatimAddressRaw }[] = await res.json();
+  return Response.json(
+    data.map((r) => ({ label: r.display_name, lat: Number(r.lat), lon: Number(r.lon), address: r.address ?? null }))
+  );
 });
