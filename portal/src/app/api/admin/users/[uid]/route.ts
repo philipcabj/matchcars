@@ -1,12 +1,13 @@
 // portal/src/app/api/admin/users/[uid]/route.ts
 // PATCH — edita rol/plan/vencimiento de CUALQUIER usuario, o lo desbloquea.
 // Espeja handleSaveUserEdit/handleUnblockUser. Solo admin (requireSuperAdmin).
+import { logPlatformActivity } from "@/lib/activity-log";
 import { requireSuperAdmin } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { adminDb } from "@/lib/firebase-admin";
 
 export const PATCH = withApiErrors(async (request, { params }: { params: Promise<{ uid: string }> }) => {
-  await requireSuperAdmin(request);
+  const { uid: actorUid } = await requireSuperAdmin(request);
   const { uid } = await params;
   const body = await request.json();
 
@@ -45,5 +46,10 @@ export const PATCH = withApiErrors(async (request, { params }: { params: Promise
   if (Object.keys(update).length === 0) return Response.json({ error: "Nada para actualizar" }, { status: 400 });
 
   await adminDb.doc(`users/${uid}`).update(update);
+  await logPlatformActivity({
+    actorUid,
+    action: "user.updated",
+    summary: `Usuario editado (${uid}): ${Object.keys(update).join(", ")}`,
+  });
   return Response.json({ ok: true });
 });

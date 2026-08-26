@@ -8,6 +8,7 @@
 // app/car/[id].tsx:2966), pero acá con motivo obligatorio guardado en
 // `rejectionReason` (mismo campo que ya lee el Stock del portal para
 // mostrar el cartel de "por qué no está publicado", sea cual sea el status).
+import { logActivity } from "@/lib/activity-log";
 import { deleteVehicleAsAdmin } from "@/lib/admin-vehicle-actions";
 import { requireAdminRole, requireSuperAdmin } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
@@ -86,8 +87,7 @@ export const PATCH = withApiErrors(async (request, { params }: { params: Promise
   // "delete" es más sensible que approve/reject de la cola de moderación
   // (puede bajar cualquier publicación viva, no solo pendientes) — admin
   // only, mismo criterio que la gestión de usuarios.
-  if (body.action === "delete") await requireSuperAdmin(request);
-  else await requireAdminRole(request);
+  const { uid: actorUid } = body.action === "delete" ? await requireSuperAdmin(request) : await requireAdminRole(request);
 
   const vehicleRef = adminDb.doc(`vehicles/${id}`);
   const vehicleSnap = await vehicleRef.get();
@@ -100,6 +100,13 @@ export const PATCH = withApiErrors(async (request, { params }: { params: Promise
     await vehicleRef.update({ status: "available", published: true, approvedAt: new Date() });
 
     if (ownerId) {
+      await logActivity({
+        agencyId: ownerId,
+        actorUid,
+        entityType: "vehicle",
+        entityId: id,
+        summary: `Publicación aprobada por administración (${carModel || id})`,
+      });
       const notifRef = adminDb.collection(`users/${ownerId}/system_notifications`).doc();
       notifRef
         .set({
@@ -148,6 +155,14 @@ export const PATCH = withApiErrors(async (request, { params }: { params: Promise
     await vehicleRef.update({ status: "rejected", published: false, rejectedAt: new Date(), rejectionReason: reason });
 
     if (ownerId) {
+      await logActivity({
+        agencyId: ownerId,
+        actorUid,
+        entityType: "vehicle",
+        entityId: id,
+        summary: `Publicación rechazada por administración (${carModel || id}): ${reason}`,
+      });
+
       await adminDb
         .collection(`users/${ownerId}/system_notifications`)
         .doc()
@@ -194,7 +209,7 @@ export const PATCH = withApiErrors(async (request, { params }: { params: Promise
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     if (!reason) return Response.json({ error: "Ingresá un motivo de eliminación." }, { status: 400 });
 
-    const result = await deleteVehicleAsAdmin(id, reason);
+    const result = await deleteVehicleAsAdmin(id, reason, actorUid);
     if (!result.ok) return Response.json({ error: result.error }, { status: 404 });
     return Response.json({ ok: true });
   }

@@ -5,11 +5,12 @@
 // notificaciones en dos lugares.
 import "server-only";
 
+import { logActivity } from "@/lib/activity-log";
 import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
 
-export async function deleteVehicleAsAdmin(id: string, reason: string): Promise<{ ok: boolean; error?: string }> {
+export async function deleteVehicleAsAdmin(id: string, reason: string, actorUid: string): Promise<{ ok: boolean; error?: string }> {
   const vehicleRef = adminDb.doc(`vehicles/${id}`);
   const vehicleSnap = await vehicleRef.get();
   if (!vehicleSnap.exists) return { ok: false, error: "Vehículo no encontrado" };
@@ -19,6 +20,16 @@ export async function deleteVehicleAsAdmin(id: string, reason: string): Promise<
   const ownerId: string | undefined = vehicleData.userId;
 
   await vehicleRef.update({ status: "deleted", published: false, deletedAt: new Date(), rejectionReason: reason });
+
+  if (ownerId) {
+    await logActivity({
+      agencyId: ownerId,
+      actorUid,
+      entityType: "vehicle",
+      entityId: id,
+      summary: `Publicación eliminada por administración (${carModel || id}): ${reason}`,
+    });
+  }
 
   if (ownerId) {
     await adminDb

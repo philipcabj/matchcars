@@ -56,3 +56,29 @@ export async function logActivity({ agencyId, actorUid, entityType, entityId, su
     console.error("[logActivity] no se pudo registrar", e);
   }
 }
+
+export interface LogPlatformActivityParams {
+  actorUid: string;
+  action: string;
+  summary: string;
+}
+
+// Mismo criterio que logActivity, para acciones del panel de administración
+// que no pertenecen a una sola agencia (cambiar rol de un usuario, resolver
+// un reporte, actualizar la cotización) — van a una colección aparte,
+// platformActivity, en vez de agencies/{agencyId}/activity porque no hay un
+// único "dueño" natural del evento.
+export async function logPlatformActivity({ actorUid, action, summary }: LogPlatformActivityParams): Promise<void> {
+  try {
+    const actorName = await resolveActorName(actorUid);
+    await adminDb.collection("platformActivity").add({
+      actorUid,
+      actorName,
+      action,
+      summary,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.error("[logPlatformActivity] no se pudo registrar", e);
+  }
+}

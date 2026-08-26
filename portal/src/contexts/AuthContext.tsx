@@ -70,8 +70,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, []);
 
+  // Fire-and-forget: registra el login en loginEvents (ver
+  // /api/auth/log-login) para que el admin pueda ver quién entró y cuándo.
+  // Nunca debe bloquear ni romper el login real si falla.
+  const logLogin = (cred: UserCredential, method: "email" | "google" | "apple") => {
+    cred.user
+      .getIdToken()
+      .then((idToken) =>
+        fetch("/api/auth/log-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+          body: JSON.stringify({ method }),
+        })
+      )
+      .catch(() => {});
+  };
+
   const loginWithEmail = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    logLogin(cred, "email");
     trackPortalEvent("portal_login", { method: "email" });
   };
 
@@ -137,6 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithGoogle = async () => {
     const cred = await signInWithPopup(auth, new GoogleAuthProvider());
     await createUserDocIfMissing(cred, "google");
+    logLogin(cred, "google");
     trackPortalEvent("portal_login", { method: "google" });
   };
 
@@ -146,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     provider.addScope("name");
     const cred = await signInWithPopup(auth, provider);
     await createUserDocIfMissing(cred, "apple");
+    logLogin(cred, "apple");
     trackPortalEvent("portal_login", { method: "apple" });
   };
 

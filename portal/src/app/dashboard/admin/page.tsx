@@ -9,13 +9,15 @@
 import { useAdminRole } from "@/hooks/useAdminRole";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { ActivityTab } from "./ActivityTab";
 import { AllVehiclesTab } from "./AllVehiclesTab";
+import { LoginsTab } from "./LoginsTab";
 import { ModerationTab } from "./ModerationTab";
 import { PricingWidget } from "./PricingWidget";
 import { ReportsTab } from "./ReportsTab";
 import { UsersTab } from "./UsersTab";
 
-type Tab = "moderation" | "reports" | "all-vehicles" | "users";
+type Tab = "moderation" | "reports" | "all-vehicles" | "users" | "activity" | "logins";
 
 export default function AdminPage() {
   const { role, loading, isAdmin, isModerator } = useAdminRole();
@@ -41,7 +43,7 @@ export default function AdminPage() {
 
       <PricingWidget />
 
-      <div className="flex gap-2 rounded-2xl border border-border bg-card p-1">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-1">
         <button
           type="button"
           onClick={() => setTab("moderation")}
@@ -55,6 +57,13 @@ export default function AdminPage() {
           className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold ${tab === "reports" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
         >
           Reportes
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("activity")}
+          className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold ${tab === "activity" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+        >
+          Actividad
         </button>
         {isAdmin && (
           <button
@@ -74,12 +83,23 @@ export default function AdminPage() {
             Usuarios
           </button>
         )}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setTab("logins")}
+            className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold ${tab === "logins" ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+          >
+            Accesos
+          </button>
+        )}
       </div>
 
       {tab === "moderation" && <ModerationTab />}
       {tab === "reports" && <ReportsTab />}
+      {tab === "activity" && <ActivityTab />}
       {tab === "all-vehicles" && isAdmin && <AllVehiclesTab />}
       {tab === "users" && isAdmin && <UsersTab />}
+      {tab === "logins" && isAdmin && <LoginsTab />}
     </div>
   );
 }

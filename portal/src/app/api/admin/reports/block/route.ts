@@ -1,12 +1,13 @@
 // portal/src/app/api/admin/reports/block/route.ts
 // POST { userId, reportId } — bloquea al usuario, despublica todos sus
 // autos y resuelve el reporte, en un solo batch. Espeja handleBlockUser.
+import { logPlatformActivity } from "@/lib/activity-log";
 import { requireAdminRole } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { adminDb } from "@/lib/firebase-admin";
 
 export const POST = withApiErrors(async (request) => {
-  await requireAdminRole(request);
+  const { uid: actorUid } = await requireAdminRole(request);
   const { userId, reportId } = await request.json();
   if (!userId || !reportId) return Response.json({ error: "Faltan userId/reportId" }, { status: 400 });
 
@@ -18,5 +19,6 @@ export const POST = withApiErrors(async (request) => {
   vehiclesSnap.forEach((v) => batch.update(v.ref, { published: false, status: "blocked" }));
 
   await batch.commit();
+  await logPlatformActivity({ actorUid, action: "user.blocked", summary: `Usuario bloqueado por reporte (${userId})` });
   return Response.json({ ok: true });
 });

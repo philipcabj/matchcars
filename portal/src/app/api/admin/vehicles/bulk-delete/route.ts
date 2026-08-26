@@ -9,7 +9,7 @@ import { withApiErrors } from "@/lib/api-handler";
 const MAX_IDS = 100;
 
 export const POST = withApiErrors(async (request) => {
-  await requireSuperAdmin(request);
+  const { uid: actorUid } = await requireSuperAdmin(request);
   const body = await request.json();
 
   const ids: unknown = body.ids;
@@ -21,7 +21,7 @@ export const POST = withApiErrors(async (request) => {
   if (ids.length > MAX_IDS) return Response.json({ error: `Máximo ${MAX_IDS} por vez.` }, { status: 400 });
 
   const results = await Promise.all(
-    (ids as string[]).map(async (id) => ({ id, ...(await deleteVehicleAsAdmin(id, reason)) }))
+    (ids as string[]).map(async (id) => ({ id, ...(await deleteVehicleAsAdmin(id, reason, actorUid)) }))
   );
 
   const failed = results.filter((r) => !r.ok);
