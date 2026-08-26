@@ -10,7 +10,7 @@ interface ActivityEvent {
   id: string;
   actorUid: string;
   actorName: string;
-  entityType: "vehicle" | "lead" | "operation" | "team";
+  entityType: "vehicle" | "lead" | "operation" | "team" | "profile";
   entityId: string;
   summary: string;
   createdAt: string | null;
@@ -21,6 +21,7 @@ const ENTITY_LABELS: Record<string, string> = {
   lead: "Lead",
   operation: "Operación",
   team: "Equipo",
+  profile: "Perfil",
 };
 
 const ENTITY_COLORS: Record<string, string> = {
@@ -28,6 +29,7 @@ const ENTITY_COLORS: Record<string, string> = {
   lead: "bg-cyan-500/15 text-cyan-600",
   operation: "bg-success/15 text-success",
   team: "bg-amber-500/15 text-amber-600",
+  profile: "bg-violet-500/15 text-violet-600",
 };
 
 function fmtDateTime(iso: string | null): string {

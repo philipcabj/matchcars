@@ -14,7 +14,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 
-export type ActivityEntityType = "vehicle" | "lead" | "operation" | "team";
+export type ActivityEntityType = "vehicle" | "lead" | "operation" | "team" | "profile";
 
 export interface LogActivityParams {
   agencyId: string;

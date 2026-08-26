@@ -7,6 +7,7 @@
 // (logos|banners/{agencyId}_...), mismos paths que ya usa edit-profile.tsx
 // de la app — no hizo falta tocar storage.rules (cae en la regla catch-all
 // existente).
+import { logActivity } from "@/lib/activity-log";
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -130,5 +131,16 @@ export const PATCH = withApiErrors(async (request) => {
   }
 
   await adminDb.doc(`users/${agencyId}`).set(update, { merge: true });
+
+  if (Object.keys(update).length > 0) {
+    await logActivity({
+      agencyId,
+      actorUid: uid,
+      entityType: "profile",
+      entityId: agencyId,
+      summary: `Actualizó el perfil de la agencia: ${Object.keys(update).join(", ")}`,
+    });
+  }
+
   return Response.json({ ok: true });
 });

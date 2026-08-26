@@ -7,6 +7,7 @@
 // enforceVehicleLimit (functions/src/index.ts, sin tocar) como red de seguridad
 // final — acá lo chequeamos antes para poder devolver un error claro y
 // sincrónico en vez de que el auto se cree y quede marcado "rejected_limit".
+import { logActivity } from "@/lib/activity-log";
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -168,5 +169,12 @@ export const POST = withApiErrors(async (request) => {
 
   const docRef = await adminDb.collection("vehicles").add(vehicleData);
   await ensureCatalogEntry(vehicleData.brand, vehicleData.model, vehicleData.version);
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "vehicle",
+    entityId: docRef.id,
+    summary: `Publicó ${vehicleData.brand} ${vehicleData.model} ${vehicleData.year}`,
+  });
   return Response.json({ id: docRef.id }, { status: 201 });
 });

@@ -6,6 +6,7 @@
 // sacar un auto de "a_preparar": la edición (PATCH de este mismo recurso)
 // a propósito no toca status/published, así que quedaba colgado para
 // siempre sin que el admin lo viera ni la agencia supiera qué hacer.
+import { logActivity } from "@/lib/activity-log";
 import { ApiAuthError, requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -42,5 +43,12 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
   }
 
   await ref.update({ status: "pending_review", published: false, updatedAt: FieldValue.serverTimestamp() });
+  await logActivity({
+    agencyId,
+    actorUid: uid,
+    entityType: "vehicle",
+    entityId: id,
+    summary: `Publicó ${data.brand} ${data.model} ${data.year} (desde parte de pago)`,
+  });
   return Response.json({ ok: true });
 });
