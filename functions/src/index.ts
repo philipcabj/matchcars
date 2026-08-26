@@ -118,6 +118,53 @@ export const assignPublicationCode = onDocumentCreated(
   }
 );
 
+// ─── logVehicleCreatedActivity ───────────────────────────────────────────────
+// Registra la publicación de un auto nuevo en agencies/{agencyId}/activity
+// (ver portal/src/lib/activity-log.ts para qué más se registra ahí) sin
+// importar si el documento se creó desde la app (add-car.tsx) o desde el
+// portal (POST /api/agency/vehicles) — cada uno escribe directo a Firestore
+// por su lado, así que un trigger acá es el único punto que ve ambos, mismo
+// criterio que assignPublicationCode arriba. Atribuye la acción a
+// createdByUid si el auto lo trae (el uid real que publicó, puede ser un
+// vendedor invitado) o si no al dueño de la cuenta (userId) — autos creados
+// antes de que existiera ese campo no tienen forma de saber quién puntual
+// del equipo publicó. Nunca debe romper la publicación real si falla: nada
+// de esto se re-lanza.
+export const logVehicleCreatedActivity = onDocumentCreated(
+  "vehicles/{vehicleId}",
+  async (event) => {
+    try {
+      const snap = event.data;
+      if (!snap) return;
+      const data = snap.data();
+      const agencyId: string | undefined = data.userId;
+      if (!agencyId) return;
+
+      const actorUid: string = data.createdByUid || agencyId;
+      const actorSnap = await db.doc(`users/${actorUid}`).get();
+      const actorData = actorSnap.data();
+      const actorName =
+        `${actorData?.firstName ?? ""} ${actorData?.lastName ?? ""}`.trim() ||
+        actorData?.displayName ||
+        actorData?.agencyName ||
+        actorData?.email ||
+        actorUid;
+
+      const carLabel = [data.brand, data.model, data.year].filter(Boolean).join(" ") || "un auto";
+      await db.collection(`agencies/${agencyId}/activity`).add({
+        actorUid,
+        actorName,
+        entityType: "vehicle",
+        entityId: snap.id,
+        summary: `Publicó ${carLabel}`,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("[logVehicleCreatedActivity] no se pudo registrar", e);
+    }
+  }
+);
+
 // ─── expireFeaturedListings ──────────────────────────────────────────────────
 
 export const expireFeaturedListings = onSchedule("every 6 hours", async () => {

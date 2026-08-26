@@ -71,6 +71,16 @@ service cloud.firestore {
       allow delete: if isSaleInvolved() || isStaff();
     }
 
+    // Registro de logins de la app (ver contexts/AuthContext.tsx) — el
+    // mismo mecanismo del portal (portal/src/app/api/auth/log-login) usa el
+    // Admin SDK y no pasa por acá; esto es solo para que la app pueda anotar
+    // su propio login desde el cliente. Nadie puede leer estos eventos desde
+    // el cliente — el panel de admin los lee server-side con el Admin SDK.
+    match /loginEvents/{eventId} {
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
     // Progreso de carga masiva (bulk-import.tsx). Solo la Cloud Function
     // startBulkImport escribe, vía Admin SDK, que ignora estas reglas.
     match /bulkImportJobs/{jobId} {

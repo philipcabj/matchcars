@@ -31,7 +31,7 @@ import { getMaxCars, getMonthlyFeaturedAllowance, hasUnlimitedFeatured } from "@
 import { getAvatarColorFromEmail } from "@/utils/avatarUtils";
 import { TrustLevel } from "@/types/commerce";
 import { SubscriptionPlan, UserProfile, UserRole } from "@/types/user";
-import { Timestamp, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { Timestamp, addDoc, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { Platform } from "react-native";
 
 let AppleAuthentication: any = null;
@@ -262,6 +262,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkSubscriptionStatus();
   }, [user, profile]);
 
+  // Fire-and-forget: anota el login en loginEvents (mismo mecanismo que
+  // portal/src/app/api/auth/log-login, pero escrito directo desde el
+  // cliente acá porque la app no tiene un backend propio para esto —
+  // firestore.rules solo permite crear el propio evento, no leer ninguno).
+  // Nunca debe bloquear ni romper el login real si falla.
+  const logAppLogin = (uid: string, method: string, email?: string | null) => {
+    addDoc(collection(db, "loginEvents"), {
+      uid,
+      email: email ?? null,
+      name: null,
+      method,
+      source: "app",
+      platform: Platform.OS,
+      ip: null,
+      createdAt: serverTimestamp(),
+    }).catch(() => {});
+  };
+
   // Registro con email
   const registerWithEmail = async ({
     firstName,
@@ -311,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       createdAt: serverTimestamp(),
       provider: "password",
     });
+    logAppLogin(uid, "email", cleanEmail);
 
     setProfile(userProfile);
   };
@@ -320,7 +339,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      logAppLogin(cred.user.uid, "email", cred.user.email);
       // onAuthStateChanged actualiza profile
     } catch (error: any) {
       logger.log("🔥 ERROR LOGIN:", error.code, error.message);
@@ -373,11 +393,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const ref = doc(db, "users", fbUser.uid);
       const snap = await getDoc(ref);
 
+      logAppLogin(fbUser.uid, "google", fbUser.email);
+
       if (snap.exists()) {
         // Usuario ya registrado
         const data = snap.data() as FirestoreUserDoc;
-        setProfile({ 
-          ...data, 
+        setProfile({
+          ...data,
           id: fbUser.uid,
           plan: data.plan || (data.isPro ? "pro_monthly" : "free")
         });
@@ -437,6 +459,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const credential = FacebookAuthProvider.credential(result.authentication.accessToken);
       const userCred = await signInWithCredential(auth, credential);
       const fbUser = userCred.user;
+      logAppLogin(fbUser.uid, "facebook", fbUser.email);
       const ref = doc(db, "users", fbUser.uid);
       const snap = await getDoc(ref);
       if (!snap.exists()) {
@@ -468,8 +491,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(userProfile);
       } else {
         const data = snap.data() as FirestoreUserDoc;
-        setProfile({ 
-          ...data, 
+        setProfile({
+          ...data,
           id: fbUser.uid,
           plan: data.plan || (data.isPro ? "pro_monthly" : "free")
         });
@@ -502,6 +525,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const credential = provider.credential({ idToken });
       const userCred = await signInWithCredential(auth, credential);
       const aUser = userCred.user;
+      logAppLogin(aUser.uid, "apple", aUser.email);
 
       const ref = doc(db, "users", aUser.uid);
       const snap = await getDoc(ref);

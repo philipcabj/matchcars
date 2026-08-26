@@ -31,6 +31,7 @@ export const POST = withApiErrors(async (request) => {
       email,
       name,
       method,
+      source: "portal",
       ip,
       userAgent: request.headers.get("user-agent") ?? null,
       createdAt: FieldValue.serverTimestamp(),

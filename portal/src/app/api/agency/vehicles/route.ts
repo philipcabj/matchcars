@@ -7,7 +7,6 @@
 // enforceVehicleLimit (functions/src/index.ts, sin tocar) como red de seguridad
 // final — acá lo chequeamos antes para poder devolver un error claro y
 // sincrónico en vez de que el auto se cree y quede marcado "rejected_limit".
-import { logActivity } from "@/lib/activity-log";
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
@@ -116,6 +115,11 @@ export const POST = withApiErrors(async (request) => {
 
   const vehicleData = {
     userId: agencyId,
+    // uid real que publica — puede ser un vendedor invitado (agencyId ya es
+    // el dueño, no la persona). Lo usa logVehicleCreatedActivity
+    // (functions/src/index.ts) para atribuir la actividad a quien publicó,
+    // no solo a la agencia.
+    createdByUid: uid,
     userName,
     userPlan: plan,
     sellerTrustLevel: userData.trustLevel || "new",
@@ -169,12 +173,9 @@ export const POST = withApiErrors(async (request) => {
 
   const docRef = await adminDb.collection("vehicles").add(vehicleData);
   await ensureCatalogEntry(vehicleData.brand, vehicleData.model, vehicleData.version);
-  await logActivity({
-    agencyId,
-    actorUid: uid,
-    entityType: "vehicle",
-    entityId: docRef.id,
-    summary: `Publicó ${vehicleData.brand} ${vehicleData.model} ${vehicleData.year}`,
-  });
+  // La actividad de "publicó un auto" la registra logVehicleCreatedActivity
+  // (Cloud Function, trigger onDocumentCreated en vehicles/{id}) — un solo
+  // punto que ve tanto esta alta como la de la app (add-car.tsx), en vez de
+  // duplicar la lógica acá.
   return Response.json({ id: docRef.id }, { status: 201 });
 });

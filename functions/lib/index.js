@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -140,6 +140,50 @@ exports.assignPublicationCode = (0, firestore_1.onDocumentCreated)("vehicles/{ve
         return next;
     });
     await snap.ref.update({ publicationCode: code });
+});
+// ─── logVehicleCreatedActivity ───────────────────────────────────────────────
+// Registra la publicación de un auto nuevo en agencies/{agencyId}/activity
+// (ver portal/src/lib/activity-log.ts para qué más se registra ahí) sin
+// importar si el documento se creó desde la app (add-car.tsx) o desde el
+// portal (POST /api/agency/vehicles) — cada uno escribe directo a Firestore
+// por su lado, así que un trigger acá es el único punto que ve ambos, mismo
+// criterio que assignPublicationCode arriba. Atribuye la acción a
+// createdByUid si el auto lo trae (el uid real que publicó, puede ser un
+// vendedor invitado) o si no al dueño de la cuenta (userId) — autos creados
+// antes de que existiera ese campo no tienen forma de saber quién puntual
+// del equipo publicó. Nunca debe romper la publicación real si falla: nada
+// de esto se re-lanza.
+exports.logVehicleCreatedActivity = (0, firestore_1.onDocumentCreated)("vehicles/{vehicleId}", async (event) => {
+    var _a, _b;
+    try {
+        const snap = event.data;
+        if (!snap)
+            return;
+        const data = snap.data();
+        const agencyId = data.userId;
+        if (!agencyId)
+            return;
+        const actorUid = data.createdByUid || agencyId;
+        const actorSnap = await db.doc(`users/${actorUid}`).get();
+        const actorData = actorSnap.data();
+        const actorName = `${(_a = actorData === null || actorData === void 0 ? void 0 : actorData.firstName) !== null && _a !== void 0 ? _a : ""} ${(_b = actorData === null || actorData === void 0 ? void 0 : actorData.lastName) !== null && _b !== void 0 ? _b : ""}`.trim() ||
+            (actorData === null || actorData === void 0 ? void 0 : actorData.displayName) ||
+            (actorData === null || actorData === void 0 ? void 0 : actorData.agencyName) ||
+            (actorData === null || actorData === void 0 ? void 0 : actorData.email) ||
+            actorUid;
+        const carLabel = [data.brand, data.model, data.year].filter(Boolean).join(" ") || "un auto";
+        await db.collection(`agencies/${agencyId}/activity`).add({
+            actorUid,
+            actorName,
+            entityType: "vehicle",
+            entityId: snap.id,
+            summary: `Publicó ${carLabel}`,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (e) {
+        console.error("[logVehicleCreatedActivity] no se pudo registrar", e);
+    }
 });
 // ─── expireFeaturedListings ──────────────────────────────────────────────────
 exports.expireFeaturedListings = (0, scheduler_1.onSchedule)("every 6 hours", async () => {

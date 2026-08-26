@@ -2220,6 +2220,11 @@ export default function AddCarScreen() {
 
       const vehicleData = {
         userId,
+        // uid real que publica — puede ser un vendedor invitado de una
+        // agencia (userId ya es el dueño, no la persona). Sin esto no hay
+        // forma de saber quién del equipo publicó cada auto (ver
+        // logVehicleCreatedActivity en functions/src/index.ts).
+        createdByUid: user?.uid || userId,
         userName,
         userPlan: sellerProfile?.plan || 'free',
         sellerTrustLevel: sellerProfile?.trustLevel || "new",
