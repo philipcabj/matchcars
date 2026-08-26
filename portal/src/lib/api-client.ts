@@ -6,6 +6,19 @@
 // y se muestra un mensaje entendible en su lugar.
 "use client";
 
+// Lleva el status HTTP además del mensaje — sin esto, dashboard/layout.tsx no
+// podía distinguir "tu sesión venció" (401, requireUid) de "tu cuenta no
+// tiene acceso al portal" (403, resolveMembership) y mostraba el texto crudo
+// del servidor ("Token inválido o expirado") como si fuera un problema de
+// la cuenta, en vez de algo tan simple como volver a iniciar sesión.
+export class ApiClientError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export async function parseJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
   let data: unknown = {};
@@ -13,14 +26,15 @@ export async function parseJsonResponse<T>(res: Response): Promise<T> {
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error(
-        `El servidor devolvió una respuesta inesperada (status ${res.status}). Probá recargar la página; si sigue, puede ser un problema del servidor de desarrollo (reiniciá "npm run dev").`
+      throw new ApiClientError(
+        `El servidor devolvió una respuesta inesperada (status ${res.status}). Probá recargar la página; si sigue, puede ser un problema del servidor de desarrollo (reiniciá "npm run dev").`,
+        res.status
       );
     }
   }
   if (!res.ok) {
     const message = (data as { error?: string } | null)?.error;
-    throw new Error(message || `Error ${res.status}`);
+    throw new ApiClientError(message || `Error ${res.status}`, res.status);
   }
   return data as T;
 }

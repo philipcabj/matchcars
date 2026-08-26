@@ -13,7 +13,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // resolveMembership (server) rechaza cuentas sin invitación y sin plan
   // pago — acá se traduce ese 403 en una pantalla clara en vez de un
   // dashboard roto a medio cargar.
-  const { error: agencyError, loading: agencyLoading } = useAgencyMe();
+  const { error: agencyError, sessionExpired, loading: agencyLoading } = useAgencyMe();
 
   useEffect(() => {
     if (!initializing && !user) router.replace("/login");
@@ -31,8 +31,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return (
       <main className="flex flex-1 items-center justify-center px-4">
         <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
-          <p className="text-sm font-semibold">Sin acceso al portal</p>
-          <p className="mt-2 text-sm text-muted-foreground">{agencyError}</p>
+          {sessionExpired ? (
+            <>
+              <p className="text-sm font-semibold">Tu sesión expiró</p>
+              <p className="mt-2 text-sm text-muted-foreground">Iniciá sesión de nuevo para continuar.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold">Sin acceso al portal</p>
+              <p className="mt-2 text-sm text-muted-foreground">{agencyError}</p>
+            </>
+          )}
           <button
             onClick={() => {
               logout();
@@ -40,7 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             }}
             className="mt-4 rounded-lg border border-border px-4 py-2 text-sm font-semibold"
           >
-            Cerrar sesión
+            {sessionExpired ? "Iniciar sesión" : "Cerrar sesión"}
           </button>
         </div>
       </main>
