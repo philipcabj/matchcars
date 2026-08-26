@@ -118,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       createdAt: serverTimestamp(),
       provider: "password",
     });
+    logLogin(cred, "email");
   };
 
   // Crea users/{uid} si es la primera vez que esta persona usa MatchCars en
