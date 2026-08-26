@@ -10,13 +10,18 @@ import { useEffect, useMemo, useState } from "react";
 interface CommissionEntryRow {
   saleId: string;
   vehicleId: string;
-  sellerUid: string;
+  sellerUid: string | null;
   vehicleSnapshot: { brand?: string; model?: string; year?: number } | null;
   dealPrice: number;
   dealCurrency: string;
   margin: number | null;
   amount: number;
   soldAt: string | null;
+}
+
+interface MarginTotal {
+  currency: string;
+  total: number;
 }
 
 function monthLabel(month: string): string {
@@ -41,6 +46,8 @@ export default function ComisionesPage() {
   });
   const [entries, setEntries] = useState<CommissionEntryRow[] | null>(null);
   const [bySeller, setBySeller] = useState<{ sellerUid: string; arsTotal: number; usdTotal: number; count: number }[]>([]);
+  const [marginByCurrency, setMarginByCurrency] = useState<MarginTotal[]>([]);
+  const [missingCostCount, setMissingCostCount] = useState(0);
   const [performance, setPerformance] = useState<
     { sellerUid: string; leadsAssigned: number; leadsWon: number; conversionRate: number; avgDaysToClose: number | null }[]
   >([]);
@@ -60,9 +67,16 @@ export default function ComisionesPage() {
           fetch("/api/agency/commission-rules", { headers }),
           fetch(`/api/agency/seller-performance?month=${month}`, { headers }),
         ]);
-        const commData = await parseJsonResponse<{ entries: CommissionEntryRow[]; bySeller: typeof bySeller }>(commRes);
+        const commData = await parseJsonResponse<{
+          entries: CommissionEntryRow[];
+          bySeller: typeof bySeller;
+          marginByCurrency: MarginTotal[];
+          missingCostCount: number;
+        }>(commRes);
         setEntries(commData.entries);
         setBySeller(commData.bySeller);
+        setMarginByCurrency(commData.marginByCurrency);
+        setMissingCostCount(commData.missingCostCount);
         const ruleData = await parseJsonResponse<{ rule: CommissionRule }>(ruleRes);
         setRule(ruleData.rule);
         const perfData = await parseJsonResponse<{ bySeller: typeof performance }>(perfRes);
@@ -103,7 +117,9 @@ export default function ComisionesPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <div>
         <h1 className="text-xl font-bold">Comisiones</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Comisiones calculadas por vendedor al cerrar cada venta.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Comisiones por vendedor y margen de cada venta del mes — con o sin vendedor asignado.
+        </p>
       </div>
 
       {error && <p className="text-sm text-error">{error}</p>}
@@ -252,6 +268,29 @@ export default function ComisionesPage() {
         </button>
       </div>
 
+      {entries && entries.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <p className="text-sm font-semibold">Margen total del mes</p>
+          {marginByCurrency.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-4">
+              {marginByCurrency.map((m) => (
+                <p key={m.currency} className="text-2xl font-extrabold">
+                  {m.currency} {m.total.toLocaleString("es-AR")}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">Sin datos de margen todavía.</p>
+          )}
+          {missingCostCount > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {missingCostCount} venta{missingCostCount === 1 ? "" : "s"} sin costo de compra cargado — el margen real puede ser
+              distinto a este total. Cargalo desde la ficha del auto en Stock.
+            </p>
+          )}
+        </div>
+      )}
+
       {bySeller.length > 0 && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {bySeller.map((s) => (
@@ -299,7 +338,7 @@ export default function ComisionesPage() {
         <p className="text-sm text-muted-foreground">Cargando…</p>
       ) : entries.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          Sin ventas con vendedor asignado en este mes. La comisión solo se calcula si el lead tenía un vendedor asignado al cerrar la venta.
+          Sin ventas cerradas en este mes.
         </p>
       ) : (
         <div className="flex flex-col gap-2">
@@ -310,13 +349,15 @@ export default function ComisionesPage() {
                   {e.vehicleSnapshot?.brand} {e.vehicleSnapshot?.model} {e.vehicleSnapshot?.year}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {memberName(e.sellerUid)} · {e.dealCurrency} {e.dealPrice.toLocaleString("es-AR")}
+                  {e.sellerUid ? memberName(e.sellerUid) : "Sin vendedor asignado"} · {e.dealCurrency} {e.dealPrice.toLocaleString("es-AR")}
                   {e.margin !== null && <> · margen {e.dealCurrency} {e.margin.toLocaleString("es-AR")}</>}
                 </p>
               </div>
-              <p className="shrink-0 text-sm font-extrabold text-accent">
-                {e.dealCurrency} {e.amount.toLocaleString("es-AR")}
-              </p>
+              {e.sellerUid && (
+                <p className="shrink-0 text-sm font-extrabold text-accent">
+                  {e.dealCurrency} {e.amount.toLocaleString("es-AR")}
+                </p>
+              )}
             </div>
           ))}
         </div>
