@@ -5,7 +5,6 @@
 // (/api/agency/vehicles) en vez de escribir directo a Firestore desde acá.
 "use client";
 
-import { LocationPicker } from "@/components/LocationPicker";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
@@ -458,25 +457,6 @@ export function VehicleForm({
           </select>
         </Field>
       </div>
-
-      <Field label="Ubicación en el mapa (opcional)">
-        <LocationPicker
-          value={values.latitude != null && values.longitude != null ? { latitude: values.latitude, longitude: values.longitude } : null}
-          onChange={(c) => {
-            set("latitude", c?.latitude ?? null);
-            set("longitude", c?.longitude ?? null);
-          }}
-          onLocationResolved={({ province, city }) => {
-            // Solo pisa el select si encontró un match confiable — si la
-            // agencia ya había elegido algo a mano, un resultado sin match
-            // no lo borra.
-            if (province) {
-              set("province", province);
-              set("city", city ?? "");
-            }
-          }}
-        />
-      </Field>
 
       <Field label="Descripción">
         <textarea

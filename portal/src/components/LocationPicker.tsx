@@ -1,7 +1,6 @@
 "use client";
 
 import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
-import { matchProvinceAndCity, type NominatimAddress } from "@/lib/locations";
 import { useEffect, useRef, useState } from "react";
 
 // Mismo formato que guarda la app (Location.geocodeAsync de expo-location) —
@@ -24,7 +23,6 @@ export function LocationPicker({
   value,
   onChange,
   onAddressChange,
-  onLocationResolved,
 }: {
   value: Coords | null;
   onChange: (c: Coords | null) => void;
@@ -33,20 +31,12 @@ export function LocationPicker({
   // texto) como al marcar/arrastrar el pin a mano (ahí se resuelve con
   // reverse geocoding). Opcional para no romper otros usos del picker.
   onAddressChange?: (address: string) => void;
-  // Igual que onAddressChange pero con provincia/ciudad ya reconciliadas
-  // contra nuestro dataset (ver matchProvinceAndCity) — para precargar
-  // selects de ubicación (ej. VehicleForm). Solo dispara si /api/geocode
-  // devolvió datos de dirección estructurados (siempre que Nominatim los
-  // tenga); si no puede reconciliar, ambos campos vienen null y quien lo use
-  // debe dejar sus selects tal cual. Opcional para no romper el uso actual
-  // (perfil de agencia, que no lo necesita).
-  onLocationResolved?: (loc: { province: string | null; city: string | null }) => void;
 }) {
   const { isLoaded } = useJsApiLoader({ googleMapsApiKey: GOOGLE_MAPS_API_KEY });
   const mapRef = useRef<google.maps.Map | null>(null);
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ label: string; lat: number; lon: number; address: NominatimAddress | null }[]>([]);
+  const [results, setResults] = useState<{ label: string; lat: number; lon: number }[]>([]);
   const [searching, setSearching] = useState(false);
   const searchSeq = useRef(0);
 
@@ -59,7 +49,7 @@ export function LocationPicker({
       // respuesta no trae cabeceras CORS, así que un fetch directo desde acá
       // rechaza en silencio (ver comentario en route.ts).
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
-      const data: { label: string; lat: number; lon: number; address: NominatimAddress | null }[] = await res.json();
+      const data: { label: string; lat: number; lon: number }[] = await res.json();
       if (seq !== searchSeq.current) return; // respuesta vieja, ya se disparó otra búsqueda
       setResults(res.ok ? data : []);
     } catch {
@@ -69,10 +59,9 @@ export function LocationPicker({
     }
   };
 
-  const pickResult = (r: { label: string; lat: number; lon: number; address: NominatimAddress | null }) => {
+  const pickResult = (r: { label: string; lat: number; lon: number }) => {
     onChange({ latitude: r.lat, longitude: r.lon });
     onAddressChange?.(r.label);
-    if (onLocationResolved) onLocationResolved(r.address ? matchProvinceAndCity(r.address) : { province: null, city: null });
     setResults([]);
     setQuery(r.label);
   };
@@ -82,18 +71,15 @@ export function LocationPicker({
   const placeSeq = useRef(0);
   const handlePlace = async (c: Coords) => {
     onChange(c);
-    if (!onAddressChange && !onLocationResolved) return;
+    if (!onAddressChange) return;
     const seq = ++placeSeq.current;
     try {
       const res = await fetch(`/api/geocode?lat=${c.latitude}&lon=${c.longitude}`);
-      const data: { label: string | null; address: NominatimAddress | null } = await res.json();
+      const data: { label: string | null } = await res.json();
       if (seq !== placeSeq.current) return; // se movió el pin de nuevo antes de que responda
       if (res.ok && data.label) {
-        onAddressChange?.(data.label);
+        onAddressChange(data.label);
         setQuery(data.label);
-      }
-      if (res.ok && onLocationResolved) {
-        onLocationResolved(data.address ? matchProvinceAndCity(data.address) : { province: null, city: null });
       }
     } catch {
       // Sin conexión/Nominatim caído: el pin igual queda bien puesto, solo

@@ -30,8 +30,66 @@ export const PROVINCES: string[] = [
   "Tucumán",
 ];
 
+// No es un censo exhaustivo (no hay tantas localidades chicas como en el
+// nomenclador oficial de INDEC/Georef) pero cubre las ciudades/localidades
+// más pobladas y conocidas de cada provincia — lo que alguien realmente
+// buscaría en un desplegable al cargar un auto.
 export const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
-  "Buenos Aires": ["La Plata", "Mar del Plata", "Bahía Blanca", "Quilmes", "Morón", "Tandil", "San Isidro", "Pilar", "Tigre", "Vicente López"],
+  "Buenos Aires": [
+    "Avellaneda",
+    "Azul",
+    "Bahía Blanca",
+    "Balcarce",
+    "Banfield",
+    "Baradero",
+    "Berazategui",
+    "Bragado",
+    "Campana",
+    "Cañuelas",
+    "Chascomús",
+    "Chivilcoy",
+    "Dolores",
+    "Escobar",
+    "Ezeiza",
+    "Florencio Varela",
+    "General Rodríguez",
+    "Hurlingham",
+    "Ituzaingó",
+    "José C. Paz",
+    "Junín",
+    "La Plata",
+    "Lanús",
+    "Lomas de Zamora",
+    "Luján",
+    "Malvinas Argentinas",
+    "Mar de Ajó",
+    "Mar del Plata",
+    "Mercedes",
+    "Merlo",
+    "Miramar",
+    "Moreno",
+    "Morón",
+    "Necochea",
+    "Olavarría",
+    "Pehuajó",
+    "Pergamino",
+    "Pilar",
+    "Pinamar",
+    "Quilmes",
+    "Ramos Mejía",
+    "San Isidro",
+    "San Justo",
+    "San Miguel",
+    "San Nicolás de los Arroyos",
+    "San Pedro",
+    "Tandil",
+    "Tigre",
+    "Trenque Lauquen",
+    "Tres Arroyos",
+    "Vicente López",
+    "Villa Gesell",
+    "Zárate",
+  ],
   // Los 48 barrios oficiales de CABA (no "ciudades" — CABA no se subdivide en
   // ciudades, así que el campo "city" se reutiliza para el barrio, sin
   // agregar un campo nuevo al esquema).
@@ -85,72 +143,250 @@ export const CITY_OPTIONS_BY_PROVINCE: Record<string, string[]> = {
     "Villa Soldati",
     "Villa Urquiza",
   ],
-  "Córdoba": ["Córdoba", "Villa Carlos Paz", "Río Cuarto", "Alta Gracia", "Villa María"],
-  "Santa Fe": ["Rosario", "Santa Fe", "Rafaela", "Venado Tuerto"],
-  "Mendoza": ["Mendoza", "Godoy Cruz", "Guaymallén", "San Rafael"],
-  "Tucumán": ["San Miguel de Tucumán", "Yerba Buena", "Tafí Viejo"],
-  "Salta": ["Salta", "San Lorenzo", "Tartagal"],
-  "Neuquén": ["Neuquén", "Plottier", "Centenario"],
-  "Río Negro": ["Bariloche", "General Roca", "Cipolletti"],
-  "Chubut": ["Comodoro Rivadavia", "Trelew", "Puerto Madryn"],
+  "Catamarca": [
+    "Andalgalá",
+    "Belén",
+    "Concepción",
+    "Fiambalá",
+    "Recreo",
+    "San Fernando del Valle de Catamarca",
+    "Santa María",
+    "Tinogasta",
+    "Valle Viejo",
+  ],
+  "Chaco": [
+    "Barranqueras",
+    "Charata",
+    "Fontana",
+    "General José de San Martín",
+    "Las Breñas",
+    "Machagai",
+    "Presidencia Roque Sáenz Peña",
+    "Puerto Tirol",
+    "Quitilipi",
+    "Resistencia",
+    "Villa Ángela",
+  ],
+  "Chubut": [
+    "Comodoro Rivadavia",
+    "Dolavon",
+    "Esquel",
+    "Gaiman",
+    "Puerto Madryn",
+    "Rada Tilly",
+    "Rawson",
+    "Sarmiento",
+    "Trelew",
+    "Trevelin",
+  ],
+  "Córdoba": [
+    "Alta Gracia",
+    "Arroyito",
+    "Bell Ville",
+    "Córdoba",
+    "Cosquín",
+    "Deán Funes",
+    "Jesús María",
+    "La Falda",
+    "Laboulaye",
+    "Marcos Juárez",
+    "Mina Clavero",
+    "Oncativo",
+    "Río Ceballos",
+    "Río Cuarto",
+    "Río Tercero",
+    "San Francisco",
+    "Unquillo",
+    "Villa Carlos Paz",
+    "Villa Dolores",
+    "Villa General Belgrano",
+    "Villa María",
+  ],
+  "Corrientes": [
+    "Bella Vista",
+    "Corrientes",
+    "Curuzú Cuatiá",
+    "Esquina",
+    "Goya",
+    "Ituzaingó",
+    "Mercedes",
+    "Monte Caseros",
+    "Paso de los Libres",
+    "Saladas",
+    "Santo Tomé",
+    "Virasoro",
+  ],
+  "Entre Ríos": [
+    "Chajarí",
+    "Colón",
+    "Concepción del Uruguay",
+    "Concordia",
+    "Crespo",
+    "Diamante",
+    "Federación",
+    "Gualeguay",
+    "Gualeguaychú",
+    "La Paz",
+    "Nogoyá",
+    "Paraná",
+    "Victoria",
+    "Villaguay",
+  ],
+  "Formosa": ["Clorinda", "El Colorado", "Formosa", "Ibarreta", "Ingeniero Juárez", "Las Lomitas", "Pirané"],
+  "Jujuy": [
+    "El Carmen",
+    "Fraile Pintado",
+    "Humahuaca",
+    "La Quiaca",
+    "Libertador General San Martín",
+    "Monterrico",
+    "Palpalá",
+    "Perico",
+    "San Pedro de Jujuy",
+    "San Salvador de Jujuy",
+    "Tilcara",
+  ],
+  "La Pampa": [
+    "Eduardo Castex",
+    "General Acha",
+    "General Pico",
+    "Guatraché",
+    "Intendente Alvear",
+    "Realicó",
+    "Santa Rosa",
+    "Toay",
+    "Victorica",
+  ],
+  "La Rioja": ["Aimogasta", "Chamical", "Chepes", "Chilecito", "Famatina", "La Rioja", "Villa Unión"],
+  "Mendoza": [
+    "General Alvear",
+    "Godoy Cruz",
+    "Guaymallén",
+    "Las Heras",
+    "Luján de Cuyo",
+    "Malargüe",
+    "Maipú",
+    "Mendoza",
+    "Rivadavia",
+    "San Martín",
+    "San Rafael",
+    "Tunuyán",
+    "Tupungato",
+  ],
+  "Misiones": [
+    "Apóstoles",
+    "Aristóbulo del Valle",
+    "Eldorado",
+    "Jardín América",
+    "Leandro N. Alem",
+    "Montecarlo",
+    "Oberá",
+    "Posadas",
+    "Puerto Iguazú",
+    "Puerto Rico",
+    "San Vicente",
+  ],
+  "Neuquén": [
+    "Centenario",
+    "Chos Malal",
+    "Cutral Có",
+    "Junín de los Andes",
+    "Neuquén",
+    "Plaza Huincul",
+    "Plottier",
+    "San Martín de los Andes",
+    "Villa La Angostura",
+    "Zapala",
+  ],
+  "Río Negro": [
+    "Allen",
+    "Catriel",
+    "Cinco Saltos",
+    "Cipolletti",
+    "Choele Choel",
+    "El Bolsón",
+    "General Roca",
+    "San Carlos de Bariloche",
+    "Viedma",
+    "Villa Regina",
+  ],
+  "Salta": [
+    "Cafayate",
+    "Colonia Santa Rosa",
+    "Embarcación",
+    "General Güemes",
+    "Joaquín V. González",
+    "Metán",
+    "Rosario de la Frontera",
+    "Salta",
+    "San Ramón de la Nueva Orán",
+    "Tartagal",
+  ],
+  "San Juan": [
+    "Albardón",
+    "Caucete",
+    "Chimbas",
+    "Jáchal",
+    "Pocito",
+    "Rawson",
+    "Rivadavia",
+    "San Juan",
+    "Santa Lucía",
+    "Villa Krause",
+  ],
+  "San Luis": ["Concarán", "Justo Daract", "La Toma", "Merlo", "San Luis", "Tilisarao", "Villa Mercedes"],
+  "Santa Cruz": [
+    "28 de Noviembre",
+    "Caleta Olivia",
+    "El Calafate",
+    "Las Heras",
+    "Perito Moreno",
+    "Pico Truncado",
+    "Puerto Deseado",
+    "Puerto San Julián",
+    "Río Gallegos",
+  ],
+  "Santa Fe": [
+    "Cañada de Gómez",
+    "Casilda",
+    "Esperanza",
+    "Firmat",
+    "Gálvez",
+    "Rafaela",
+    "Reconquista",
+    "Rosario",
+    "Rufino",
+    "San Lorenzo",
+    "Santa Fe",
+    "Santo Tomé",
+    "Sunchales",
+    "Vera",
+    "Venado Tuerto",
+    "Villa Constitución",
+  ],
+  "Santiago del Estero": [
+    "Añatuya",
+    "Fernández",
+    "Frías",
+    "La Banda",
+    "Monte Quemado",
+    "Quimilí",
+    "Santiago del Estero",
+    "Termas de Río Hondo",
+  ],
+  "Tierra del Fuego": ["Río Grande", "Tolhuin", "Ushuaia"],
+  "Tucumán": [
+    "Aguilares",
+    "Bella Vista",
+    "Concepción",
+    "Famaillá",
+    "Lules",
+    "Monteros",
+    "San Miguel de Tucumán",
+    "Simoca",
+    "Tafí del Valle",
+    "Tafí Viejo",
+    "Trancas",
+    "Yerba Buena",
+  ],
 };
-
-// Nominatim no siempre nombra la provincia igual que nuestro dataset (ej.
-// CABA aparece como "Ciudad Autónoma de Buenos Aires" en el campo `state`) —
-// alias conocidos para reconciliar.
-const PROVINCE_ALIASES: Record<string, string> = {
-  "ciudad autonoma de buenos aires": "CABA",
-  "capital federal": "CABA",
-  caba: "CABA",
-};
-
-function normalize(s: string): string {
-  return s
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, ""); // sin acentos (marcas diacríticas tras NFD)
-}
-
-export interface NominatimAddress {
-  state?: string | null;
-  city?: string | null;
-  town?: string | null;
-  village?: string | null;
-  suburb?: string | null;
-  neighbourhood?: string | null;
-  city_district?: string | null;
-}
-
-// Reconcilia los strings crudos que devuelve Nominatim (ver
-// portal/src/app/api/geocode/route.ts) contra PROVINCES/
-// CITY_OPTIONS_BY_PROVINCE — nunca inventa un valor: si no encuentra un
-// match confiable devuelve null en ese campo, y quien lo use (LocationPicker
-// vía VehicleForm) deja los selects tal cual para que la agencia los
-// complete a mano.
-export function matchProvinceAndCity(address: NominatimAddress): { province: string | null; city: string | null } {
-  const rawProvince = address.state?.trim();
-  if (!rawProvince) return { province: null, city: null };
-  const normalizedProvince = normalize(rawProvince);
-
-  const province =
-    PROVINCE_ALIASES[normalizedProvince] ??
-    PROVINCES.find((p) => normalize(p) === normalizedProvince) ??
-    null;
-
-  if (!province) return { province: null, city: null };
-
-  // Para CABA, Nominatim trae el barrio en suburb/neighbourhood/
-  // city_district (city/town suelen venir vacíos o decir "Buenos Aires").
-  // Para el resto de las provincias, la localidad viene en city/town/village.
-  const rawCity =
-    province === "CABA"
-      ? address.suburb || address.neighbourhood || address.city_district
-      : address.city || address.town || address.village;
-  const normalizedCity = rawCity?.trim() ? normalize(rawCity.trim()) : null;
-
-  const cityOptions = CITY_OPTIONS_BY_PROVINCE[province] || [];
-  const city = (normalizedCity && cityOptions.find((c) => normalize(c) === normalizedCity)) || null;
-
-  return { province, city };
-}

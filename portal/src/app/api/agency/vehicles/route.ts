@@ -147,8 +147,6 @@ export const POST = withApiErrors(async (request) => {
     location: {
       province: body.province || userData.province || null,
       city: body.city || userData.city || null,
-      latitude: typeof body.latitude === "number" ? body.latitude : null,
-      longitude: typeof body.longitude === "number" ? body.longitude : null,
     },
     images: {
       cover: body.coverImage,
