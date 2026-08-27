@@ -15,7 +15,14 @@ export type PortalEmailType =
   | "team_invite"
   | "vehicle_approved"
   | "moderation_rejected"
-  | "vehicle_deleted_by_admin";
+  | "vehicle_deleted_by_admin"
+  // Portal del comprador (Módulo A) — firma electrónica de Seña/Boleto y
+  // pedidos de documentación, ver portal/src/app/mi-operacion/[token].
+  | "buyer_portal_welcome"
+  | "signature_requested"
+  | "signature_otp"
+  | "signature_completed"
+  | "document_requested";
 
 interface EmailData {
   // Uno de los dos: recipientUid (busca el email en users/{uid}, para
@@ -31,6 +38,8 @@ interface EmailData {
   agencyName?: string;
   roleLabel?: string;
   messagePreview?: string;
+  otpCode?: string;
+  documentLabel?: string;
 }
 
 function escapeHtml(str: string): string {
@@ -226,6 +235,70 @@ export async function sendNotificationEmail(type: PortalEmailType, data: EmailDa
           "Te invitaron a un equipo",
           `<strong>${sender}</strong> te invitó a sumarte a <strong>${agency}</strong> en el Portal de Agencias de Matchcars, como <strong>${roleLabel}</strong>.<br/>Aceptá la invitación para crear tu acceso.`,
           "Aceptar invitación",
+          ctaLink
+        );
+        break;
+      }
+      case "buyer_portal_welcome": {
+        const car = escapeHtml(data.carModel || "tu compra");
+        const agency = escapeHtml(data.agencyName || "la agencia");
+        subject = subject || `Seguí el estado de tu compra — ${data.carModel || ""}`.trim();
+        html = buildTemplate(
+          "🚗",
+          "Seguí tu compra paso a paso",
+          `<strong>${agency}</strong> te invita a seguir el estado de tu compra del <strong>${car}</strong> — firmá la seña/boleto y subí lo que te pidan, todo desde este link.`,
+          "Ver mi operación",
+          ctaLink
+        );
+        break;
+      }
+      case "signature_requested": {
+        const car = escapeHtml(data.carModel || "el auto");
+        const agency = escapeHtml(data.agencyName || "la agencia");
+        const doc = escapeHtml(data.documentLabel || "un documento");
+        subject = subject || `${data.agencyName || "La agencia"} te envió ${data.documentLabel || "un documento"} para firmar`;
+        html = buildTemplate(
+          "✍️",
+          "Tenés un documento para firmar",
+          `<strong>${agency}</strong> te envió <strong>${doc}</strong> de tu compra del <strong>${car}</strong> — revisalo y firmalo desde este link.`,
+          "Ir a firmar",
+          ctaLink
+        );
+        break;
+      }
+      case "signature_otp": {
+        const code = escapeHtml(data.otpCode || "");
+        subject = subject || "Tu código para firmar el documento";
+        html = buildTemplate(
+          "🔐",
+          "Tu código de verificación",
+          `Usá este código para confirmar tu firma: <strong style="font-size:24px;letter-spacing:4px;">${code}</strong><br/>Vence en 10 minutos. Si no lo pediste vos, ignorá este mensaje.`,
+          "Volver al documento",
+          ctaLink
+        );
+        break;
+      }
+      case "signature_completed": {
+        const car = escapeHtml(data.carModel || "el auto");
+        subject = subject || "Documento firmado por las dos partes";
+        html = buildTemplate(
+          "✅",
+          "Documento firmado",
+          `El documento de la operación por <strong>${car}</strong> ya quedó firmado por ambas partes.`,
+          "Ver documento",
+          ctaLink
+        );
+        break;
+      }
+      case "document_requested": {
+        const doc = escapeHtml(data.documentLabel || "un documento");
+        const agency = escapeHtml(data.agencyName || "la agencia");
+        subject = subject || `${data.agencyName || "La agencia"} te pidió un documento`;
+        html = buildTemplate(
+          "📄",
+          "Te piden un documento",
+          `<strong>${agency}</strong> necesita que subas <strong>${doc}</strong> para seguir con tu operación.`,
+          "Subir documento",
           ctaLink
         );
         break;

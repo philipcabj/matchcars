@@ -314,6 +314,8 @@ export default function OperationDetailPage() {
         <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
       </div>
 
+      <BuyerPortalSection op={op} onChanged={refresh} patch={patch} />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <FinancingSection
           op={op}
@@ -324,6 +326,116 @@ export default function OperationDetailPage() {
         />
         <div id="parte-de-pago" className="scroll-mt-4">
           <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Portal público del comprador (/mi-operacion/[token]) — mismo link sirve
+// para seguir el checklist, firmar Seña/Boleto y subir documentación
+// pedida. Acá la agencia lo copia/reenvía y pide documentos nuevos.
+function BuyerPortalSection({
+  op,
+  onChanged,
+  patch,
+}: {
+  op: SaleOperation;
+  onChanged: () => void;
+  patch: (body: Record<string, unknown>) => Promise<void>;
+}) {
+  const [newLabel, setNewLabel] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const link = `https://portal.matchcars.app/mi-operacion/${op.buyerAccessToken}`;
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard puede fallar por permisos del navegador — no es bloqueante,
+      // el link sigue visible en pantalla para copiar a mano.
+    }
+  };
+
+  const addRequest = async () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    setAdding(true);
+    try {
+      await patch({ action: "add_document_request", label });
+      setNewLabel("");
+      onChanged();
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const removeRequest = async (requestId: string) => {
+    await patch({ action: "remove_document_request", requestId });
+    onChanged();
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <p className="mb-1 text-sm font-semibold">Portal del comprador</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        {op.buyerContactEmail
+          ? "El comprador sigue el estado de la operación, firma Seña/Boleto y sube lo que le pidas desde este link."
+          : "No hay un email de contacto cargado — el comprador no va a poder firmar ni recibir avisos hasta que cargues uno."}
+      </p>
+
+      <div className="flex items-center gap-2">
+        <input readOnly value={link} className={`${inputClass} flex-1 text-xs`} onFocus={(e) => e.target.select()} />
+        <button onClick={copyLink} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs font-semibold">
+          {copied ? "¡Copiado!" : "Copiar"}
+        </button>
+      </div>
+
+      <div className="mt-4 border-t border-border pt-3">
+        <p className="mb-2 text-xs font-semibold">Documentos pedidos</p>
+        {op.documentRequests.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Todavía no pediste ningún documento.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {op.documentRequests.map((d) => (
+              <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{d.label}</p>
+                  {d.uploadedUrl ? (
+                    <a href={d.uploadedUrl} target="_blank" rel="noreferrer" className="text-success underline">
+                      Ver archivo subido
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">Pendiente</span>
+                  )}
+                </div>
+                {!d.uploadedUrl && (
+                  <button onClick={() => removeRequest(d.id)} className="shrink-0 text-error">
+                    Quitar
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder='Ej. "DNI (frente y dorso)"'
+            className={`${inputClass} flex-1 text-xs`}
+          />
+          <button
+            onClick={addRequest}
+            disabled={adding || !newLabel.trim()}
+            className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+          >
+            {adding ? "Agregando…" : "Pedir documento"}
+          </button>
         </div>
       </div>
     </div>
@@ -349,6 +461,7 @@ function ChecklistSection({
 }) {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [senaPrompt, setSenaPrompt] = useState(false);
   const [senaMonto, setSenaMonto] = useState("");
   const [senaCurrency, setSenaCurrency] = useState<"ARS" | "USD">((op.vehicleSnapshot?.currency as "ARS" | "USD") || "ARS");
@@ -377,6 +490,25 @@ function ChecklistSection({
       onError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setGeneratingKey(null);
+      setSenaPrompt(false);
+      setSenaMonto("");
+    }
+  };
+
+  // Firma electrónica in-house (Ley 25.506, firma electrónica simple) — solo
+  // Seña y Boleto son firmables, ver SignableChecklistKey en
+  // lib/sale-operations.ts para por qué. El vendedor "firma" al enviar (ya
+  // está autenticado); el comprador firma con checkbox + código por email
+  // desde /mi-operacion/[token].
+  const sendForSignature = async (key: "sena" | "boleto_compraventa", monto?: number, montoCurrency?: string) => {
+    setSendingKey(key);
+    try {
+      await patch({ action: "send_for_signature", key, monto, montoCurrency });
+      onChanged();
+    } catch {
+      // patch() ya dejó el error visible arriba del checklist
+    } finally {
+      setSendingKey(null);
       setSenaPrompt(false);
       setSenaMonto("");
     }
@@ -464,13 +596,23 @@ function ChecklistSection({
                 />
               </label>
               {item.key === "boleto_compraventa" && (
-                <button
-                  onClick={() => generateDocument("boleto_compraventa", item.key)}
-                  disabled={generatingKey === item.key}
-                  className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
-                >
-                  {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
-                </button>
+                <>
+                  <button
+                    onClick={() => generateDocument("boleto_compraventa", item.key)}
+                    disabled={generatingKey === item.key}
+                    className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                  >
+                    {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
+                  </button>
+                  <button
+                    onClick={() => sendForSignature("boleto_compraventa")}
+                    disabled={sendingKey === item.key || !op.buyerContactEmail}
+                    title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : undefined}
+                    className="rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
+                  >
+                    {sendingKey === item.key ? "Enviando…" : "✍️ Enviar a firmar"}
+                  </button>
+                </>
               )}
               {item.key === "sena" && (
                 <button
@@ -508,10 +650,28 @@ function ChecklistSection({
                 >
                   Generar
                 </button>
+                <button
+                  onClick={() => sendForSignature("sena", Number(senaMonto), senaCurrency)}
+                  disabled={!senaMonto || Number(senaMonto) <= 0 || sendingKey === item.key || !op.buyerContactEmail}
+                  title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : undefined}
+                  className="rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
+                >
+                  {sendingKey === item.key ? "Enviando…" : "✍️ Enviar a firmar"}
+                </button>
                 <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
                   Cancelar
                 </button>
               </div>
+            )}
+
+            {(item.key === "sena" || item.key === "boleto_compraventa") && op.signatures[item.key] && (
+              <p className="mt-2 text-xs">
+                {op.signatures[item.key]!.status === "signed" ? (
+                  <span className="font-semibold text-success">✍️ Firmado el {new Date(op.signatures[item.key]!.buyer.signedAt!).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                ) : (
+                  <span className="font-semibold text-accent">Enviado a firmar — esperando al comprador</span>
+                )}
+              </p>
             )}
 
             {item.adjuntos.length > 0 && (

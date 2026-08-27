@@ -8,9 +8,27 @@ import { withApiErrors } from "@/lib/api-handler";
 import { logActivity } from "@/lib/activity-log";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { calculateFrenchInstallment, suggestTradeInPrice, TradeInCondition } from "@/lib/sale-operations";
+import { sendNotificationEmail } from "@/lib/notify-mail";
+import { buildSaleDocumentData, uploadSaleDocumentPdf } from "@/lib/pdf/sale-document-service";
+import { renderSaleDocumentPdf, SaleDocumentTipo } from "@/lib/pdf/render-sale-document";
+import {
+  calculateFrenchInstallment,
+  DocumentRequest,
+  SignableChecklistKey,
+  SignatureRequest,
+  suggestTradeInPrice,
+  TradeInCondition,
+} from "@/lib/sale-operations";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
+import { randomUUID } from "node:crypto";
+
+const SIGNABLE_KEYS: SignableChecklistKey[] = ["sena", "boleto_compraventa"];
+const SIGNATURE_EXPIRY_DAYS = 15;
+
+function getClientIp(request: Request): string | null {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || null;
+}
 
 function toIso(ts: unknown): string | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
@@ -69,6 +87,10 @@ function serialize(
     metodoPago: data.metodoPago ?? null,
     financieraNombre: data.financieraNombre ?? null,
     metodoPagoConfirmado: !!data.metodoPagoConfirmado,
+    buyerAccessToken: data.buyerAccessToken ?? null,
+    buyerContactEmail: data.buyerContactEmail ?? null,
+    signatures: data.signatures ?? {},
+    documentRequests: data.documentRequests ?? [],
     // Datos en vivo para armar el "camino" de la venta en una sola pantalla
     // (SaleJourney) — antes había que adivinar el estado real saltando entre
     // el lead y la operación por separado.
@@ -313,6 +335,100 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       });
     });
     return Response.json({ ok: true, vehicleId: vehicleRef.id });
+  }
+
+  // Firma electrónica in-house de Seña/Boleto (Módulo A) — ver
+  // portal/src/lib/sale-operations.ts (SignableChecklistKey) para por qué
+  // son los únicos dos pasos firmables. "Enviar a firmar" de nuevo mientras
+  // ya hay uno pendiente simplemente lo reemplaza (el anterior deja de ser
+  // completable) — no hace falta un estado "voided" separado para eso.
+  if (action === "send_for_signature") {
+    const key = SIGNABLE_KEYS.includes(body.key) ? (body.key as SignableChecklistKey) : null;
+    if (!key) return Response.json({ error: "Documento inválido." }, { status: 400 });
+    if (!op.buyerContactEmail) {
+      return Response.json({ error: "Cargá un email de contacto del comprador antes de enviar a firmar." }, { status: 400 });
+    }
+    const monto = Number(body.monto) || 0;
+    const montoCurrency = body.montoCurrency === "USD" ? "USD" : "ARS";
+    if (key === "sena" && monto <= 0) {
+      return Response.json({ error: "Ingresá el monto de la seña." }, { status: 400 });
+    }
+
+    const data = await buildSaleDocumentData(op, agencyId);
+    const tipo: SaleDocumentTipo = key === "sena" ? "recibo_sena" : "boleto_compraventa";
+    const buffer = await renderSaleDocumentPdf(tipo, data, { monto, montoCurrency });
+    const { url } = await uploadSaleDocumentPdf(agencyId, id, `${tipo}_sin_firmar`, buffer);
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SIGNATURE_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+    // El vendedor ya está autenticado al hacer click acá — su sesión ya
+    // prueba su identidad, no necesita un código OTP como el comprador.
+    const signatureRequest: SignatureRequest = {
+      documentUrl: url,
+      finalDocumentUrl: null,
+      status: "pending_buyer",
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      documentData: data,
+      ...(key === "sena" ? { monto, montoCurrency: montoCurrency as "ARS" | "USD" } : {}),
+      seller: {
+        name: data.agencyName,
+        signedAt: now.toISOString(),
+        contactEmail: null,
+        ip: getClientIp(request),
+        userAgent: request.headers.get("user-agent") || null,
+      },
+      buyer: { name: null, signedAt: null, contactEmail: op.buyerContactEmail, ip: null, userAgent: null },
+    };
+
+    await ref.update({ [`signatures.${key}`]: signatureRequest, updatedAt: FieldValue.serverTimestamp() });
+
+    const carLabel = `${op.vehicleSnapshot?.brand ?? ""} ${op.vehicleSnapshot?.model ?? ""}`.trim() || "el auto";
+    const docLabel = key === "sena" ? "el recibo de seña" : "el boleto de compraventa";
+    sendNotificationEmail("signature_requested", {
+      recipientEmail: op.buyerContactEmail,
+      senderName: data.agencyName,
+      agencyName: data.agencyName,
+      carModel: carLabel,
+      documentLabel: docLabel,
+      ctaLink: `https://portal.matchcars.app/mi-operacion/${op.buyerAccessToken}`,
+    }).catch(() => {});
+
+    return Response.json({ ok: true });
+  }
+
+  if (action === "add_document_request") {
+    const label = typeof body.label === "string" ? body.label.trim() : "";
+    if (!label) return Response.json({ error: "Ingresá qué documento necesitás." }, { status: 400 });
+    const docRequest: DocumentRequest = {
+      id: randomUUID(),
+      label,
+      requestedAt: new Date().toISOString(),
+      uploadedUrl: null,
+      uploadedAt: null,
+    };
+    await ref.update({ documentRequests: FieldValue.arrayUnion(docRequest), updatedAt: FieldValue.serverTimestamp() });
+
+    if (op.buyerContactEmail) {
+      const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+      const agencyName = ownerSnap.data()?.agencyName || ownerSnap.data()?.displayName || "la agencia";
+      sendNotificationEmail("document_requested", {
+        recipientEmail: op.buyerContactEmail,
+        senderName: agencyName,
+        agencyName,
+        documentLabel: label,
+        ctaLink: `https://portal.matchcars.app/mi-operacion/${op.buyerAccessToken}`,
+      }).catch(() => {});
+    }
+
+    return Response.json({ ok: true, request: docRequest });
+  }
+
+  if (action === "remove_document_request") {
+    const requestId = String(body.requestId || "");
+    const documentRequests = (op.documentRequests ?? []).filter((d: DocumentRequest) => d.id !== requestId);
+    await ref.update({ documentRequests, updatedAt: FieldValue.serverTimestamp() });
+    return Response.json({ ok: true });
   }
 
   if (action === "set_status") {

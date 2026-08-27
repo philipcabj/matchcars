@@ -24,8 +24,54 @@ const styles = StyleSheet.create({
   signRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 64 },
   signBox: { width: "40%", textAlign: "center" },
   signLine: { borderTopWidth: 1, borderTopColor: "#171B16", marginBottom: 6 },
+  signVerified: { fontSize: 10, fontWeight: 700, marginBottom: 4 },
+  signVerifiedDetail: { fontSize: 8, color: "#5B655D", marginBottom: 2 },
   footer: { position: "absolute", bottom: 32, left: 48, right: 48, fontSize: 8, color: "#8B9184", textAlign: "center" },
 });
+
+// Firma electrónica in-house del portal del comprador (Módulo A) — cuando
+// ambas partes firmaron, esto reemplaza la línea en blanco por el registro
+// de verificación. Sin QR a propósito, mismo criterio que el resto del
+// documento: es un documento legal, no una pieza de marketing.
+export interface SignatureVerification {
+  sellerName: string;
+  sellerSignedAt: string; // ya formateado, es-AR
+  buyerName: string;
+  buyerSignedAt: string; // ya formateado, es-AR
+  buyerContactEmail: string;
+}
+
+function SignBlock({ signatures }: { signatures?: SignatureVerification }) {
+  if (!signatures) {
+    return (
+      <View style={styles.signRow}>
+        <View style={styles.signBox}>
+          <View style={styles.signLine} />
+          <Text>Firma del vendedor</Text>
+        </View>
+        <View style={styles.signBox}>
+          <View style={styles.signLine} />
+          <Text>Firma del comprador</Text>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.signRow}>
+      <View style={styles.signBox}>
+        <Text style={styles.signVerified}>Firmado electrónicamente</Text>
+        <Text style={styles.signVerifiedDetail}>{signatures.sellerName}</Text>
+        <Text style={styles.signVerifiedDetail}>{signatures.sellerSignedAt}</Text>
+      </View>
+      <View style={styles.signBox}>
+        <Text style={styles.signVerified}>Firmado electrónicamente</Text>
+        <Text style={styles.signVerifiedDetail}>{signatures.buyerName}</Text>
+        <Text style={styles.signVerifiedDetail}>{signatures.buyerSignedAt}</Text>
+        <Text style={styles.signVerifiedDetail}>Verificado por email a {signatures.buyerContactEmail}</Text>
+      </View>
+    </View>
+  );
+}
 
 export interface DocumentData {
   agencyName: string;
@@ -47,7 +93,7 @@ function fmtMoney(n: number, currency: string) {
   return `${currency} ${n.toLocaleString("es-AR")}`;
 }
 
-export function BoletoCompraventa({ data }: { data: DocumentData }) {
+export function BoletoCompraventa({ data, signatures }: { data: DocumentData; signatures?: SignatureVerification }) {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
@@ -101,16 +147,7 @@ export function BoletoCompraventa({ data }: { data: DocumentData }) {
           transferencia registral ante el organismo correspondiente.
         </Text>
 
-        <View style={styles.signRow}>
-          <View style={styles.signBox}>
-            <View style={styles.signLine} />
-            <Text>Firma del vendedor</Text>
-          </View>
-          <View style={styles.signBox}>
-            <View style={styles.signLine} />
-            <Text>Firma del comprador</Text>
-          </View>
-        </View>
+        <SignBlock signatures={signatures} />
 
         <Text style={styles.footer}>Generado desde el Portal de Agencias de MatchCars — {data.fecha}</Text>
       </Page>
@@ -118,7 +155,17 @@ export function BoletoCompraventa({ data }: { data: DocumentData }) {
   );
 }
 
-export function ReciboDeSena({ data, monto, montoCurrency }: { data: DocumentData; monto: number; montoCurrency: string }) {
+export function ReciboDeSena({
+  data,
+  monto,
+  montoCurrency,
+  signatures,
+}: {
+  data: DocumentData;
+  monto: number;
+  montoCurrency: string;
+  signatures?: SignatureVerification;
+}) {
   // La seña puede pagarse en una moneda distinta a la del precio de venta
   // (ej. venta en USD, seña en efectivo en ARS) — el saldo pendiente solo se
   // puede calcular por resta directa si las monedas coinciden; si no, se
@@ -149,16 +196,7 @@ export function ReciboDeSena({ data, monto, montoCurrency }: { data: DocumentDat
           <Text style={styles.value}>{data.agencyName}</Text>
         </View>
 
-        <View style={styles.signRow}>
-          <View style={styles.signBox}>
-            <View style={styles.signLine} />
-            <Text>Firma del vendedor</Text>
-          </View>
-          <View style={styles.signBox}>
-            <View style={styles.signLine} />
-            <Text>Firma del comprador</Text>
-          </View>
-        </View>
+        <SignBlock signatures={signatures} />
 
         <Text style={styles.footer}>Generado desde el Portal de Agencias de MatchCars — {data.fecha}</Text>
       </Page>

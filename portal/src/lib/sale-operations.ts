@@ -2,6 +2,7 @@
 // Módulo A — Operación de venta: checklist de trámites, financiación rápida
 // (sin conexión a ninguna financiera) y parte de pago, agrupados en una sola
 // entidad colgada de un lead. Ver saleOperations/{id} en Firestore.
+import type { DocumentData } from "@/lib/pdf/SaleDocuments";
 export type ChecklistStepStatus = "pendiente" | "hecho";
 
 export interface ChecklistAttachment {
@@ -150,6 +151,57 @@ export const EMPTY_TRADE_IN: TradeIn = {
   vehiculoStockId: null,
 };
 
+// Firma electrónica de Seña/Boleto (Módulo A) — solo estos dos pasos del
+// checklist son firmables: son un acuerdo privado entre comprador y
+// vendedor (Ley 25.506, firma electrónica simple). El resto de los pasos
+// (Formulario 08, Verificación policial, Informe de dominio) son trámites
+// ante organismos que exigen firma certificada o son inspecciones físicas —
+// ningún sistema de firma electrónica los reemplaza, siguen siendo manuales.
+export type SignableChecklistKey = "sena" | "boleto_compraventa";
+
+export interface SignatureParty {
+  name: string | null;
+  signedAt: string | null;
+  contactEmail: string | null; // solo comprador — el vendedor firma con su sesión, no por email
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export type SignatureStatus = "pending_buyer" | "signed" | "voided";
+
+export interface SignatureRequest {
+  documentUrl: string; // PDF sin firmar (reusa la generación de document/route.tsx)
+  finalDocumentUrl: string | null; // con el bloque de firmas, una vez completo
+  status: SignatureStatus;
+  createdAt: string;
+  expiresAt: string;
+  seller: SignatureParty;
+  buyer: SignatureParty;
+  // Solo para "sena" — hace falta guardarlo para poder re-renderizar el PDF
+  // final (con el bloque de firmas) con exactamente el mismo contenido que
+  // se mandó a firmar.
+  monto?: number;
+  montoCurrency?: "ARS" | "USD";
+  // Snapshot congelado al enviar a firmar — el PDF final (al verificar el
+  // código) se renderiza con ESTO, no con datos en vivo del auto/agencia. Si
+  // no fuera así, un cambio de precio u otro dato entre "enviar a firmar" y
+  // que el comprador confirme haría que termine firmando algo distinto de lo
+  // que vio y aceptó.
+  documentData: DocumentData;
+}
+
+// Documento que la agencia le pide subir al comprador (ej. "DNI frente y
+// dorso") desde el portal público de la operación — libre, no atado a un
+// paso fijo del checklist porque no todos los pedidos encajan en los 7
+// pasos default.
+export interface DocumentRequest {
+  id: string;
+  label: string;
+  requestedAt: string;
+  uploadedUrl: string | null;
+  uploadedAt: string | null;
+}
+
 export type SaleOperationStatus = "en_curso" | "completada" | "cancelada";
 
 // Cómo se cubre el saldo (o el precio total si no hay parte de pago) — antes
@@ -182,6 +234,16 @@ export interface SaleOperation {
   // cierre real y no quede para siempre como una elección que se puede tocar
   // sin querer.
   metodoPagoConfirmado: boolean;
+  // Token del portal público del comprador (portal.matchcars.app/mi-operacion/{token})
+  // — se genera una sola vez al crear la operación, sin importar si el
+  // comprador tiene cuenta en MatchCars o no (ver leads/[id]/operation/route.ts).
+  buyerAccessToken: string;
+  // Resuelto una sola vez al crear la operación (cuenta o manualContact) y
+  // reusado para mandar el código de firma — sin esto, "Enviar a firmar"
+  // quedaría deshabilitado por siempre para leads manuales sin recotejar.
+  buyerContactEmail: string | null;
+  signatures: Partial<Record<SignableChecklistKey, SignatureRequest>>;
+  documentRequests: DocumentRequest[];
   // Datos en vivo (no guardados en el doc de la operación) para el
   // SaleJourney — ver comentario en el GET de sale-operations/[id]/route.ts.
   leadStatus: string | null;

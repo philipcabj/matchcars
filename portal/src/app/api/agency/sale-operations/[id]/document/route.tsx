@@ -9,12 +9,12 @@
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
-import { adminDb, adminStorage } from "@/lib/firebase-admin";
+import { adminDb } from "@/lib/firebase-admin";
 import { OperationRecord, OperationRecordData } from "@/lib/pdf/OperationRecord";
-import { BoletoCompraventa, DocumentData, ReciboDeSena } from "@/lib/pdf/SaleDocuments";
+import { ReciboDeSena, BoletoCompraventa } from "@/lib/pdf/SaleDocuments";
+import { buildSaleDocumentData, uploadSaleDocumentPdf } from "@/lib/pdf/sale-document-service";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { randomUUID } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 
 const CHECKLIST_KEY_BY_TIPO: Record<string, string> = {
@@ -135,34 +135,14 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
     buffer = await renderToBuffer(<OperationRecord data={data} />);
     nombre = `Registro de operación — ${data.vehicle.brand} ${data.vehicle.model}.pdf`;
   } else {
-    const data: DocumentData = {
-      agencyName,
-      agencyAddress: ownerData.businessAddress || undefined,
-      buyerLabel: op.buyerLabel || "Comprador",
-      brand: vehicle?.brand ?? op.vehicleSnapshot?.brand ?? "",
-      model: vehicle?.model ?? op.vehicleSnapshot?.model ?? "",
-      version: vehicle?.version ?? "",
-      year: vehicle?.year ?? op.vehicleSnapshot?.year ?? null,
-      licensePlate: vehicle?.licensePlate ?? "",
-      km: vehicle?.km ?? null,
-      price: vehicle?.price ?? 0,
-      currency: vehicle?.currency ?? "ARS",
-      fecha: new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" }),
-      publicationCode: vehicle?.publicationCode ?? null,
-    };
+    const data = await buildSaleDocumentData(op, agencyId);
     buffer = await renderToBuffer(
       tipo === "recibo_sena" ? <ReciboDeSena data={data} monto={monto} montoCurrency={montoCurrency} /> : <BoletoCompraventa data={data} />
     );
     nombre = tipo === "recibo_sena" ? `Recibo de seña (${montoCurrency} ${monto.toLocaleString("es-AR")}).pdf` : "Boleto de compraventa.pdf";
   }
 
-  const filename = `${tipo}_${Date.now()}.pdf`;
-  const filePath = `uploads/${agencyId}/operations/${id}/${filename}`;
-  const token = randomUUID();
-  await adminStorage.file(filePath).save(buffer, {
-    metadata: { contentType: "application/pdf", metadata: { firebaseStorageDownloadTokens: token } },
-  });
-  const url = `https://firebasestorage.googleapis.com/v0/b/${adminStorage.name}/o/${encodeURIComponent(filePath)}?alt=media&token=${token}`;
+  const { url } = await uploadSaleDocumentPdf(agencyId, id, tipo, buffer);
 
   const checklistKey = CHECKLIST_KEY_BY_TIPO[tipo];
   const checklist = [...(op.checklist ?? [])];

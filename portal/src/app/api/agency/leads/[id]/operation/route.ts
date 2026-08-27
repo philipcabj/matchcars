@@ -8,9 +8,11 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
+import { sendNotificationEmail } from "@/lib/notify-mail";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { buildDefaultChecklist } from "@/lib/sale-operations";
 import { FieldValue } from "firebase-admin/firestore";
+import { randomUUID } from "node:crypto";
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/operation">) => {
   const uid = await requireUid(request);
@@ -33,6 +35,16 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
 
   const buyer = lead.manualContact?.name || [lead.buyerSnapshot?.firstName, lead.buyerSnapshot?.lastName].filter(Boolean).join(" ") || "Comprador";
 
+  // Email de contacto del comprador — de la cuenta si tiene, o del contacto
+  // manual si no. Sin esto no se le puede mandar el link del portal ni pedir
+  // el código de firma; queda null y la agencia lo agrega/reenvía después.
+  let buyerContactEmail: string | null = lead.manualContact?.email || null;
+  if (!buyerContactEmail && lead.buyerId) {
+    const buyerSnap = await adminDb.doc(`users/${lead.buyerId}`).get();
+    buyerContactEmail = buyerSnap.data()?.email || null;
+  }
+
+  const buyerAccessToken = randomUUID();
   const opRef = adminDb.collection("saleOperations").doc();
   await adminDb.runTransaction(async (t) => {
     t.set(opRef, {
@@ -64,11 +76,28 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
       },
       metodoPago: null,
       financieraNombre: null,
+      buyerAccessToken,
+      buyerContactEmail,
+      signatures: {},
+      documentRequests: [],
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
     t.update(leadRef, { saleOperationId: opRef.id });
   });
+
+  if (buyerContactEmail) {
+    const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
+    const agencyName = ownerSnap.data()?.agencyName || ownerSnap.data()?.displayName || "la agencia";
+    const carModel = [lead.vehicleSnapshot?.brand, lead.vehicleSnapshot?.model].filter(Boolean).join(" ");
+    sendNotificationEmail("buyer_portal_welcome", {
+      recipientEmail: buyerContactEmail,
+      senderName: agencyName,
+      agencyName,
+      carModel,
+      ctaLink: `https://portal.matchcars.app/mi-operacion/${buyerAccessToken}`,
+    }).catch(() => {});
+  }
 
   return Response.json({ id: opRef.id }, { status: 201 });
 });
