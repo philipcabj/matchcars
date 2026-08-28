@@ -710,6 +710,191 @@ export const analyzeCarPhotos = onCall(
   }
 );
 
+// ─── IA de alta de auto — detectVehicleFeature / generateVehicleDescription ─
+// Antes esto llamaba a Firebase AI Logic (firebase/vertexai) directo desde
+// el cliente de la app. Google exige App Check obligatorio para Firebase AI
+// Logic a partir del 2026-11-02, lo que hubiera implicado sumar un módulo
+// nativo de attestation (Play Integrity/App Attest) solo para esto. Se
+// migra a Cloud Functions con la API key propia de Gemini — mismo patrón
+// que analyzeCarPhotos arriba —, evitando Firebase AI Logic (y por lo
+// tanto App Check) por completo.
+
+interface DetectFeatureBox {
+  ymin: number;
+  xmin: number;
+  ymax: number;
+  xmax: number;
+}
+
+interface DetectFeatureResult {
+  success: boolean;
+  box?: DetectFeatureBox;
+  error?: string;
+}
+
+function parseDetectionBox(input: unknown): DetectFeatureBox | null {
+  try {
+    let box: any = input;
+    if (Array.isArray(box)) {
+      if (box.length > 0) box = box[0];
+      else return null;
+    }
+    if (box?.box) box = box.box;
+    else if (box?.bounding_box) box = box.bounding_box;
+
+    if (typeof box !== "object" || box === null) return null;
+    const norm: Record<string, unknown> = {};
+    for (const k in box) norm[k.toLowerCase()] = box[k];
+
+    const ymin = parseFloat(String(norm.ymin ?? norm.y_min ?? norm.top));
+    const xmin = parseFloat(String(norm.xmin ?? norm.x_min ?? norm.left));
+    const ymax = parseFloat(String(norm.ymax ?? norm.y_max ?? norm.bottom));
+    const xmax = parseFloat(String(norm.xmax ?? norm.x_max ?? norm.right));
+
+    if (![ymin, xmin, ymax, xmax].some(Number.isNaN)) {
+      return { ymin, xmin, ymax, xmax };
+    }
+  } catch {
+    // caída al return null de abajo
+  }
+  return null;
+}
+
+const PLATE_DETECTION_PROMPT = `
+  Analyze this image and find the bounding box of the car license plate.
+  Return ONLY a valid JSON object with keys: ymin, xmin, ymax, xmax (normalized 0-1 coordinates).
+
+  CRITICAL RULES:
+  1. Identify the MAIN license plate (the one most visible).
+  2. The box MUST be a tight rectangle around the plate itself.
+  3. Exclude any car brand, logo, or text on the body of the car above or below the plate.
+  4. Coordinates are 0.0 to 1.0 (top-left is 0,0; bottom-right is 1,1).
+  5. If no plate is found, return null.
+
+  Example: {"ymin": 0.65, "xmin": 0.45, "ymax": 0.72, "xmax": 0.55}
+`;
+
+const CAR_DETECTION_PROMPT = `
+  Analyze this image and find the bounding box of the main car (vehicle).
+  Return ONLY a JSON object with keys: ymin, xmin, ymax, xmax (normalized 0-1 coordinates).
+
+  RULES:
+  1. Find the PRIMARY vehicle in the image.
+  2. The box should encompass the entire visible car.
+  3. Include a small margin around the car.
+  4. If the car is partially cropped, return the box for the visible part.
+  5. Be generous: if there is a car, detect it. Do not return null unless the image is completely empty of cars.
+`;
+
+export const detectVehicleFeature = onCall(
+  { secrets: [geminiKey], cors: true },
+  async (request): Promise<DetectFeatureResult> => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Necesitás iniciar sesión.");
+    }
+
+    const { base64Image, feature } = request.data as { base64Image?: string; feature?: "plate" | "car" };
+    if (!base64Image) {
+      throw new HttpsError("invalid-argument", "Falta la imagen.");
+    }
+    if (feature !== "plate" && feature !== "car") {
+      throw new HttpsError("invalid-argument", "feature debe ser 'plate' o 'car'.");
+    }
+
+    const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, "");
+    const genAI = new GoogleGenerativeAI(geminiKey.value());
+    const geminiModel = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: { responseMimeType: "application/json" },
+    });
+
+    try {
+      const result = await geminiModel.generateContent([
+        feature === "plate" ? PLATE_DETECTION_PROMPT : CAR_DETECTION_PROMPT,
+        { inlineData: { mimeType: "image/jpeg", data: cleanBase64 } },
+      ]);
+      const text = result.response.text();
+
+      let jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      const firstBrace = jsonStr.indexOf("{");
+      const lastBrace = jsonStr.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+      }
+      jsonStr = jsonStr.replace(/,\s*}/g, "}").replace(/]\s*}/g, "}");
+
+      if (jsonStr === "null" || !jsonStr) {
+        return { success: false, error: "AI returned null/empty." };
+      }
+
+      const parsed = JSON.parse(jsonStr);
+      const box = parseDetectionBox(parsed);
+      if (box) return { success: true, box };
+      return { success: false, error: "Invalid JSON structure. Raw: " + text.substring(0, 100) };
+    } catch (error: any) {
+      return { success: false, error: error?.message || "Unknown AI error" };
+    }
+  }
+);
+
+interface GenerateDescriptionRequest {
+  brand: string;
+  model: string;
+  version?: string;
+  year: number | string;
+  km: number | string;
+  city?: string;
+  province?: string;
+  currency: string;
+  price: number | string;
+  fuel?: string;
+  gear?: string;
+  extras?: string;
+}
+
+export const generateVehicleDescription = onCall(
+  { secrets: [geminiKey], cors: true },
+  async (request): Promise<{ text: string }> => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Necesitás iniciar sesión.");
+    }
+
+    const { brand, model, version, year, km, city, province, currency, price, fuel, gear, extras } =
+      request.data as GenerateDescriptionRequest;
+
+    if (!brand || !model) {
+      throw new HttpsError("invalid-argument", "Faltan datos del vehículo.");
+    }
+
+    const prompt = `
+      Actúa como un vendedor de autos experto. Escribe una descripción de venta atractiva y profesional para este vehículo, usando español de Argentina.
+
+      Datos del auto:
+      - Marca: ${brand}
+      - Modelo: ${model} ${version || ""}
+      - Año: ${year}
+      - Kilómetros: ${Number(km).toLocaleString("es-AR")} km
+      - Ubicación: ${city ? city + ", " : ""}${province || ""}
+      - Precio: ${currency} ${Number(price).toLocaleString("es-AR")}
+      ${fuel ? `- ${fuel}` : ""}
+      ${gear ? `- ${gear}` : ""}
+      ${extras ? `- Destacados: ${extras}` : ""}
+
+      Instrucciones:
+      1. Sé persuasivo pero honesto.
+      2. Resalta los puntos fuertes (km, estado, documentación).
+      3. Usa un tono cercano pero profesional.
+      4. No pongas títulos como "Descripción:" ni saludos iniciales.
+      5. Máximo 2 párrafos cortos.
+    `;
+
+    const genAI = new GoogleGenerativeAI(geminiKey.value());
+    const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const result = await geminiModel.generateContent(prompt);
+    return { text: result.response.text().trim() };
+  }
+);
+
 // ─── Meta Conversions API — sendMetaConversionEvent ──────────────────────────
 // Server-side mirror of the Meta Pixel events fired on the web funnel
 // (matchcars.app). Deduplicated with the client-side pixel via eventId.

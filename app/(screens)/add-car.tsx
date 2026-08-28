@@ -9,7 +9,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { notifyAdminNewVehicle } from "@/lib/admin-notifications";
 import { detectCar, detectLicensePlate, type BoundingBox } from "@/lib/ai";
 import { Analytics } from "@/lib/analytics";
-import { app, db, storage, vertexAI } from "@/lib/firebase";
+import { app, db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { evaluateVehicleRisk } from "@/lib/riskScoring";
@@ -24,7 +24,6 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
-import { getGenerativeModel } from "firebase/vertexai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardTypeOptions } from "react-native";
 import {
@@ -2367,34 +2366,24 @@ export default function AddCarScreen() {
         acceptsFinancing ? "acepta financiación" : "",
       ].filter(Boolean).join(", ");
 
-      const prompt = `
-        Actúa como un vendedor de autos experto. Escribe una descripción de venta atractiva y profesional para este vehículo, usando español de Argentina.
-        
-        Datos del auto:
-        - Marca: ${brand}
-        - Modelo: ${model} ${version || ""}
-        - Año: ${year}
-        - Kilómetros: ${Number(km).toLocaleString("es-AR")} km
-        - Ubicación: ${city ? city + ", " : ""}${province || ""}
-        - Precio: ${currency} ${Number(price).toLocaleString("es-AR")}
-        ${fuel ? `- ${fuel}` : ""}
-        ${gear ? `- ${gear}` : ""}
-        ${extras ? `- Destacados: ${extras}` : ""}
-        
-        Instrucciones:
-        1. Sé persuasivo pero honesto.
-        2. Resalta los puntos fuertes (km, estado, documentación).
-        3. Usa un tono cercano pero profesional.
-        4. No pongas títulos como "Descripción:" ni saludos iniciales.
-        5. Máximo 2 párrafos cortos.
-      `;
+      const fns = getFunctions(app);
+      const generate = httpsCallable<object, { text: string }>(fns, "generateVehicleDescription");
+      const res = await generate({
+        brand,
+        model,
+        version,
+        year,
+        km,
+        city,
+        province,
+        currency,
+        price,
+        fuel,
+        gear,
+        extras,
+      });
 
-      const modelAI = getGenerativeModel(vertexAI, { model: "gemini-2.5-flash" });
-      const result = await modelAI.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      
-      setDetails(text.trim());
+      setDetails(res.data.text.trim());
     } catch (error: any) {
       // La IA es una ayuda opcional: si falla, el usuario siempre puede escribir la descripción a mano.
       console.error("Error generando descripción con IA:", error);

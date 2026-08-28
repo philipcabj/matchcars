@@ -5,7 +5,6 @@ import * as firebaseAuth from "firebase/auth";
 import { browserLocalPersistence, getAuth, initializeAuth, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-import { getVertexAI } from "firebase/vertexai";
 import { Platform } from "react-native";
 
 const firebaseConfig = {
@@ -46,6 +45,3 @@ export const db = getFirestore(app);
 
 // 🔹 Storage
 export const storage = getStorage(app);
-
-// 🔹 Vertex AI
-export const vertexAI = getVertexAI(app);
