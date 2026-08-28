@@ -4,7 +4,6 @@
 // /stock/[id]/edit.
 "use client";
 
-import { CostsCard } from "@/components/CostsCard";
 import { FlyerButton } from "@/components/FlyerButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
@@ -385,13 +384,20 @@ export default function VehicleDetailPage() {
       )}
 
       {agency && canTrackExpenses(agency.plan) && (
-        <CostsCard
-          vehicleId={id}
-          price={Number(vehicle.price)}
-          currency={vehicle.currency}
-          purchasePrice={vehicle.purchasePrice}
-          expensesTotal={vehicle.expensesTotal}
-        />
+        <Link
+          href="/dashboard/costos"
+          className="flex items-center justify-between rounded-xl border border-border bg-card p-4 text-sm transition hover:border-accent"
+        >
+          <div>
+            <p className="font-semibold">Costos y margen</p>
+            <p className="text-xs text-muted-foreground">
+              {vehicle.purchasePrice != null
+                ? `Costo cargado: ${vehicle.currency} ${(vehicle.purchasePrice + vehicle.expensesTotal).toLocaleString("es-AR")}`
+                : "Sin costo cargado todavía"}
+            </p>
+          </div>
+          <span className="text-accent">Gestionar en Costos →</span>
+        </Link>
       )}
 
       {timeline.length > 0 && (

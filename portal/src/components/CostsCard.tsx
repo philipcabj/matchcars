@@ -10,6 +10,11 @@ const EXPENSE_TYPE_LABELS: Record<string, string> = {
   detailing: "Detailing",
   tramite: "Trámite",
   publicidad: "Publicidad",
+  flete: "Flete/traslado",
+  patente_impuesto: "Patente/impuesto",
+  guarderia: "Guardería/depósito",
+  financiacion: "Financiación",
+  comision_intermediario: "Comisión a intermediario",
   otro: "Otro",
 };
 

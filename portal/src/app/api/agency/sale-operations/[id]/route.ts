@@ -321,6 +321,10 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
         km: tradeIn.km || 0,
         price: suggestedPrice,
         currency: "ARS",
+        // El precio de toma ES el costo de adquisición — sin esto, el
+        // vendedor tenía que volver a cargarlo a mano en Costos para que el
+        // auto tuviera margen calculado (ver módulo de Costos y Rentabilidad).
+        purchasePrice: suggestedPrice || null,
         images: { cover: tradeIn.fotos?.[0] || "", gallery: tradeIn.fotos?.slice(1) ?? [] },
         status: "a_preparar",
         published: false,

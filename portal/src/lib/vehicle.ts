@@ -89,6 +89,7 @@ export interface VehicleListItem {
   // Costo de adquisición (Módulo C) — null si nunca se cargó, para el
   // dashboard de inventario a costo (se degrada mostrando solo lo que hay).
   purchasePrice?: number | null;
+  expensesTotal?: number;
 }
 
 // Superset de VehicleFormValues (mismos campos, mismo shape string-based que

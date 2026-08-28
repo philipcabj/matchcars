@@ -26,6 +26,7 @@ const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; 
   // (ese gate quedaba mostrando "🔒 Dealer" a Pro/Pro Plus aunque la
   // pantalla ya los dejaba entrar).
   { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "crm" },
+  { label: "Costos", href: "/dashboard/costos", icon: "💵", enabled: true, gate: "crm" },
   { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none" },
   { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
 ];

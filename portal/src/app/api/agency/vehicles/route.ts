@@ -42,6 +42,7 @@ export const GET = withApiErrors(async (request) => {
         publicationCode: typeof data.publicationCode === "number" ? data.publicationCode : null,
         margin,
         purchasePrice: typeof data.purchasePrice === "number" ? data.purchasePrice : null,
+        expensesTotal: data.expensesTotal || 0,
       };
     })
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));

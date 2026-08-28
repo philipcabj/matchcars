@@ -13,7 +13,19 @@ import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canTrackExpenses } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
 
-export const EXPENSE_TYPES = ["compra", "reparacion", "detailing", "tramite", "publicidad", "otro"] as const;
+export const EXPENSE_TYPES = [
+  "compra",
+  "reparacion",
+  "detailing",
+  "tramite",
+  "publicidad",
+  "flete",
+  "patente_impuesto",
+  "guarderia",
+  "financiacion",
+  "comision_intermediario",
+  "otro",
+] as const;
 export type ExpenseType = (typeof EXPENSE_TYPES)[number];
 
 function toIso(ts: unknown): string | null {
