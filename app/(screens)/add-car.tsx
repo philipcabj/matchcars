@@ -2672,12 +2672,17 @@ export default function AddCarScreen() {
               />
             </View>
 
-            <Input
-              label="Patente"
-              value={licensePlate}
-              onChangeText={(t) => setLicensePlate(t.toUpperCase().slice(0, 10))}
-              placeholder="AB123CD"
-            />
+            <View>
+              <Input
+                label="Patente"
+                value={licensePlate}
+                onChangeText={(t) => setLicensePlate(t.toUpperCase().slice(0, 10))}
+                placeholder="AB123CD"
+              />
+              <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: -8, marginBottom: 12 }}>
+                No se muestra en la publicación — es solo para uso interno.
+              </Text>
+            </View>
 
             <Input
               label="Kilómetros"
