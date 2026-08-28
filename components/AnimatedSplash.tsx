@@ -288,14 +288,17 @@ const styles = StyleSheet.create({
     fontSize: 46,
     lineHeight: 44,
     color: BRAND.white,
-    letterSpacing: -1,
+    // El paddingRight no tuvo ningún efecto (probado) — Android recorta el
+    // texto según el ancho medido por StaticLayout, que no incluye el
+    // padding del View. Lo que sí importa es el letterSpacing: Android
+    // suma ese espaciado también DESPUÉS del último carácter (a diferencia
+    // de como se ve en iOS), así que con -1 el "colchón" final quedaba en
+    // negativo y el trazo itálico de la última letra (H de MATCH, S de
+    // CARS) se recortaba. En Android se neutraliza a 0; en iOS se deja
+    // igual que antes porque ahí nunca hubo problema.
+    letterSpacing: Platform.OS === 'android' ? 0 : -1,
     fontStyle: 'italic',
     fontWeight: '900',
-    // Android recorta el borde derecho de texto itálico con letterSpacing
-    // negativo (mide el ancho con métricas rectas y no deja lugar para el
-    // trazo que el itálico "empuja" hacia la derecha) — la última letra
-    // (la "H" de MATCH) quedaba cortada. iOS no tiene este problema.
-    paddingRight: Platform.OS === 'android' ? 10 : 0,
   },
   chainRow: {
     flexDirection: 'row',
