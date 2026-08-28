@@ -89,6 +89,11 @@ export interface VehicleListItem {
   // Costo de adquisición (Módulo C) — null si nunca se cargó, para el
   // dashboard de inventario a costo (se degrada mostrando solo lo que hay).
   purchasePrice?: number | null;
+  // Monto/moneda tal como lo tipeó el usuario, si difiere de la moneda del
+  // auto (purchasePrice ya viene convertido) — solo para mostrar de dónde
+  // salió el número, ver purchase-price/route.ts.
+  purchasePriceOriginal?: number | null;
+  purchasePriceOriginalCurrency?: "ARS" | "USD" | null;
   expensesTotal?: number;
 }
 

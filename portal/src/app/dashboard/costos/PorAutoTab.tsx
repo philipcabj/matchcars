@@ -39,6 +39,23 @@ export function PorAutoTab() {
     })();
   }, [getIdToken]);
 
+  // CostsCard guarda directo contra la API (no vía este estado) — sin
+  // sincronizar acá, cerrar y reabrir el drawer mostraba el valor viejo
+  // (la lista nunca se había vuelto a pedir), como si no hubiese guardado.
+  const applyPatch = (vehicleId: string, patch: { purchasePrice?: number | null; expensesTotal?: number }) => {
+    setVehicles((prev) =>
+      (prev ?? []).map((v) => {
+        if (v.id !== vehicleId) return v;
+        const next = { ...v, ...patch };
+        const nextPurchasePrice = patch.purchasePrice !== undefined ? patch.purchasePrice : v.purchasePrice ?? null;
+        const nextExpensesTotal = patch.expensesTotal !== undefined ? patch.expensesTotal : v.expensesTotal ?? 0;
+        next.margin = nextPurchasePrice != null ? (v.price ?? 0) - nextPurchasePrice - nextExpensesTotal : null;
+        return next;
+      })
+    );
+    setSelected((prev) => (prev && prev.id === vehicleId ? { ...prev, ...patch } : prev));
+  };
+
   const activeVehicles = useMemo(
     () => (vehicles ?? []).filter((v) => !CLOSED_STATUSES.includes(v.status ?? "available")),
     [vehicles]
@@ -134,8 +151,11 @@ export function PorAutoTab() {
               price={Number(selected.price ?? 0)}
               currency={selected.currency ?? "ARS"}
               purchasePrice={selected.purchasePrice ?? null}
+              purchasePriceOriginal={selected.purchasePriceOriginal ?? null}
+              purchasePriceOriginalCurrency={selected.purchasePriceOriginalCurrency ?? null}
               expensesTotal={selected.expensesTotal ?? 0}
               autoOpenAdd
+              onSaved={(patch) => applyPatch(selected.id, patch)}
             />
           </div>
         </div>

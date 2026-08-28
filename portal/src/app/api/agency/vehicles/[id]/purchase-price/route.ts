@@ -3,9 +3,18 @@
 // Ruta chica aparte del PATCH grande de vehicles/[id] a propósito: la
 // pestaña "Costos" del detalle de Stock no reenvía el formulario completo,
 // solo este único campo.
+//
+// El costo se puede cargar en una moneda distinta a la del auto (compraste
+// en USD, vendés en ARS, o al revés) — `purchasePrice` SIEMPRE queda
+// normalizado a la moneda del auto (así todo el resto del código, margen
+// en vehicles/route.ts, costos/route.ts, mark-vehicle-sold.ts, sigue
+// leyéndolo sin cambios), y se guarda aparte el monto/moneda originales +
+// la cotización usada, solo para mostrarle al usuario de dónde salió el
+// número.
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
+import { getUsdToArsRateServer } from "@/lib/exchange-rate";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canTrackExpenses } from "@/lib/plans";
 
@@ -27,11 +36,36 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (!snap.exists || snap.data()?.userId !== agencyId) return Response.json({ error: "No encontrado" }, { status: 404 });
 
   const body = await request.json();
-  const purchasePrice = body.purchasePrice === null ? null : Number(body.purchasePrice);
-  if (purchasePrice !== null && (!Number.isFinite(purchasePrice) || purchasePrice < 0)) {
+  const rawAmount = body.purchasePrice === null ? null : Number(body.purchasePrice);
+  if (rawAmount !== null && (!Number.isFinite(rawAmount) || rawAmount < 0)) {
     return Response.json({ error: "Ingresá un costo válido." }, { status: 400 });
   }
+  const inputCurrency = body.currency === "USD" ? "USD" : "ARS";
 
-  await ref.update({ purchasePrice });
-  return Response.json({ ok: true });
+  if (rawAmount === null) {
+    await ref.update({
+      purchasePrice: null,
+      purchasePriceOriginal: null,
+      purchasePriceOriginalCurrency: null,
+      purchasePriceExchangeRate: null,
+    });
+    return Response.json({ ok: true });
+  }
+
+  const vehicleCurrency = snap.data()?.currency === "USD" ? "USD" : "ARS";
+  let purchasePrice = rawAmount;
+  let exchangeRate: number | null = null;
+  if (inputCurrency !== vehicleCurrency) {
+    const { rate } = await getUsdToArsRateServer();
+    exchangeRate = rate;
+    purchasePrice = inputCurrency === "USD" ? rawAmount * rate : rawAmount / rate;
+  }
+
+  await ref.update({
+    purchasePrice,
+    purchasePriceOriginal: rawAmount,
+    purchasePriceOriginalCurrency: inputCurrency,
+    purchasePriceExchangeRate: exchangeRate,
+  });
+  return Response.json({ ok: true, purchasePrice, exchangeRate });
 });

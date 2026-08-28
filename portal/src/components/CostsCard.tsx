@@ -37,24 +37,39 @@ export function CostsCard({
   price,
   currency,
   purchasePrice: initialPurchasePrice,
+  purchasePriceOriginal: initialPurchasePriceOriginal,
+  purchasePriceOriginalCurrency: initialPurchasePriceOriginalCurrency,
   expensesTotal: initialExpensesTotal,
   autoOpenAdd,
+  onSaved,
 }: {
   vehicleId: string;
   price: number;
   currency: string;
   purchasePrice: number | null;
+  purchasePriceOriginal?: number | null;
+  purchasePriceOriginalCurrency?: "ARS" | "USD" | null;
   expensesTotal: number;
   // Salta directo al formulario de "agregar gasto" al abrirse — usado
   // desde el botón "+ Gasto" de Costos > Por auto, para no sumar un click
   // extra al camino más común (llegar acá para cargar un gasto puntual).
   autoOpenAdd?: boolean;
+  // Avisa al padre después de guardar costo/gastos, para que actualice su
+  // propia lista — sin esto, si el drawer se cierra y se vuelve a abrir
+  // desde una lista que nunca se refrescó, parece que "no guardó" aunque
+  // sí quedó guardado en Firestore.
+  onSaved?: (patch: { purchasePrice?: number | null; expensesTotal?: number }) => void;
 }) {
   const { getIdToken } = useAuth();
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [expensesTotal, setExpensesTotal] = useState(initialExpensesTotal);
   const [purchasePrice, setPurchasePrice] = useState<number | null>(initialPurchasePrice);
-  const [priceInput, setPriceInput] = useState(initialPurchasePrice?.toString() ?? "");
+  const [priceInput, setPriceInput] = useState(
+    initialPurchasePriceOriginal?.toString() ?? initialPurchasePrice?.toString() ?? ""
+  );
+  const [priceCurrency, setPriceCurrency] = useState<"ARS" | "USD">(
+    initialPurchasePriceOriginalCurrency ?? (currency === "USD" ? "USD" : "ARS")
+  );
   const [savingPrice, setSavingPrice] = useState(false);
   const [showAdd, setShowAdd] = useState(!!autoOpenAdd);
   const [newExpense, setNewExpense] = useState({ tipo: "otro", monto: "", descripcion: "" });
@@ -83,10 +98,12 @@ export function CostsCard({
       const res = await fetch(`/api/agency/vehicles/${vehicleId}/purchase-price`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ purchasePrice: value }),
+        body: JSON.stringify({ purchasePrice: value, currency: priceCurrency }),
       });
-      await parseJsonResponse(res);
-      setPurchasePrice(value);
+      const data = await parseJsonResponse<{ purchasePrice?: number | null }>(res);
+      const saved = value === null ? null : (data.purchasePrice ?? value);
+      setPurchasePrice(saved);
+      onSaved?.({ purchasePrice: saved });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
@@ -111,7 +128,11 @@ export function CostsCard({
       });
       const data = await parseJsonResponse<{ id: string }>(res);
       setExpenses((prev) => [{ id: data.id, tipo: newExpense.tipo, monto, descripcion: newExpense.descripcion, createdAt: new Date().toISOString() }, ...(prev ?? [])]);
-      setExpensesTotal((prev) => prev + monto);
+      setExpensesTotal((prev) => {
+        const next = prev + monto;
+        onSaved?.({ expensesTotal: next });
+        return next;
+      });
       setNewExpense({ tipo: "otro", monto: "", descripcion: "" });
       setShowAdd(false);
     } catch (e) {
@@ -130,7 +151,11 @@ export function CostsCard({
       });
       await parseJsonResponse(res);
       setExpenses((prev) => (prev ?? []).filter((e) => e.id !== expenseId));
-      setExpensesTotal((prev) => prev - monto);
+      setExpensesTotal((prev) => {
+        const next = prev - monto;
+        onSaved?.({ expensesTotal: next });
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error desconocido");
     }
@@ -142,15 +167,20 @@ export function CostsCard({
     <div className="rounded-xl border border-border bg-card p-4">
       <p className="mb-3 text-xs font-semibold text-muted-foreground">Costos y margen</p>
 
-      <div className="mb-3 flex items-end gap-2">
+      <div className="mb-1 flex items-end gap-2">
         <label className="flex flex-1 flex-col gap-1 text-sm">
-          <span className="text-xs text-muted-foreground">Costo de compra ({currency})</span>
-          <ThousandsInput
-            className={inputClass}
-            value={priceInput}
-            onChange={setPriceInput}
-            placeholder="Sin cargar"
-          />
+          <span className="text-xs text-muted-foreground">Costo de compra</span>
+          <div className="flex gap-1">
+            <select
+              value={priceCurrency}
+              onChange={(e) => setPriceCurrency(e.target.value === "USD" ? "USD" : "ARS")}
+              className="rounded-lg border border-border bg-background px-2 py-2 text-sm outline-none focus:border-accent"
+            >
+              <option value="ARS">ARS</option>
+              <option value="USD">USD</option>
+            </select>
+            <ThousandsInput className={`${inputClass} flex-1`} value={priceInput} onChange={setPriceInput} placeholder="Sin cargar" />
+          </div>
         </label>
         <button
           onClick={savePurchasePrice}
@@ -160,6 +190,10 @@ export function CostsCard({
           {savingPrice ? "…" : "Guardar"}
         </button>
       </div>
+      <p className="mb-3 min-h-[1em] text-xs text-muted-foreground">
+        {priceCurrency !== currency &&
+          `Se guarda convertido a ${currency} (el auto está publicado en ${currency}) con la cotización del dólar blue al momento de guardar.`}
+      </p>
 
       {expenses === null ? (
         <p className="text-sm text-muted-foreground">Cargando gastos…</p>
