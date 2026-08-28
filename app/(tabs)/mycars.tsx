@@ -152,7 +152,7 @@ export default function MyCarsTab() {
   }).length;
   const totalVehiclesCount = myVehicles.filter(v => {
     const status = v.status || "available";
-    if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold") return false;
+    if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold" || status === "reserved") return false;
     return true;
   }).length;
 
@@ -160,7 +160,7 @@ export default function MyCarsTab() {
     const status = v.status || "available";
     if (activeFilter === "published") {
       if (!v.published) return false;
-      if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold") return false;
+      if (status === "deleted" || status === "rejected" || status === "rejected_limit" || status === "blocked" || status === "sold" || status === "reserved") return false;
       return true;
     }
     if (activeFilter === "review") {
@@ -172,7 +172,12 @@ export default function MyCarsTab() {
       return false;
     }
     if (activeFilter === "sold") {
-      return status === "sold";
+      // "reserved" = ya se marcó vendido, esperando que el comprador
+      // confirme la recepción desde su cuenta — sin esto, un auto en ese
+      // estado quedaba sin ninguna pestaña que lo mostrara (no es
+      // "published" porque se despublica al vender, y no es "sold" hasta
+      // que el comprador confirma).
+      return status === "sold" || status === "reserved";
     }
     return true;
   });
@@ -891,6 +896,13 @@ export default function MyCarsTab() {
                 {item.status === "sold" && (
                    <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: theme.card, padding: 10, borderRadius: 12, alignItems: "center" }}>
                       <Text style={{ color: "#2ecc71", fontWeight: "700" }}>✅ Vendido</Text>
+                   </View>
+                )}
+
+                {item.status === "reserved" && (
+                   <View style={{ marginTop: 4, marginBottom: 6, backgroundColor: theme.card, padding: 10, borderRadius: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+                      <Ionicons name="time-outline" size={18} color="#F59E0B" />
+                      <Text style={{ color: "#F59E0B", fontWeight: "700" }}>Reservado — esperando que el comprador confirme la entrega</Text>
                    </View>
                 )}
               </View>
