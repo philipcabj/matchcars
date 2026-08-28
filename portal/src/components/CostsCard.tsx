@@ -213,7 +213,14 @@ export function CostsCard({
               </div>
             </div>
           ))}
-          {expenses.length === 0 && <p className="text-xs text-muted-foreground">Sin gastos cargados.</p>}
+          {expenses.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Sin gastos cargados.</p>
+          ) : (
+            <div className="flex items-center justify-between border-t border-border pt-2 text-sm">
+              <span className="text-muted-foreground">Total de gastos</span>
+              <span className="font-semibold">{currency} {expensesTotal.toLocaleString("es-AR")}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -259,8 +266,17 @@ export function CostsCard({
 
       {error && <p className="mt-2 text-xs text-error">{error}</p>}
 
+      {(purchasePrice !== null || expensesTotal > 0) && (
+        <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-sm">
+          <span className="text-muted-foreground">Costo total (compra + gastos)</span>
+          <span className="font-semibold">
+            {currency} {((purchasePrice ?? 0) + expensesTotal).toLocaleString("es-AR")}
+          </span>
+        </div>
+      )}
+
       {margin !== null && (
-        <div className="mt-3 border-t border-border pt-3">
+        <div className="mt-1">
           <p className="text-xs text-muted-foreground">Margen estimado</p>
           <p className={`text-lg font-extrabold ${margin >= 0 ? "text-success" : "text-error"}`}>
             {currency} {margin.toLocaleString("es-AR")}
