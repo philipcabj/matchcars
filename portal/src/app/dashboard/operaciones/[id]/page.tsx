@@ -167,6 +167,14 @@ export default function OperationDetailPage() {
 
   const refresh = () => setReloadKey((k) => k + 1);
 
+  // Tildar un paso sentía demora porque esperaba una vuelta completa al
+  // servidor (PATCH + refetch) antes de mostrar el cambio. Esto lo aplica
+  // en pantalla al toque; si el PATCH de fondo falla, refresh() (llamado
+  // desde el catch de quien use esto) trae el estado real del servidor.
+  const updateChecklistLocally = (key: string, patch: Partial<ChecklistItem>) => {
+    setOp((prev) => (prev ? { ...prev, checklist: prev.checklist.map((c) => (c.key === key ? { ...c, ...patch } : c)) } : prev));
+  };
+
   // Snapshot con todo el detalle de la operación (forma de pago,
   // financiación, parte de pago, checklist, entrega) — a diferencia del
   // boleto/recibo, no queda atado a ningún paso del checklist, se puede
@@ -311,7 +319,16 @@ export default function OperationDetailPage() {
       {error && <p className="text-sm text-error">{error}</p>}
 
       <div id="checklist" className="scroll-mt-4">
-        <ChecklistSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onError={setError} nextKey={nextItem?.key ?? null} />
+        <ChecklistSection
+          op={op}
+          agency={agency}
+          onChanged={refresh}
+          patch={patch}
+          userId={user?.uid ?? ""}
+          onError={setError}
+          nextKey={nextItem?.key ?? null}
+          onOptimisticUpdate={updateChecklistLocally}
+        />
       </div>
 
       <BuyerPortalSection op={op} onChanged={refresh} patch={patch} />
@@ -450,6 +467,7 @@ function ChecklistSection({
   userId,
   onError,
   nextKey,
+  onOptimisticUpdate,
 }: {
   op: SaleOperation;
   agency: ReturnType<typeof useAgencyMe>["data"];
@@ -458,6 +476,7 @@ function ChecklistSection({
   userId: string;
   onError: (msg: string | null) => void;
   nextKey: string | null;
+  onOptimisticUpdate: (key: string, patch: Partial<ChecklistItem>) => void;
 }) {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [generatingKey, setGeneratingKey] = useState<string | null>(null);
@@ -490,8 +509,10 @@ function ChecklistSection({
       onError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setGeneratingKey(null);
-      setSenaPrompt(false);
-      setSenaMonto("");
+      // A propósito NO se cierra el prompt de seña ni se borra el monto acá
+      // — generar el PDF plano no significa que la agencia terminó con este
+      // paso, puede querer además "Enviar a firmar" con el mismo monto sin
+      // tener que volver a escribirlo.
     }
   };
 
@@ -505,18 +526,28 @@ function ChecklistSection({
     try {
       await patch({ action: "send_for_signature", key, monto, montoCurrency });
       onChanged();
+      // Solo se cierra el prompt si realmente se mandó — si falla, se deja
+      // el monto cargado para reintentar sin escribirlo de nuevo.
+      setSenaPrompt(false);
+      setSenaMonto("");
     } catch {
       // patch() ya dejó el error visible arriba del checklist
     } finally {
       setSendingKey(null);
-      setSenaPrompt(false);
-      setSenaMonto("");
     }
   };
 
   const toggleDone = async (item: ChecklistItem) => {
-    await patch({ action: "update_checklist_item", key: item.key, status: item.status === "hecho" ? "pendiente" : "hecho" });
-    onChanged();
+    const nextStatus = item.status === "hecho" ? "pendiente" : "hecho";
+    // Optimista: se ve el tilde al toque, sin esperar la vuelta del PATCH +
+    // el refetch completo de la operación. Si el guardado de fondo falla,
+    // onChanged() (llamado desde el catch) trae el estado real y corrige.
+    onOptimisticUpdate(item.key, { status: nextStatus, completedAt: nextStatus === "hecho" ? new Date().toISOString() : null });
+    try {
+      await patch({ action: "update_checklist_item", key: item.key, status: nextStatus });
+    } catch {
+      onChanged();
+    }
   };
 
   const setResponsable = async (item: ChecklistItem, responsable: string) => {
@@ -600,6 +631,7 @@ function ChecklistSection({
                   <button
                     onClick={() => generateDocument("boleto_compraventa", item.key)}
                     disabled={generatingKey === item.key}
+                    title="Descarga el PDF para imprimir/firmar en persona — no le manda nada al comprador"
                     className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
                   >
                     {generatingKey === item.key ? "Generando…" : "📄 Generar PDF"}
@@ -607,7 +639,7 @@ function ChecklistSection({
                   <button
                     onClick={() => sendForSignature("boleto_compraventa")}
                     disabled={sendingKey === item.key || !op.buyerContactEmail}
-                    title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : undefined}
+                    title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : "Le manda el documento al comprador para que lo firme desde su portal"}
                     className="rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
                   >
                     {sendingKey === item.key ? "Enviando…" : "✍️ Enviar a firmar"}
@@ -646,14 +678,15 @@ function ChecklistSection({
                 <button
                   onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
                   disabled={!senaMonto || Number(senaMonto) <= 0}
+                  title="Descarga el PDF para imprimir/firmar en persona — no le manda nada al comprador"
                   className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
                 >
-                  Generar
+                  {generatingKey === item.key ? "Generando…" : "Descargar PDF"}
                 </button>
                 <button
                   onClick={() => sendForSignature("sena", Number(senaMonto), senaCurrency)}
                   disabled={!senaMonto || Number(senaMonto) <= 0 || sendingKey === item.key || !op.buyerContactEmail}
-                  title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : undefined}
+                  title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : "Le manda el documento al comprador para que lo firme desde su portal"}
                   className="rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
                 >
                   {sendingKey === item.key ? "Enviando…" : "✍️ Enviar a firmar"}

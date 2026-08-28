@@ -69,6 +69,9 @@ export const POST = withApiErrors(async (request) => {
   if (!body.province || !body.city) {
     return Response.json({ error: "Provincia y ciudad son obligatorias." }, { status: 400 });
   }
+  if (!body.licensePlate?.trim()) {
+    return Response.json({ error: "La patente es obligatoria." }, { status: 400 });
+  }
   if (!body.coverImage) {
     return Response.json({ error: "Falta la foto de portada." }, { status: 400 });
   }

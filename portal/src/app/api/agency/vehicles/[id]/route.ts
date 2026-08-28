@@ -120,6 +120,9 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (!body.province || !body.city) {
     return Response.json({ error: "Provincia y ciudad son obligatorias." }, { status: 400 });
   }
+  if (!body.licensePlate?.trim()) {
+    return Response.json({ error: "La patente es obligatoria." }, { status: 400 });
+  }
 
   const priceNum = Number(body.price);
   const currency = body.currency === "USD" ? "USD" : "ARS";

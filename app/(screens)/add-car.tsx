@@ -412,6 +412,12 @@ export default function AddCarScreen() {
   const [provinceOpen, setProvinceOpen] = useState(false);
   const [fuelType, setFuelType] = useState("");
   const [gearbox, setGearbox] = useState("");
+  // Sin formato forzado a propósito: hay patentes viejas (ABC123) y Mercosur
+  // (AB123CD) en circulación — mismo criterio que el portal
+  // (components/VehicleForm.tsx). Hace falta para el boleto de
+  // compraventa/recibo de seña (Módulo A, portal) — antes quedaba "A
+  // completar" en esos documentos legales porque nada la pedía acá.
+  const [licensePlate, setLicensePlate] = useState("");
   const [fuelOpen, setFuelOpen] = useState(false);
   const [gearboxOpen, setGearboxOpen] = useState(false);
   const [acceptsFinancing, setAcceptsFinancing] = useState(false);
@@ -2235,6 +2241,7 @@ export default function AddCarScreen() {
         price: priceNum,
         currency,
         km: kmNum,
+        licensePlate: licensePlate.trim() || null,
         fuelType: fuelType || null,
         gearbox: gearbox || null,
         doors: null,
@@ -2403,7 +2410,16 @@ export default function AddCarScreen() {
   };
 
   const canSubmit =
-    !loading && !coverUploading && gallery.every((g) => !g.uploading) && !!brand && !!model && !!year && !!price && !!province && !!city;
+    !loading &&
+    !coverUploading &&
+    gallery.every((g) => !g.uploading) &&
+    !!brand &&
+    !!model &&
+    !!year &&
+    !!price &&
+    !!province &&
+    !!city &&
+    !!licensePlate.trim();
 
   const coverCount = coverLocalUri || coverImage ? 1 : 0;
 
@@ -2655,6 +2671,13 @@ export default function AddCarScreen() {
                 variant="inline"
               />
             </View>
+
+            <Input
+              label="Patente"
+              value={licensePlate}
+              onChangeText={(t) => setLicensePlate(t.toUpperCase().slice(0, 10))}
+              placeholder="AB123CD"
+            />
 
             <Input
               label="Kilómetros"

@@ -298,6 +298,10 @@ export function VehicleForm({
       setError("Provincia y ciudad son obligatorias.");
       return;
     }
+    if (!values.licensePlate.trim()) {
+      setError("La patente es obligatoria.");
+      return;
+    }
     if (!values.coverImage) {
       setError("Falta la foto de portada.");
       return;
@@ -410,7 +414,7 @@ export function VehicleForm({
             ))}
           </select>
         </Field>
-        <Field label="Patente / Dominio">
+        <Field label="Patente / Dominio *">
           <input
             className={inputClass}
             value={values.licensePlate}
