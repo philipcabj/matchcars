@@ -37,12 +37,17 @@ export function CostsCard({
   currency,
   purchasePrice: initialPurchasePrice,
   expensesTotal: initialExpensesTotal,
+  autoOpenAdd,
 }: {
   vehicleId: string;
   price: number;
   currency: string;
   purchasePrice: number | null;
   expensesTotal: number;
+  // Salta directo al formulario de "agregar gasto" al abrirse — usado
+  // desde el botón "+ Gasto" de Costos > Por auto, para no sumar un click
+  // extra al camino más común (llegar acá para cargar un gasto puntual).
+  autoOpenAdd?: boolean;
 }) {
   const { getIdToken } = useAuth();
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
@@ -50,7 +55,7 @@ export function CostsCard({
   const [purchasePrice, setPurchasePrice] = useState<number | null>(initialPurchasePrice);
   const [priceInput, setPriceInput] = useState(initialPurchasePrice?.toString() ?? "");
   const [savingPrice, setSavingPrice] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
+  const [showAdd, setShowAdd] = useState(!!autoOpenAdd);
   const [newExpense, setNewExpense] = useState({ tipo: "otro", monto: "", descripcion: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

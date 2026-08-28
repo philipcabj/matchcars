@@ -49,6 +49,9 @@ export function PorAutoTab() {
 
   return (
     <div className="flex flex-col gap-3">
+      {activeVehicles.length > 0 && (
+        <p className="text-xs text-muted-foreground">Tocá un auto o &quot;+ Gasto&quot; para cargar el costo de compra y los gastos que le vayan surgiendo.</p>
+      )}
       {activeVehicles.length === 0 ? (
         <p className="text-sm text-muted-foreground">No hay stock activo todavía.</p>
       ) : (
@@ -63,6 +66,7 @@ export function PorAutoTab() {
                 <th className="px-4 py-3 font-medium">Costo total</th>
                 <th className="px-4 py-3 font-medium">Precio publicado</th>
                 <th className="px-4 py-3 font-medium">Margen estimado</th>
+                <th className="px-4 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -94,6 +98,18 @@ export function PorAutoTab() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelected(v);
+                        }}
+                        className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground"
+                      >
+                        + Gasto
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -119,6 +135,7 @@ export function PorAutoTab() {
               currency={selected.currency ?? "ARS"}
               purchasePrice={selected.purchasePrice ?? null}
               expensesTotal={selected.expensesTotal ?? 0}
+              autoOpenAdd
             />
           </div>
         </div>
