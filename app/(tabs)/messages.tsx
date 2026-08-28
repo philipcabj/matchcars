@@ -17,7 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function MessagesTab() {
   const { theme } = useTheme();
-  const { user, profile } = useAuth();
+  const { user, blockedUserIds } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [networkError, setNetworkError] = useState(false);
@@ -95,7 +95,6 @@ export default function MessagesTab() {
 
     const unsub = onSnapshot(q, (snap) => {
       const list: any[] = [];
-      const blockedUsers = profile?.blockedUsers || [];
 
       snap.forEach((doc) => {
         const data = doc.data();
@@ -110,7 +109,7 @@ export default function MessagesTab() {
         const otherUid = members.find((p: string) => p !== user.uid);
         
         // Filter blocked users
-        if (otherUid && blockedUsers.includes(otherUid)) {
+        if (otherUid && blockedUserIds.includes(otherUid)) {
             return;
         }
 
@@ -146,7 +145,7 @@ export default function MessagesTab() {
   });
 
   return () => unsub();
-}, [user, profile?.blockedUsers]);
+}, [user, blockedUserIds]);
 
   // We need to fetch profiles for these users to display names/avatars
   const [profiles, setProfiles] = useState<Map<string, any>>(new Map());

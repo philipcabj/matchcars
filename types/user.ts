@@ -46,9 +46,6 @@ export interface UserProfile {
   loginCount?: number;
   lastLoginAt?: any;
   flags?: number; // Number of reports against this user
-  
-  // Blocking
-  blockedUsers?: string[]; // IDs of users blocked by this user
 
   // Pro Dealer Profile Fields
   agencyName?: string;

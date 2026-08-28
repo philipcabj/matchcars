@@ -155,7 +155,7 @@ function MapEmbed({
 
 export default function UserProfileScreen() {
   const { theme } = useTheme();
-  const { user, profile } = useAuth();
+  const { user, blockedUserIds } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ uid?: string; slug?: string }>();
   const identifier = params.uid ?? params.slug;
@@ -197,7 +197,7 @@ export default function UserProfileScreen() {
   // ── Derived ──
   const hasUid = !!uid;
   const isOwnProfile = user?.uid && uid && user.uid === uid;
-  const isBlocked = profile?.blockedUsers && uid && profile.blockedUsers.includes(uid);
+  const isBlocked = !!uid && blockedUserIds.includes(String(uid));
   const uidString = String(uid ?? "");
   const profileUrl = `https://matchcars.app/user-profile/${uidString}`;
   const slugUrl = profileData?.slug ? `https://matchcars.app/agencia/${profileData.slug}` : null;

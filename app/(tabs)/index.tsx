@@ -36,7 +36,7 @@ export default function AutosPublicTab() {
   const params = useLocalSearchParams();
   const owner = (params?.owner as string) || undefined;
   const favOf = (params?.favOf as string) || undefined;
-  const { user, profile } = useAuth();
+  const { user, profile, blockedUserIds } = useAuth();
   const { viewedIds } = useHistory();
   const [buyerPrefs, setBuyerPrefs] = useState<BuyerPreferences | undefined>(undefined);
   const [showPrefsModal, setShowPrefsModal] = useState(false);
@@ -253,14 +253,13 @@ export default function AutosPublicTab() {
         limit(PAGE_SIZE)
       );
       const snap = await getDocs(q);
-      const blockedUsers = profile?.blockedUsers || [];
       const now = new Date();
       const isWeekend = now.getDay() === 0 || now.getDay() === 6;
       const newItems: Vehicle[] = [];
 
       snap.forEach((docSnap) => {
         const data: any = docSnap.data();
-        if (data.userId && blockedUsers.includes(data.userId)) return;
+        if (data.userId && blockedUserIds.includes(data.userId)) return;
         const mapped: Vehicle = {
           id: docSnap.id,
           brand: data.brand, model: data.model, version: data.version ?? undefined,
@@ -305,7 +304,7 @@ export default function AutosPublicTab() {
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, lastDoc, profile?.blockedUsers]);
+  }, [loadingMore, hasMore, lastDoc, blockedUserIds]);
 
   useEffect(() => {
     const fetchRecentVehicles = async () => {
@@ -508,13 +507,12 @@ export default function AutosPublicTab() {
     );
     const unsub = onSnapshot(ref, (snap) => {
       const items: Vehicle[] = [];
-      const blockedUsers = profile?.blockedUsers || [];
 
       snap.forEach((doc) => {
         const data: any = doc.data();
 
         // Filter blocked users
-        if (data.userId && blockedUsers.includes(data.userId)) {
+        if (data.userId && blockedUserIds.includes(data.userId)) {
           return;
         }
 
@@ -625,7 +623,7 @@ export default function AutosPublicTab() {
     });
 
     return () => unsub();
-  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, owner, favOf, filterCurrency, profile?.blockedUsers, refreshTrigger]);
+  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, owner, favOf, filterCurrency, blockedUserIds, refreshTrigger]);
 
     // Effect to fetch missing user names (if they look like emails)
     useEffect(() => {

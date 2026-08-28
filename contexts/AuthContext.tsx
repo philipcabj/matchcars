@@ -31,7 +31,7 @@ import { getMaxCars, getMonthlyFeaturedAllowance, hasUnlimitedFeatured } from "@
 import { getAvatarColorFromEmail } from "@/utils/avatarUtils";
 import { TrustLevel } from "@/types/commerce";
 import { SubscriptionPlan, UserProfile, UserRole } from "@/types/user";
-import { Timestamp, addDoc, arrayRemove, arrayUnion, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { Timestamp, addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { Platform } from "react-native";
 
 let AppleAuthentication: any = null;
@@ -79,6 +79,15 @@ interface AuthContextValue {
    * vendedor y demás campos que van al documento del auto.
    */
   sellerProfile: UserProfile | null;
+  /**
+   * uids que ESTA cuenta bloqueó — users/{uid}/blocked/{peerUid}, mismo
+   * mecanismo que ya usaba solo chat/[uid].tsx para no dejar mandar mensajes
+   * a alguien bloqueado. Antes el resto de la app (feed, favoritos, perfil,
+   * lista de conversaciones) filtraba contra profile.blockedUsers, un campo
+   * que blockUser/unblockUser nunca llegaban a escribir de verdad — quedaba
+   * siempre vacío. Ahora todos leen de acá, en vivo.
+   */
+  blockedUserIds: string[];
   initializing: boolean;
   registerWithEmail: (params: {
     firstName: string;
@@ -110,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [agencyId, setAgencyId] = useState<string | null>(null);
   const [ownerProfile, setOwnerProfile] = useState<UserProfile | null>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [initializing, setInitializing] = useState(true);
 
   const [fbRequest, fbResponse, fbPromptAsync] = Facebook.useAuthRequest(
@@ -130,18 +140,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Escuchar cambios de sesión (Firebase Auth)
   useEffect(() => {
     let unsubProfile: (() => void) | undefined;
+    let unsubBlocked: (() => void) | undefined;
 
     const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
-      
+
       // Clean up previous profile listener if any
       if (unsubProfile) {
         unsubProfile();
         unsubProfile = undefined;
       }
+      if (unsubBlocked) {
+        unsubBlocked();
+        unsubBlocked = undefined;
+      }
 
       if (firebaseUser) {
         const ref = doc(db, "users", firebaseUser.uid);
+
+        // Usuarios que esta cuenta bloqueó — ver blockUser/unblockUser más
+        // abajo, mismo path que ya usa chat/[uid].tsx.
+        unsubBlocked = onSnapshot(collection(db, "users", firebaseUser.uid, "blocked"), (snap) => {
+          setBlockedUserIds(snap.docs.map((d) => d.id));
+        });
 
         // Resuelve una sola vez por sesión si esta cuenta es miembro
         // invitado de una agencia del Portal — no hace falta que sea en
@@ -225,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setAgencyId(null);
         setOwnerProfile(null);
+        setBlockedUserIds([]);
         setInitializing(false);
       }
     });
@@ -232,6 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubAuth();
       if (unsubProfile) unsubProfile();
+      if (unsubBlocked) unsubBlocked();
     };
   }, []);
 
@@ -803,21 +826,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // users/{uid}/blocked/{peerUid} — mismo mecanismo que ya usaba chat/[uid].tsx
+  // a mano (ese archivo sigue con su propia implementación local, no hace
+  // falta tocarlo: escribe/lee exactamente este mismo path). blockedUserIds
+  // se actualiza solo vía el listener de arriba, no hace falta setState acá.
   const blockUser = async (userIdToBlock: string) => {
     if (!user) return;
     try {
-        const userRef = doc(db, "users", user.uid);
-        // Usamos arrayUnion para agregar el ID a la lista sin duplicados
-        await updateDoc(userRef, {
-            blockedUsers: arrayUnion(userIdToBlock)
-        });
-        // Actualizamos estado local optimista
-        if (profile) {
-            setProfile({
-                ...profile,
-                blockedUsers: [...(profile.blockedUsers || []), userIdToBlock]
-            });
-        }
+        await setDoc(doc(db, "users", user.uid, "blocked", userIdToBlock), { blockedAt: serverTimestamp() });
     } catch (e) {
         console.error("Error blocking user:", e);
         throw e;
@@ -827,16 +843,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const unblockUser = async (userIdToUnblock: string) => {
     if (!user) return;
     try {
-        const userRef = doc(db, "users", user.uid);
-        await updateDoc(userRef, {
-            blockedUsers: arrayRemove(userIdToUnblock)
-        });
-        if (profile) {
-            setProfile({
-                ...profile,
-                blockedUsers: (profile.blockedUsers || []).filter(id => id !== userIdToUnblock)
-            });
-        }
+        await deleteDoc(doc(db, "users", user.uid, "blocked", userIdToUnblock));
     } catch (e) {
         console.error("Error unblocking user:", e);
         throw e;
@@ -848,6 +855,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     agencyId,
     sellerProfile: ownerProfile ?? profile,
+    blockedUserIds,
     initializing,
     registerWithEmail,
     loginWithEmail,

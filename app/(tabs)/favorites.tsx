@@ -18,7 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function FavoritesTab() {
   const { theme } = useTheme();
-  const { user, profile } = useAuth();
+  const { user, blockedUserIds } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
@@ -115,7 +115,7 @@ export default function FavoritesTab() {
             }
             
             // Filter blocked users
-            if (profile?.blockedUsers && data.userId && profile.blockedUsers.includes(data.userId)) {
+            if (data.userId && blockedUserIds.includes(data.userId)) {
                 return others;
             }
 
@@ -163,7 +163,7 @@ export default function FavoritesTab() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [favoriteIds, profile?.blockedUsers]);
+  }, [favoriteIds, blockedUserIds]);
 
   const [sellerProfiles, setSellerProfiles] = useState<Record<string, { name: string }>>({});
 
