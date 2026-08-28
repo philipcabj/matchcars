@@ -692,13 +692,12 @@ function ChecklistSection({
             {item.key === "sena" && senaPrompt && (
               <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-background p-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="number"
+                  <ThousandsInput
                     autoFocus
                     placeholder="Monto de la seña"
                     value={senaMonto}
-                    onChange={(e) => {
-                      setSenaMonto(e.target.value);
+                    onChange={(v) => {
+                      setSenaMonto(v);
                       setSenaReadyToSend(false);
                     }}
                     className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
