@@ -12,6 +12,7 @@ import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { sendPushNotification } from "@/lib/notify-push";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 type OfferAction = "accept" | "reject" | "counter" | "withdraw";
@@ -24,8 +25,9 @@ async function postMessage(conversationId: string, senderId: string, text: strin
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/offer">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "leads")) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

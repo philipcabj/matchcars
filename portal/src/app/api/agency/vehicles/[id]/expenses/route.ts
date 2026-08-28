@@ -10,7 +10,8 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS, canTrackExpenses } from "@/lib/plans";
+import { canTrackExpenses } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const EXPENSE_TYPES = [
@@ -43,9 +44,10 @@ async function requireOwnedVehicle(agencyId: string, id: string) {
 
 export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]/expenses">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
-    return Response.json({ error: "Tu rol no tiene permiso para ver el stock." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "costos")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
   }
 
   const { id } = await ctx.params;
@@ -69,9 +71,10 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]/expenses">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
-    return Response.json({ error: "Tu rol no tiene permiso para editar el stock." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "costos")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
   }
 
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();

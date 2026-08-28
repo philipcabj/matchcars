@@ -7,6 +7,7 @@ import { logActivity } from "@/lib/activity-log";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_LABELS, AGENCY_ROLE_PERMISSIONS, AgencyRole } from "@/lib/plans";
+import { sanitizeSections } from "@/lib/sections";
 import { NextRequest } from "next/server";
 
 const VALID_ROLES: AgencyRole[] = ["manager", "sales"];
@@ -27,24 +28,25 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
   if (!VALID_ROLES.includes(body.role)) {
     return Response.json({ error: "Rol inválido." }, { status: 400 });
   }
+  // Opcional: si no viene, se deja el acceso por sección tal como está
+  // (cambiar el rol no debería resetear a mano lo que el dueño ya
+  // configuró) — .update() con dot-path para no pisar el doc entero.
+  const sections = sanitizeSections(body.sections);
 
   const ref = adminDb.doc(`agencies/${agencyId}/members/${targetUid}`);
   const snap = await ref.get();
   if (!snap.exists) return Response.json({ error: "Ese miembro no existe." }, { status: 404 });
 
-  await Promise.all([
-    ref.update({ role: body.role }),
-    adminDb.doc(`agencyMemberships/${targetUid}`).set({ agencyId, role: body.role }),
-  ]);
+  const update: Record<string, unknown> = { role: body.role };
+  if (sections) update.sections = sections;
+
+  await Promise.all([ref.update(update), adminDb.doc(`agencyMemberships/${targetUid}`).update(update)]);
 
   const memberName = snap.data()?.name || snap.data()?.email || targetUid;
-  await logActivity({
-    agencyId,
-    actorUid,
-    entityType: "team",
-    entityId: targetUid,
-    summary: `Cambió el rol de ${memberName} a ${AGENCY_ROLE_LABELS[body.role as AgencyRole]}`,
-  });
+  const summary = sections
+    ? `Actualizó el acceso de ${memberName}`
+    : `Cambió el rol de ${memberName} a ${AGENCY_ROLE_LABELS[body.role as AgencyRole]}`;
+  await logActivity({ agencyId, actorUid, entityType: "team", entityId: targetUid, summary });
 
   return Response.json({ ok: true });
 });

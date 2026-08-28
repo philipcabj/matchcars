@@ -12,12 +12,14 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]/publish">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock || !hasSection(membership, "stock")) {
     return Response.json({ error: "Tu rol no tiene permiso para publicar autos." }, { status: 403 });
   }
 

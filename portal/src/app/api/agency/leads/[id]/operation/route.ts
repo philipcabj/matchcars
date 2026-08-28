@@ -11,14 +11,16 @@ import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { buildDefaultChecklist } from "@/lib/sale-operations";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 import { randomUUID } from "node:crypto";
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/operation">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
-    return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "operaciones")) {
+    return Response.json({ error: "Tu rol no tiene permiso para gestionar operaciones." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);
 

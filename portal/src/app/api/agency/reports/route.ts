@@ -16,7 +16,8 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AttentionItem, PeerComparison } from "@/lib/reports";
-import { AGENCY_ROLE_PERMISSIONS, hasAdvancedReports, hasPeerComparison } from "@/lib/plans";
+import { hasAdvancedReports, hasPeerComparison } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { STATUS_LABELS } from "@/lib/vehicle";
 
 const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold", "a_preparar"];
@@ -39,9 +40,10 @@ const PAID_PLAN_VALUES = [
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].viewStats) {
-    return Response.json({ error: "Tu rol no tiene permiso para ver reportes." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "reportes")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
   }
 
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();

@@ -19,6 +19,7 @@ import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
 import { CreateManualLeadInput, MANUAL_CONTACT_SOURCE_LABELS, ManualContactSource, SalesByMonth } from "@/lib/leads";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 const MANUAL_CONTACT_SOURCES = Object.keys(MANUAL_CONTACT_SOURCE_LABELS) as ManualContactSource[];
@@ -75,8 +76,9 @@ function countInMonth(docs: FirebaseFirestore.DocumentData[], field: string, mon
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "leads")) {
     return Response.json({ error: "Tu rol no tiene permiso para ver los leads." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);
@@ -152,8 +154,9 @@ export const GET = withApiErrors(async (request) => {
 
 export const POST = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "leads")) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

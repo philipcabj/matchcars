@@ -9,7 +9,8 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS, canManageCommissions } from "@/lib/plans";
+import { canManageCommissions } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 
 function toDate(ts: unknown): Date | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate();
@@ -22,9 +23,10 @@ function inMonth(date: Date | null, monthStart: Date, monthEnd: Date): boolean {
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].viewStats) {
-    return Response.json({ error: "Tu rol no tiene permiso para ver estadísticas." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "comisiones")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
   }
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
   if (!canManageCommissions(ownerSnap.data()?.plan || "free")) {

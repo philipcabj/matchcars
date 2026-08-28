@@ -13,17 +13,21 @@ import "server-only";
 import { ApiAuthError } from "@/lib/api-auth";
 import { adminDb } from "@/lib/firebase-admin";
 import { AgencyRole, canAccessCRM } from "@/lib/plans";
+import { SectionKey } from "@/lib/sections";
 
 export interface AgencyMembership {
   agencyId: string;
   role: AgencyRole;
+  // undefined = todavía no se configuró nada explícito (miembros de antes
+  // de esta feature) — ver legacySectionsForRole en lib/sections.ts.
+  sections?: SectionKey[] | null;
 }
 
 export async function resolveMembership(uid: string): Promise<AgencyMembership> {
   const membershipSnap = await adminDb.doc(`agencyMemberships/${uid}`).get();
   if (membershipSnap.exists) {
     const data = membershipSnap.data()!;
-    return { agencyId: data.agencyId, role: data.role };
+    return { agencyId: data.agencyId, role: data.role, sections: data.sections ?? null };
   }
 
   // Sin invitación: solo entra como "dueño de su propia agencia" si tiene un

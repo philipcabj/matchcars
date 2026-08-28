@@ -383,7 +383,7 @@ export default function VehicleDetailPage() {
         </div>
       )}
 
-      {agency && canTrackExpenses(agency.plan) && (
+      {agency && canTrackExpenses(agency.plan) && agency.mySections.includes("costos") && (
         <Link
           href="/dashboard/costos"
           className="flex items-center justify-between rounded-xl border border-border bg-card p-4 text-sm transition hover:border-accent"

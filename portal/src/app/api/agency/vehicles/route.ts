@@ -14,12 +14,19 @@ import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canUploadVideo, getMaxCars } from "@/lib/plans";
 import { evaluateVehicleRiskServer } from "@/lib/risk-scoring";
+import { hasSection } from "@/lib/sections";
 import { EXCLUDED_STATUSES, VehicleFormValues } from "@/lib/vehicle";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId } = await resolveMembership(uid);
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  // Lo usan tanto Stock como la pestaña "Por auto" de Costos — alcanza con
+  // tener acceso a cualquiera de las dos secciones.
+  if (!hasSection(membership, "stock") && !hasSection(membership, "costos")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
+  }
   const snap = await adminDb.collection("vehicles").where("userId", "==", agencyId).get();
   const vehicles = snap.docs
     .map((d) => {
@@ -54,8 +61,9 @@ export const GET = withApiErrors(async (request) => {
 
 export const POST = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock || !hasSection(membership, "stock")) {
     return Response.json({ error: "Tu rol no tiene permiso para publicar autos." }, { status: 403 });
   }
 

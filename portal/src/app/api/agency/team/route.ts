@@ -12,6 +12,7 @@ import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { AGENCY_ROLE_LABELS, AGENCY_ROLE_PERMISSIONS, AgencyRole, getIncludedSeats } from "@/lib/plans";
+import { defaultSectionsForNewMember, sanitizeSections } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 const VALID_ROLES: AgencyRole[] = ["owner", "manager", "sales"];
@@ -29,6 +30,7 @@ export const POST = withApiErrors(async (request) => {
   const role: AgencyRole = VALID_ROLES.includes(body.role) ? body.role : "sales";
   if (!email) return Response.json({ error: "Falta el email." }, { status: 400 });
   if (role === "owner") return Response.json({ error: "No se puede asignar el rol 'Dueño/a' a un miembro." }, { status: 400 });
+  const sections = sanitizeSections(body.sections) ?? defaultSectionsForNewMember(role);
 
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
   const ownerData = ownerSnap.data() ?? {};
@@ -67,6 +69,7 @@ export const POST = withApiErrors(async (request) => {
     const targetData = targetDoc.data();
     const memberData = {
       role,
+      sections,
       email,
       // Nombre y apellido de la persona primero — agencyName es su nombre
       // comercial (si lo tiene), no quién es, y confunde en listas de equipo.
@@ -82,7 +85,7 @@ export const POST = withApiErrors(async (request) => {
     await Promise.all([
       adminDb.doc(`agencies/${agencyId}`).set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
       adminDb.doc(`agencies/${agencyId}/members/${targetUid}`).set(memberData),
-      adminDb.doc(`agencyMemberships/${targetUid}`).set({ agencyId, role }),
+      adminDb.doc(`agencyMemberships/${targetUid}`).set({ agencyId, role, sections }),
     ]);
 
     await logActivity({
@@ -108,6 +111,7 @@ export const POST = withApiErrors(async (request) => {
     agencyName: inviterName,
     email,
     role,
+    sections,
     invitedBy: uid,
     invitedByName: inviterName,
     status: "pending",

@@ -6,6 +6,7 @@
 import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { adminDb } from "@/lib/firebase-admin";
+import { sanitizeSections } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/invite/[id]/accept">) => {
@@ -29,6 +30,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/invite
   }
 
   const { agencyId, role } = invite;
+  const sections = sanitizeSections(invite.sections);
   if (uid === agencyId) {
     return Response.json({ error: "Ya sos el dueño/a de esa agencia." }, { status: 400 });
   }
@@ -41,6 +43,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/invite
 
   const memberData = {
     role,
+    sections,
     email: myEmail,
     name: userSnap.data()?.displayName || `${userSnap.data()?.firstName ?? ""} ${userSnap.data()?.lastName ?? ""}`.trim() || myEmail,
     addedAt: FieldValue.serverTimestamp(),
@@ -50,7 +53,7 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/invite
   await Promise.all([
     adminDb.doc(`agencies/${agencyId}`).set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true }),
     adminDb.doc(`agencies/${agencyId}/members/${uid}`).set(memberData),
-    adminDb.doc(`agencyMemberships/${uid}`).set({ agencyId, role }),
+    adminDb.doc(`agencyMemberships/${uid}`).set({ agencyId, role, sections }),
     inviteSnap.ref.update({ status: "accepted", acceptedAt: FieldValue.serverTimestamp(), acceptedUid: uid }),
   ]);
 

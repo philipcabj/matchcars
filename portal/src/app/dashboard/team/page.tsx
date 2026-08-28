@@ -7,16 +7,22 @@ import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { trackPortalEvent } from "@/lib/ga";
 import { AGENCY_ROLE_LABELS, AgencyRole } from "@/lib/plans";
+import { ALL_SECTIONS, defaultSectionsForNewMember, legacySectionsForRole, SECTION_LABELS, SectionKey } from "@/lib/sections";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 const ROLE_OPTIONS: AgencyRole[] = ["manager", "sales"];
+
+function toggleSection(current: SectionKey[], section: SectionKey): SectionKey[] {
+  return current.includes(section) ? current.filter((s) => s !== section) : [...current, section];
+}
 
 export default function TeamPage() {
   const { getIdToken } = useAuth();
   const { data, error, loading, refetch } = useAgencyMe();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<AgencyRole>("sales");
+  const [sections, setSections] = useState<SectionKey[]>(defaultSectionsForNewMember("sales"));
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -32,7 +38,7 @@ export default function TeamPage() {
       const res = await fetch("/api/agency/team", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ email, role }),
+        body: JSON.stringify({ email, role, sections }),
       });
       const data = await parseJsonResponse<{ invited: boolean }>(res);
       setFormSuccess(data.invited ? `Le mandamos una invitación a ${email}.` : `${email} ya es parte del equipo.`);
@@ -69,6 +75,22 @@ export default function TeamPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ role: newRole }),
+      });
+      await parseJsonResponse(res);
+      refetch();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Error desconocido");
+    }
+  };
+
+  const changeSections = async (uid: string, currentRole: AgencyRole, newSections: SectionKey[]) => {
+    setActionError(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/agency/team/${uid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ role: currentRole, sections: newSections }),
       });
       await parseJsonResponse(res);
       refetch();
@@ -121,37 +143,60 @@ export default function TeamPage() {
         {data.members.map((m) => {
           const isOwner = m.role === "owner";
           const isMe = m.uid === data.myUid;
+          const memberRole = m.role as AgencyRole;
+          const memberSections = m.sections ?? legacySectionsForRole(memberRole);
           return (
-            <div key={m.uid} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
-              <Avatar name={m.name || m.email || m.uid} size={36} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">
-                  {m.name || m.email} {isMe && <span className="text-xs font-normal text-muted-foreground">(vos)</span>}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+            <div key={m.uid} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+              <div className="flex items-center gap-3">
+                <Avatar name={m.name || m.email || m.uid} size={36} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">
+                    {m.name || m.email} {isMe && <span className="text-xs font-normal text-muted-foreground">(vos)</span>}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                </div>
+                {canManage && !isOwner ? (
+                  <select
+                    value={m.role}
+                    onChange={(e) => changeRole(m.uid, e.target.value as AgencyRole)}
+                    className="rounded-lg border border-border bg-background px-2 py-1 text-xs"
+                  >
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {AGENCY_ROLE_LABELS[r]}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="rounded-full bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent">
+                    {AGENCY_ROLE_LABELS[m.role as AgencyRole] ?? m.role}
+                  </span>
+                )}
+                {canManage && !isOwner && (
+                  <button onClick={() => removeMember(m.uid)} className="text-xs font-semibold text-error">
+                    Quitar
+                  </button>
+                )}
               </div>
-              {canManage && !isOwner ? (
-                <select
-                  value={m.role}
-                  onChange={(e) => changeRole(m.uid, e.target.value as AgencyRole)}
-                  className="rounded-lg border border-border bg-background px-2 py-1 text-xs"
-                >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {AGENCY_ROLE_LABELS[r]}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="rounded-full bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent">
-                  {AGENCY_ROLE_LABELS[m.role as AgencyRole] ?? m.role}
-                </span>
-              )}
-              {canManage && !isOwner && (
-                <button onClick={() => removeMember(m.uid)} className="text-xs font-semibold text-error">
-                  Quitar
-                </button>
-              )}
+              {!isOwner &&
+                (canManage ? (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 pl-[3.25rem]">
+                    {ALL_SECTIONS.map((s) => (
+                      <label key={s} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={memberSections.includes(s)}
+                          onChange={() => changeSections(m.uid, memberRole, toggleSection(memberSections, s))}
+                        />
+                        {SECTION_LABELS[s]}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="border-t border-border pt-2 pl-[3.25rem] text-xs text-muted-foreground">
+                    Acceso: {memberSections.length === ALL_SECTIONS.length ? "todas las secciones" : memberSections.map((s) => SECTION_LABELS[s]).join(", ") || "ninguna sección"}
+                  </p>
+                ))}
             </div>
           );
         })}
@@ -205,7 +250,11 @@ export default function TeamPage() {
                 <span className="font-medium">Rol</span>
                 <select
                   value={role}
-                  onChange={(e) => setRole(e.target.value as AgencyRole)}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as AgencyRole;
+                    setRole(nextRole);
+                    setSections(defaultSectionsForNewMember(nextRole));
+                  }}
                   className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 >
                   {ROLE_OPTIONS.map((r) => (
@@ -223,6 +272,19 @@ export default function TeamPage() {
                 {busy ? "Agregando…" : "Agregar"}
               </button>
             </form>
+          )}
+          {seatsLeft > 0 && (
+            <div className="mt-3 flex flex-col gap-1.5 border-t border-border pt-3">
+              <p className="text-xs font-medium text-muted-foreground">Acceso a secciones</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {ALL_SECTIONS.map((s) => (
+                  <label key={s} className="flex items-center gap-1.5 text-xs">
+                    <input type="checkbox" checked={sections.includes(s)} onChange={() => setSections((prev) => toggleSection(prev, s))} />
+                    {SECTION_LABELS[s]}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
           {formError && <p className="mt-2 text-sm text-error">{formError}</p>}
           {formSuccess && <p className="mt-2 text-sm text-success">{formSuccess}</p>}

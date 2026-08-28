@@ -12,6 +12,7 @@ import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { NotificationItem } from "@/lib/notifications";
 import { AGENCY_ROLE_PERMISSIONS, canAccessCRM } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 
 function toIso(ts: unknown): string | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
@@ -24,10 +25,18 @@ function buyerLabel(snapshot: { firstName?: string; lastName?: string } | undefi
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
   if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
     return Response.json({ items: [] });
   }
+  // Campanita compartida entre secciones (leads/ofertas, ventas pendientes
+  // de confirmación, trámites de operación por vencer) — en vez de tapar
+  // todo el endpoint por una sola sección, cada categoría se arma solo si
+  // esta persona tiene la sección correspondiente.
+  const hasLeads = hasSection(membership, "leads");
+  const hasStock = hasSection(membership, "stock");
+  const hasOperaciones = hasSection(membership, "operaciones");
   // Silencioso a propósito (a diferencia de requireCRMAccess, que tira
   // error): esto es un poll de fondo para la campanita, no una página — un
   // plan sin CRM simplemente no tiene nada de leads/ofertas que mostrar acá.
@@ -45,7 +54,7 @@ export const GET = withApiErrors(async (request) => {
 
   const items: NotificationItem[] = [];
 
-  for (const d of newLeadsSnap.docs) {
+  for (const d of hasLeads ? newLeadsSnap.docs : []) {
     const data = d.data();
     const veh = data.vehicleSnapshot;
     const carLabel = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""}`.trim() : "una publicación";
@@ -59,7 +68,7 @@ export const GET = withApiErrors(async (request) => {
     });
   }
 
-  for (const d of pendingOfferSnap.docs) {
+  for (const d of hasLeads ? pendingOfferSnap.docs : []) {
     const data = d.data();
     const veh = data.vehicleSnapshot;
     const carLabel = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""}`.trim() : "un auto";
@@ -73,7 +82,7 @@ export const GET = withApiErrors(async (request) => {
     });
   }
 
-  for (const d of pendingSalesSnap.docs) {
+  for (const d of hasStock ? pendingSalesSnap.docs : []) {
     const data = d.data();
     const veh = data.vehicleSnapshot;
     const carLabel = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""}`.trim() : "un auto";
@@ -94,7 +103,7 @@ export const GET = withApiErrors(async (request) => {
   const now = Date.now();
   const dueSoonThreshold = now + DUE_SOON_DAYS * 24 * 60 * 60 * 1000;
 
-  for (const d of activeOperationsSnap.docs) {
+  for (const d of hasOperaciones ? activeOperationsSnap.docs : []) {
     const data = d.data();
     const checklist = (data.checklist ?? []) as {
       key: string;

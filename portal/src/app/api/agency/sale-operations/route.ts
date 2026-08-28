@@ -6,6 +6,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 
 function toIso(ts: unknown): string | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
@@ -14,8 +15,9 @@ function toIso(ts: unknown): string | null {
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "operaciones")) {
     return Response.json({ error: "Tu rol no tiene permiso para ver operaciones." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

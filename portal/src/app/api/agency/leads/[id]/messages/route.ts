@@ -15,6 +15,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 
 function toIso(ts: unknown): string | null {
@@ -33,8 +34,9 @@ async function loadOwnedLead(agencyId: string, id: string) {
 
 export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/messages">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "leads")) {
     return Response.json({ error: "Tu rol no tiene permiso para ver los leads." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);
@@ -65,8 +67,9 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/leads/[id]/messages">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "leads")) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar leads." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

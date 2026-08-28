@@ -14,6 +14,7 @@ import { OperationRecord, OperationRecordData } from "@/lib/pdf/OperationRecord"
 import { ReciboDeSena, BoletoCompraventa } from "@/lib/pdf/SaleDocuments";
 import { buildSaleDocumentData, uploadSaleDocumentPdf } from "@/lib/pdf/sale-document-service";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { FieldValue } from "firebase-admin/firestore";
 
@@ -30,8 +31,9 @@ function toIso(ts: unknown): string | null {
 
 export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]/document">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "operaciones")) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar operaciones." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

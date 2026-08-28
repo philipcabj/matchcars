@@ -21,6 +21,7 @@ import {
   TradeInCondition,
 } from "@/lib/sale-operations";
 import { AGENCY_ROLE_PERMISSIONS } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue } from "firebase-admin/firestore";
 import { randomUUID } from "node:crypto";
 
@@ -111,8 +112,9 @@ async function loadOwned(agencyId: string, id: string) {
 
 export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "operaciones")) {
     return Response.json({ error: "Tu rol no tiene permiso para ver operaciones." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);
@@ -141,8 +143,9 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/sale-operations/[id]">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageLeads || !hasSection(membership, "operaciones")) {
     return Response.json({ error: "Tu rol no tiene permiso para gestionar operaciones." }, { status: 403 });
   }
   await requireCRMAccess(agencyId);

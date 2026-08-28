@@ -9,6 +9,7 @@ import { resolveMembership } from "@/lib/agency-server";
 import { ensureCatalogEntry } from "@/lib/catalog-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canUploadVideo } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 import { FieldValue, type DocumentReference, type DocumentSnapshot } from "firebase-admin/firestore";
 
 function toIso(ts: unknown): string | null {
@@ -30,7 +31,11 @@ async function loadOwnedVehicle(
 
 export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]">) => {
   const uid = await requireUid(request);
-  const { agencyId } = await resolveMembership(uid);
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "stock")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
+  }
   const { id } = await ctx.params;
   const { snap } = await loadOwnedVehicle(agencyId, id);
 
@@ -103,8 +108,9 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock || !hasSection(membership, "stock")) {
     return Response.json({ error: "Tu rol no tiene permiso para editar autos." }, { status: 403 });
   }
 
@@ -188,8 +194,9 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
 // deshacer — status:"deleted" ya está en EXCLUDED_STATUSES en todos lados.
 export const DELETE = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
+  const membership = await resolveMembership(uid);
+  const { agencyId, role } = membership;
+  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock || !hasSection(membership, "stock")) {
     return Response.json({ error: "Tu rol no tiene permiso para eliminar autos." }, { status: 403 });
   }
 

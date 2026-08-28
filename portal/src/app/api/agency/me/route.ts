@@ -7,12 +7,14 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { AGENCY_ROLE_PERMISSIONS, canAccessCRM, getIncludedSeats, getMaxCars, getPlanFeatures, getPlanLabel } from "@/lib/plans";
+import { ALL_SECTIONS, hasSection } from "@/lib/sections";
 
 const EXCLUDED_STATUSES = ["deleted", "rejected", "rejected_limit", "blocked", "sold", "a_preparar"];
 
 export const GET = withApiErrors(async (request) => {
   const uid = await requireUid(request);
-  const { agencyId, role: myRole } = await resolveMembership(uid);
+  const membership = await resolveMembership(uid);
+  const { agencyId, role: myRole } = membership;
 
   // Datos de plan/nombre/logo viven en la cuenta del dueño (agencyId), no en la
   // del miembro que consulta — un vendedor invitado no tiene plan propio.
@@ -47,6 +49,7 @@ export const GET = withApiErrors(async (request) => {
       id: d.id,
       email: data.email,
       role: data.role,
+      sections: data.sections ?? null,
       createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
     };
   });
@@ -105,5 +108,6 @@ export const GET = withApiErrors(async (request) => {
     myUid: uid,
     myRole,
     myPermissions: AGENCY_ROLE_PERMISSIONS[myRole],
+    mySections: ALL_SECTIONS.filter((s) => hasSection(membership, s)),
   });
 });

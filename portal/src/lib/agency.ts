@@ -1,9 +1,11 @@
 // portal/src/lib/agency.ts
 import { AgencyRole, AgencyRolePermissions } from "@/lib/plans";
+import { SectionKey } from "@/lib/sections";
 
 export interface AgencyMember {
   uid: string;
   role: string;
+  sections?: SectionKey[] | null;
   email?: string | null;
   name?: string;
   isImplicitOwner?: boolean;
@@ -13,6 +15,7 @@ export interface PendingInvite {
   id: string;
   email: string;
   role: string;
+  sections?: SectionKey[] | null;
   createdAt: string | null;
 }
 
@@ -41,4 +44,5 @@ export interface AgencyMe {
   myUid: string;
   myRole: AgencyRole;
   myPermissions: AgencyRolePermissions;
+  mySections: SectionKey[];
 }

@@ -16,13 +16,15 @@ import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { getUsdToArsRateServer } from "@/lib/exchange-rate";
 import { adminDb } from "@/lib/firebase-admin";
-import { AGENCY_ROLE_PERMISSIONS, canTrackExpenses } from "@/lib/plans";
+import { canTrackExpenses } from "@/lib/plans";
+import { hasSection } from "@/lib/sections";
 
 export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agency/vehicles/[id]/purchase-price">) => {
   const uid = await requireUid(request);
-  const { agencyId, role } = await resolveMembership(uid);
-  if (!AGENCY_ROLE_PERMISSIONS[role].manageStock) {
-    return Response.json({ error: "Tu rol no tiene permiso para editar el stock." }, { status: 403 });
+  const membership = await resolveMembership(uid);
+  const { agencyId } = membership;
+  if (!hasSection(membership, "costos")) {
+    return Response.json({ error: "No tenés acceso a esta sección." }, { status: 403 });
   }
 
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();

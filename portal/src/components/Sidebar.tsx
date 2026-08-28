@@ -8,26 +8,27 @@ import { Avatar } from "@/components/Avatar";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useAdminRole } from "@/hooks/useAdminRole";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
+import { SectionKey } from "@/lib/sections";
 
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "http://localhost:3100";
 
 type Gate = "none" | "crm";
 
-const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; gate: Gate }[] = [
+const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; gate: Gate; sectionKey?: SectionKey }[] = [
   { label: "Mi Agencia", href: "/dashboard", icon: "🏠", enabled: true, gate: "none" },
   { label: "Configurar agencia", href: "/dashboard/profile", icon: "🏷️", enabled: true, gate: "none" },
   { label: "Equipo", href: "/dashboard/team", icon: "👥", enabled: true, gate: "none" },
-  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, gate: "none" },
-  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm" },
-  { label: "Operaciones", href: "/dashboard/operaciones", icon: "📋", enabled: true, gate: "crm" },
-  { label: "Postventa", href: "/dashboard/postventa", icon: "🔄", enabled: true, gate: "crm" },
+  { label: "Stock", href: "/dashboard/stock", icon: "🚗", enabled: true, gate: "none", sectionKey: "stock" },
+  { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm", sectionKey: "leads" },
+  { label: "Operaciones", href: "/dashboard/operaciones", icon: "📋", enabled: true, gate: "crm", sectionKey: "operaciones" },
+  { label: "Postventa", href: "/dashboard/postventa", icon: "🔄", enabled: true, gate: "crm", sectionKey: "postventa" },
   // Comisiones ya es universal (canManageCommissions = cualquier plan pago,
   // ver plans.ts) -- mismo gate "crm" que el resto del CRM, no "dealer"
   // (ese gate quedaba mostrando "🔒 Dealer" a Pro/Pro Plus aunque la
   // pantalla ya los dejaba entrar).
-  { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "crm" },
-  { label: "Costos", href: "/dashboard/costos", icon: "💵", enabled: true, gate: "crm" },
-  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none" },
+  { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "crm", sectionKey: "comisiones" },
+  { label: "Costos", href: "/dashboard/costos", icon: "💵", enabled: true, gate: "crm", sectionKey: "costos" },
+  { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none", sectionKey: "reportes" },
   { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
 ];
 
@@ -40,7 +41,14 @@ export function Sidebar() {
   const { isModerator } = useAdminRole();
   const router = useRouter();
   const pathname = usePathname();
-  const navItems = isModerator ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  // Mientras no cargó agency todavía se muestra todo (evita un parpadeo de
+  // menú vacío) — una vez que llega mySections, se esconden las secciones
+  // que esta persona no tiene habilitadas (no solo un candado, directamente
+  // no aparecen).
+  const visibleItems = agency
+    ? NAV_ITEMS.filter((item) => !item.sectionKey || agency.mySections.includes(item.sectionKey))
+    : NAV_ITEMS;
+  const navItems = isModerator ? [...visibleItems, ADMIN_NAV_ITEM] : visibleItems;
 
   const handleLogout = async () => {
     await logout();
