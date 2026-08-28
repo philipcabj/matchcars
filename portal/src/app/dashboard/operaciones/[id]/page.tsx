@@ -270,9 +270,22 @@ export default function OperationDetailPage() {
                   ) {
                     return;
                   }
+                  // Si el auto todavía no se marcó vendido (no se usó el botón
+                  // del lead), "Completar" acá también lo hace — antes eran
+                  // dos acciones sin conexión y quedaba publicado para
+                  // siempre. Avisamos porque es un efecto más grande que
+                  // "cerrar el checklist".
+                  const notSoldYet = op.vehicleStatus !== "sold" && op.vehicleStatus !== "reserved";
+                  if (
+                    notSoldYet &&
+                    !confirm("Esto también va a marcar el auto como vendido (y avisarle al comprador, si tiene cuenta). ¿Continuar?")
+                  ) {
+                    return;
+                  }
                   await patch({ action: "set_status", status: "completada" });
                   refresh();
                 }}
+                title="Marca la operación como terminada y, si todavía no pasó, también el auto como vendido"
                 className="rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white"
               >
                 Completar

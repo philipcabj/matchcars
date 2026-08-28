@@ -20,11 +20,9 @@ import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
 import { calculateCommission, CommissionRule, DEFAULT_COMMISSION_RULE } from "@/lib/commissions";
 import { LEAD_STATUS_LABELS, LeadStatus } from "@/lib/leads";
-import { sendNotificationEmail } from "@/lib/notify-mail";
-import { sendPushNotification } from "@/lib/notify-push";
+import { markVehicleSold } from "@/lib/mark-vehicle-sold";
 import { AGENCY_ROLE_PERMISSIONS, canManageCommissions } from "@/lib/plans";
 import { FieldValue } from "firebase-admin/firestore";
-import { randomUUID } from "node:crypto";
 
 const TERMINAL_OFFER_STATUSES = ["rejected", "withdrawn", "expired"];
 
@@ -257,110 +255,12 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
     if (current !== "won") {
       return Response.json({ error: "Este lead todavía no está marcado como vendido." }, { status: 400 });
     }
-    if (!lead.vehicleId) {
-      return Response.json({ error: "Este lead no tiene un auto del stock asociado." }, { status: 400 });
-    }
-    const vehicleRef = adminDb.doc(`vehicles/${lead.vehicleId}`);
-    const saleRef = adminDb.doc(`sales/${lead.vehicleId}`);
-    const offerRef = lead.offer?.id ? adminDb.doc(`offers/${lead.offer.id}`) : null;
-    // Con comprador real, el auto queda "reserved" (no "sold" todavía) hasta
-    // que confirme la recepción desde el chat de la app — mismo criterio que
-    // handleMarkAsSold en chat/[uid].tsx. Sin comprador (lead manual) no hay
-    // quién confirme, así que se cierra directo como antes.
-    const pendingConfirmation = !!lead.buyerId;
-    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-    // Token para el QR de confirmación de entrega en persona — cualquiera
-    // que tenga este link puede confirmar esta venta puntual, sin necesitar
-    // sesión propia (el comprador puede no tener la app abierta/logueada en
-    // el momento de la entrega). Alcanza con la posesión del QR, igual
-    // criterio que un link de descarga con token de Storage.
-    const deliveryConfirmToken = pendingConfirmation ? randomUUID() : null;
-
-    // Comisión (Módulo C) — solo si hay un vendedor asignado distinto del
-    // dueño (el dueño no se paga comisión a sí mismo) y el plan la incluye.
-    // Se calcula acá, no después, para que quede una foto fija de la regla
-    // vigente al momento del cierre — si la agencia cambia la regla más
-    // adelante, no debería recalcular ventas ya cerradas.
-    const dealPrice = lead.dealPrice || 0;
-    const dealCurrency = lead.dealCurrency || "ARS";
-    let commission: { sellerUid: string; amount: number; currency: string; margin: number | null; rule: CommissionRule } | null = null;
-    if (lead.assignedTo && lead.assignedTo !== agencyId) {
-      const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
-      if (canManageCommissions(ownerSnap.data()?.plan || "free")) {
-        const ruleSnap = await adminDb.doc(`agencies/${agencyId}/settings/commissionRule`).get();
-        const rule: CommissionRule = ruleSnap.exists ? (ruleSnap.data() as CommissionRule) : DEFAULT_COMMISSION_RULE;
-        // margin en null si no se cargó costo de compra — no se asume 0 de
-        // costo (sobreestimaría el margen), simplemente esa regla no aplica.
-        const vehicleForMargin = await vehicleRef.get();
-        const purchasePrice = vehicleForMargin.data()?.purchasePrice;
-        const expensesTotal = vehicleForMargin.data()?.expensesTotal || 0;
-        const margin = typeof purchasePrice === "number" ? dealPrice - purchasePrice - expensesTotal : null;
-        commission = {
-          sellerUid: lead.assignedTo,
-          amount: calculateCommission(rule, dealPrice, margin),
-          currency: dealCurrency,
-          margin,
-          rule,
-        };
-      }
-    }
-
-    await adminDb.runTransaction(async (t) => {
-      const vehicleSnap = await t.get(vehicleRef);
-      if (!vehicleSnap.exists) throw new Error("El auto ya no existe.");
-      if (vehicleSnap.data()?.status === "sold") throw new Error("Este auto ya está marcado como vendido.");
-      t.update(vehicleRef, {
-        status: pendingConfirmation ? "reserved" : "sold",
-        published: false,
-        soldAt: FieldValue.serverTimestamp(),
-        ...(offerRef ? { soldViaOfferId: lead.offer.id } : {}),
-      });
-      if (offerRef) t.update(offerRef, { vehicleSold: true });
-      t.set(
-        saleRef,
-        {
-          vehicleId: lead.vehicleId,
-          sellerId: agencyId,
-          buyerId: lead.buyerId || "",
-          finalPrice: dealPrice,
-          currency: dealCurrency,
-          soldAt: FieldValue.serverTimestamp(),
-          source: "matchcars",
-          vehicleSnapshot: lead.vehicleSnapshot ?? {},
-          confirmedByBuyer: pendingConfirmation ? null : true,
-          ...(pendingConfirmation ? { buyerConfirmDeadline: deadline, deliveryConfirmToken } : { confirmedAt: FieldValue.serverTimestamp() }),
-          ...(commission ? { commission } : {}),
-        },
-        { merge: true }
-      );
-    });
-
-    if (lead.buyerId) {
-      const carModel = `${lead.vehicleSnapshot?.brand ?? ""} ${lead.vehicleSnapshot?.model ?? ""}`.trim();
-      sendNotificationEmail("vehicle_sold", {
-        recipientUid: lead.buyerId,
-        senderName: "MatchCars",
-        subject: `Confirmá la recepción de tu ${carModel}`,
-        carModel,
-      }).catch(() => {});
-      const buyerSnap = await adminDb.doc(`users/${lead.buyerId}`).get();
-      const pushToken = buyerSnap.data()?.pushToken;
-      if (pushToken) {
-        sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {}).catch(() => {});
-      }
-    }
-
-    await logActivity({
-      agencyId,
-      actorUid: uid,
-      entityType: "lead",
-      entityId: id,
-      summary: pendingConfirmation
-        ? `Marcó ${carLabel()} como vendido — esperando confirmación del comprador`
-        : `Marcó ${carLabel()} como vendido y entregado`,
-    });
-
-    return Response.json({ ok: true, deliveryConfirmToken });
+    // Extraído a lib/mark-vehicle-sold.ts para poder dispararse también
+    // desde "Completar" en una saleOperation (Módulo A) sin duplicar la
+    // transacción/comisión/notificación al comprador.
+    const result = await markVehicleSold(agencyId, uid, id);
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+    return Response.json({ ok: true, deliveryConfirmToken: result.deliveryConfirmToken });
   }
 
   // Recalcula la comisión de una venta ya cerrada usando el vendedor actual

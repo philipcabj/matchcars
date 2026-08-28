@@ -8,6 +8,7 @@ import { withApiErrors } from "@/lib/api-handler";
 import { logActivity } from "@/lib/activity-log";
 import { requireCRMAccess, resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
+import { markVehicleSold } from "@/lib/mark-vehicle-sold";
 import { sendNotificationEmail } from "@/lib/notify-mail";
 import { buildSaleDocumentData, uploadSaleDocumentPdf } from "@/lib/pdf/sale-document-service";
 import { renderSaleDocumentPdf, SaleDocumentTipo } from "@/lib/pdf/render-sale-document";
@@ -433,6 +434,25 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
 
   if (action === "set_status") {
     const status = body.status === "completada" ? "completada" : body.status === "cancelada" ? "cancelada" : "en_curso";
+
+    // "Completar" acá y "marcar vendido" en el lead eran dos acciones sin
+    // ninguna conexión — se podía terminar todo el checklist de la
+    // operación y el auto seguía publicado, sin que el comprador se
+    // enterara de nada. Si todavía no se vendió, se dispara acá mismo
+    // (mismo helper que usa el lead) antes de cerrar la operación.
+    let deliveryConfirmToken: string | null = null;
+    if (status === "completada" && op.vehicleId) {
+      const vehicleSnap = await adminDb.doc(`vehicles/${op.vehicleId}`).get();
+      const vehicleStatus = vehicleSnap.data()?.status;
+      if (vehicleStatus !== "sold" && vehicleStatus !== "reserved") {
+        const result = await markVehicleSold(agencyId, uid, op.leadId);
+        if (!result.ok) {
+          return Response.json({ error: `No se pudo marcar el auto como vendido: ${result.error}` }, { status: result.status });
+        }
+        deliveryConfirmToken = result.deliveryConfirmToken;
+      }
+    }
+
     await ref.update({ status, updatedAt: FieldValue.serverTimestamp() });
     const carLabel = `${op.vehicleSnapshot?.brand ?? ""} ${op.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
     await logActivity({
@@ -442,7 +462,7 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       entityId: id,
       summary: status === "completada" ? `Marcó la operación de ${carLabel} como completada` : `Canceló la operación de ${carLabel}`,
     });
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, deliveryConfirmToken });
   }
 
   return Response.json({ error: "Acción inválida." }, { status: 400 });
