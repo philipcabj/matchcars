@@ -126,6 +126,24 @@ export async function markVehicleSold(agencyId: string, actorUid: string, leadId
     if (pushToken) {
       sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {}).catch(() => {});
     }
+    // El email puede caer en spam y no siempre hay un chat previo con el
+    // vendedor (leads del CRM cargados a mano no tienen conversación en la
+    // app) — sin esto, "Confirmar recepción" quedaba sin ningún aviso
+    // visible dentro de la app. Mismo mecanismo que ya usa mycars.tsx para
+    // avisar "Calificá tu experiencia", leído por Notificaciones > Alertas
+    // y por Perfil > Mis compras.
+    adminDb
+      .collection(`users/${lead.buyerId}/rating_notifications`)
+      .add({
+        type: "confirm_delivery",
+        title: "Confirmá tu compra",
+        message: `El vendedor marcó tu ${carModel} como entregado. Confirmá la recepción desde "Mis compras" en tu perfil.`,
+        vehicleId: lead.vehicleId,
+        sellerId: agencyId,
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+      .catch(() => {});
   }
 
   await logActivity({

@@ -8,6 +8,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
+import { sendNotificationEmail } from "@/lib/mail";
+import { sendPushNotification } from "@/lib/notifications";
 import { analyzeMarketPrice } from "@/lib/pricing";
 import { canAccessCRM, isDealerPlan } from "@/lib/planChecks";
 import { fetchDealerReportData, generateCSV, generatePDF, shareFile } from "@/lib/reporting";
@@ -17,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, doc, documentId, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, documentId, getDoc, getDocs, query, runTransaction, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { formatNumber } from "@/utils/format";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -447,6 +449,50 @@ export default function ProfileScreen() {
       if (user) fetchTransactions();
     }, [user, fetchTransactions])
   );
+
+  const [confirmingReceiptId, setConfirmingReceiptId] = useState<string | null>(null);
+
+  // Cierra el paso "confirmar recepción" para compras que vienen de una
+  // venta cerrada desde el portal/CRM (sin un chat con oferta de por
+  // medio, ver mark-vehicle-sold.ts) — antes solo existía este paso dentro
+  // del chat, así que si el comprador y el vendedor nunca chatearon en la
+  // app, el comprador no tenía ningún lugar donde confirmar ni calificar.
+  const handleConfirmReceipt = async (purchase: any) => {
+    if (!purchase.vehicleId || !user?.uid || confirmingReceiptId) return;
+    setConfirmingReceiptId(purchase.id);
+    try {
+      const vehicleRef = doc(db, "vehicles", purchase.vehicleId);
+      const saleRef = doc(db, "sales", purchase.vehicleId);
+      await runTransaction(db, async (t) => {
+        t.update(vehicleRef, { status: "sold" });
+        t.update(saleRef, { confirmedByBuyer: true, confirmedAt: serverTimestamp() });
+      });
+      setPurchases((prev) =>
+        prev.map((p) => (p.id === purchase.id ? { ...p, confirmedByBuyer: true } : p))
+      );
+      showAlert("¡Gracias!", "Venta confirmada. Ahora podés calificar al vendedor.", "success");
+      if (purchase.sellerId) {
+        const carModel = `${purchase.vehicleSnapshot?.brand ?? ""} ${purchase.vehicleSnapshot?.model ?? ""}`.trim();
+        sendNotificationEmail("vehicle_sold", {
+          recipientUid: purchase.sellerId,
+          senderName: "MatchCars",
+          subject: `¡Venta confirmada! ${carModel}`,
+          carModel,
+        }).catch(() => {});
+        try {
+          const sellerSnap = await getDoc(doc(db, "users", purchase.sellerId));
+          const sellerPushToken = sellerSnap.data()?.pushToken;
+          if (sellerPushToken) {
+            sendPushNotification(sellerPushToken, "¡Venta confirmada!", `El comprador confirmó la recepción de ${carModel}.`, {});
+          }
+        } catch {}
+      }
+    } catch (err: any) {
+      showAlert("Error", err?.message ?? "No se pudo confirmar.", "error");
+    } finally {
+      setConfirmingReceiptId(null);
+    }
+  };
 
   const openRatingModal = (purchase: any) => {
     setSelectedPurchase(purchase);
@@ -1106,6 +1152,18 @@ export default function ProfileScreen() {
                                 <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(purchase.ratingByBuyer?.score ?? purchase.rating)}</Text>
                                 <Text style={{ color: theme.textMuted, fontSize: 12, marginLeft: 4 }}>Calificado</Text>
                             </View>
+                        ) : purchase.confirmedByBuyer === null ? (
+                            <TouchableOpacity
+                                onPress={() => handleConfirmReceipt(purchase)}
+                                disabled={confirmingReceiptId === purchase.id}
+                                style={{ marginTop: 8, backgroundColor: theme.accent, padding: 8, borderRadius: 8, alignItems: "center", opacity: confirmingReceiptId === purchase.id ? 0.6 : 1 }}
+                            >
+                                {confirmingReceiptId === purchase.id ? (
+                                    <ActivityIndicator color="#FFF" size="small" />
+                                ) : (
+                                    <Text style={{ color: "#FFF", fontSize: 12, fontWeight: "700" }}>Confirmar recepción</Text>
+                                )}
+                            </TouchableOpacity>
                         ) : (
                             <TouchableOpacity
                                 onPress={() => openRatingModal(purchase)}
