@@ -1,6 +1,7 @@
 // portal/src/app/dashboard/stock/page.tsx
 "use client";
 
+import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
@@ -163,11 +164,10 @@ function PriceEditor({ vehicle, onSaved }: { vehicle: VehicleListItem; onSaved: 
 
   return (
     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <input
-        type="number"
+      <ThousandsInput
         autoFocus
         value={price}
-        onChange={(e) => setPrice(e.target.value)}
+        onChange={setPrice}
         onKeyDown={(e) => e.key === "Enter" && save()}
         className="w-24 rounded-md border border-accent bg-background px-1.5 py-0.5 text-xs"
       />
@@ -509,20 +509,18 @@ export default function StockPage() {
                 </button>
                 {showPriceRange && (
                   <>
-                    <input
-                      type="number"
+                    <ThousandsInput
                       value={priceMin}
-                      onChange={(e) => setPriceMin(e.target.value)}
+                      onChange={setPriceMin}
                       placeholder="Mín."
-                      className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                      className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
                     />
                     <span className="text-xs text-muted-foreground">a</span>
-                    <input
-                      type="number"
+                    <ThousandsInput
                       value={priceMax}
-                      onChange={(e) => setPriceMax(e.target.value)}
+                      onChange={setPriceMax}
                       placeholder="Máx."
-                      className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
+                      className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-xs"
                     />
                     {(priceMin || priceMax) && (
                       <button

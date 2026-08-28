@@ -3,6 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
 import { useEffect, useState } from "react";
+import { ThousandsInput } from "./ThousandsInput";
 
 const EXPENSE_TYPE_LABELS: Record<string, string> = {
   compra: "Compra",
@@ -144,12 +145,10 @@ export function CostsCard({
       <div className="mb-3 flex items-end gap-2">
         <label className="flex flex-1 flex-col gap-1 text-sm">
           <span className="text-xs text-muted-foreground">Costo de compra ({currency})</span>
-          <input
-            type="number"
-            min={0}
+          <ThousandsInput
             className={inputClass}
             value={priceInput}
-            onChange={(e) => setPriceInput(e.target.value)}
+            onChange={setPriceInput}
             placeholder="Sin cargar"
           />
         </label>
@@ -193,13 +192,11 @@ export function CostsCard({
               </option>
             ))}
           </select>
-          <input
-            type="number"
-            min={0}
+          <ThousandsInput
             placeholder={`Monto (${currency})`}
             className={inputClass}
             value={newExpense.monto}
-            onChange={(e) => setNewExpense({ ...newExpense, monto: e.target.value })}
+            onChange={(v) => setNewExpense({ ...newExpense, monto: v })}
           />
           <input
             placeholder="Descripción (opcional)"

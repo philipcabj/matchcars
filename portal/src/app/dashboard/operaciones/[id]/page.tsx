@@ -1113,11 +1113,11 @@ function FinancingSection({
       <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Precio total</span>
-          <input type="number" className={inputClass} value={precioTotal} onChange={(e) => setPrecioTotal(e.target.value)} />
+          <ThousandsInput className={inputClass} value={precioTotal} onChange={setPrecioTotal} />
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Anticipo</span>
-          <input type="number" className={inputClass} value={anticipo} onChange={(e) => setAnticipo(e.target.value)} />
+          <ThousandsInput className={inputClass} value={anticipo} onChange={setAnticipo} />
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">Cuotas</span>

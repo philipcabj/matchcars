@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { parseJsonResponse } from "@/lib/api-client";
 import { COMMISSION_TYPE_LABELS, CommissionRule, CommissionRuleType } from "@/lib/commissions";
+import { ThousandsInput } from "@/components/ThousandsInput";
 import { useEffect, useMemo, useState } from "react";
 
 interface CommissionEntryRow {
@@ -174,14 +175,22 @@ export default function ComisionesPage() {
               {editingRule.tipo !== "escalonado" && (
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium">{editingRule.tipo === "fijo" ? "Monto fijo" : "Porcentaje"}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.1"
-                    className={inputClass}
-                    value={editingRule.valor}
-                    onChange={(e) => setEditingRule({ ...editingRule, valor: Number(e.target.value) })}
-                  />
+                  {editingRule.tipo === "fijo" ? (
+                    <ThousandsInput
+                      className={inputClass}
+                      value={String(editingRule.valor)}
+                      onChange={(v) => setEditingRule({ ...editingRule, valor: Number(v) || 0 })}
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.1"
+                      className={inputClass}
+                      value={editingRule.valor}
+                      onChange={(e) => setEditingRule({ ...editingRule, valor: Number(e.target.value) })}
+                    />
+                  )}
                 </label>
               )}
 
@@ -189,25 +198,23 @@ export default function ComisionesPage() {
                 <div className="flex flex-col gap-2">
                   {editingRule.escalones.map((tier, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <input
-                        type="number"
+                      <ThousandsInput
                         placeholder="Desde"
                         className={`${inputClass} w-28`}
-                        value={tier.desde}
-                        onChange={(e) => {
+                        value={String(tier.desde)}
+                        onChange={(v) => {
                           const next = [...editingRule.escalones];
-                          next[i] = { ...tier, desde: Number(e.target.value) };
+                          next[i] = { ...tier, desde: Number(v) || 0 };
                           setEditingRule({ ...editingRule, escalones: next });
                         }}
                       />
-                      <input
-                        type="number"
+                      <ThousandsInput
                         placeholder="Hasta (vacío = sin techo)"
                         className={`${inputClass} w-40`}
-                        value={tier.hasta ?? ""}
-                        onChange={(e) => {
+                        value={tier.hasta != null ? String(tier.hasta) : ""}
+                        onChange={(v) => {
                           const next = [...editingRule.escalones];
-                          next[i] = { ...tier, hasta: e.target.value === "" ? null : Number(e.target.value) };
+                          next[i] = { ...tier, hasta: v === "" ? null : Number(v) };
                           setEditingRule({ ...editingRule, escalones: next });
                         }}
                       />

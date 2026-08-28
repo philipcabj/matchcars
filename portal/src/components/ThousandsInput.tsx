@@ -15,12 +15,14 @@ export function ThousandsInput({
   className,
   placeholder,
   autoFocus,
+  onKeyDown,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
   placeholder?: string;
   autoFocus?: boolean;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   return (
     <input
@@ -31,6 +33,7 @@ export function ThousandsInput({
       value={formatThousands(value)}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))}
+      onKeyDown={onKeyDown}
     />
   );
 }
