@@ -419,12 +419,15 @@ export default function ProfileScreen() {
             } catch { /* silent — show all if lookup fails */ }
           }
           if (vehicleStatuses.size > 0) {
-            pendingPurchases = pendingPurchases.filter(
-              (i: any) => vehicleStatuses.get(i.vehicleId) === "sold"
-            );
-            pendingSales = pendingSales.filter(
-              (i: any) => vehicleStatuses.get(i.vehicleId) === "sold"
-            );
+            // "reserved" = venta ya cerrada, esperando que el comprador
+            // confirme la recepción — sigue siendo una venta válida, no
+            // una reactivación del auto (eso sería "available" de nuevo).
+            const isFinalized = (vid: string) => {
+              const s = vehicleStatuses.get(vid);
+              return s === "sold" || s === "reserved";
+            };
+            pendingPurchases = pendingPurchases.filter((i: any) => isFinalized(i.vehicleId));
+            pendingSales = pendingSales.filter((i: any) => isFinalized(i.vehicleId));
           }
         }
 
@@ -1197,6 +1200,11 @@ export default function ProfileScreen() {
                             <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                                 Precio Final: {sale.currency} {formatNumber(sale.finalPrice)}
                             </Text>
+                            {sale.confirmedByBuyer === null && (
+                                <Text style={{ color: "#F59E0B", fontSize: 12, marginTop: 4, fontWeight: "600" }}>
+                                    Pendiente de confirmación del comprador
+                                </Text>
+                            )}
                             {(sale.ratingByBuyer?.score ?? sale.rating) ? (
                                 <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
                                     <Text style={{ color: "#F59E0B", fontSize: 12 }}>{'★'.repeat(sale.ratingByBuyer?.score ?? sale.rating)}</Text>
