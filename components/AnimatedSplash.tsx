@@ -236,8 +236,8 @@ export default function AnimatedSplash({ onFinish, appReady = true }: Props) {
             marginTop: 10,
           }}
         >
-          <Text style={styles.word}>MATCH</Text>
-          <Text style={styles.word}>CARS</Text>
+          <Text style={[styles.word, Platform.OS === 'android' && styles.wordBoxAndroid]}>MATCH</Text>
+          <Text style={[styles.word, Platform.OS === 'android' && styles.wordBoxAndroid]}>CARS</Text>
         </Animated.View>
 
         <Animated.View
@@ -288,17 +288,22 @@ const styles = StyleSheet.create({
     fontSize: 46,
     lineHeight: 44,
     color: BRAND.white,
-    // El paddingRight no tuvo ningún efecto (probado) — Android recorta el
-    // texto según el ancho medido por StaticLayout, que no incluye el
-    // padding del View. Lo que sí importa es el letterSpacing: Android
-    // suma ese espaciado también DESPUÉS del último carácter (a diferencia
-    // de como se ve en iOS), así que con -1 el "colchón" final quedaba en
-    // negativo y el trazo itálico de la última letra (H de MATCH, S de
-    // CARS) se recortaba. En Android se neutraliza a 0; en iOS se deja
-    // igual que antes porque ahí nunca hubo problema.
-    letterSpacing: Platform.OS === 'android' ? 0 : -1,
+    letterSpacing: -1,
     fontStyle: 'italic',
     fontWeight: '900',
+  },
+  // Ni el paddingRight ni el letterSpacing:0 sacaron el recorte en Android
+  // (probados en dispositivo, sin efecto) — ninguno de los dos cambia el
+  // ancho que Android usa internamente para armar el StaticLayout del
+  // texto, que es lo que definitivamente determina dónde se corta. Achicar
+  // el "colchón" no alcanza: hay que agrandar el layout a la fuerza con un
+  // width explícito bien de sobra + textAlign:center, así el trazo itálico
+  // de la última letra (H de MATCH, S de CARS) tiene espacio real adentro
+  // de la caja medida, no solo alrededor. Solo en Android — en iOS nunca
+  // hubo problema y agregar esto ahí solo podía introducir uno nuevo.
+  wordBoxAndroid: {
+    width: 260,
+    textAlign: 'center',
   },
   chainRow: {
     flexDirection: 'row',
