@@ -3,11 +3,13 @@ import { db } from "./firebase";
 
 const APP_NAME = "MatchCars";
 const ACCENT_COLOR = "#00A3FF";
-// Ojo: "(admin)" es sintaxis de grupo de Expo Router y probablemente no
-// debería aparecer tal cual en la URL final — no lo toco acá porque excede
-// el alcance de este fix (agregar el prefijo /app), pero puede que este
-// link ya estuviera roto de antes.
-const APP_URL = "https://matchcars.app/app";
+// /app proxeaba al sitio legacy (export web de Expo), que quedó
+// desactualizado — ya no tiene sentido mandar a nadie ahí (ver mismo cambio
+// en lib/mail.ts). Ojo aparte: "(admin)" más abajo es sintaxis de grupo de
+// Expo Router y probablemente no debería aparecer tal cual en la URL final
+// — ese link a "${APP_URL}/(admin)/dashboard?..." ya estaba roto de antes
+// por eso solo, no se toca acá.
+const APP_URL = "https://matchcars.app";
 
 function buildAdminTemplate(title: string, rows: { label: string; value: string }[], ctaLink: string): string {
   const rowsHtml = rows

@@ -39,9 +39,14 @@ function escapeHtml(str: string): string {
 
 const APP_NAME = "MatchCars";
 const ACCENT_COLOR = "#00A3FF";
-// La app transaccional (chat, ofertas, etc.) vive bajo /app — matchcars.app
-// pasó a ser el marketplace de solo lectura.
-const APP_URL = "https://matchcars.app/app";
+// /app proxeaba al sitio legacy (export web de Expo) — quedó desactualizado
+// ("la web vieja") y ni chat ni ofertas funcionan bien ahí, así que ya no
+// tiene sentido mandar a nadie ahí. Universal Links (ver
+// public/.well-known/apple-app-site-association) solo cubren /car,
+// /user-profile, /match y /confirmar-entrega — no hay todavía un path para
+// abrir el chat/ofertas directo en la app, así que esto cae en la home del
+// marketplace nuevo hasta que se arme ese deep link.
+const APP_URL = "https://matchcars.app";
 const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
 const APPLE_URL = "https://apps.apple.com/app/id6757968664";
 

@@ -175,6 +175,14 @@ export default function OperationDetailPage() {
     setOp((prev) => (prev ? { ...prev, checklist: prev.checklist.map((c) => (c.key === key ? { ...c, ...patch } : c)) } : prev));
   };
 
+  // Mismo criterio que arriba, para lo que alimenta los chips de SaleJourney
+  // (forma de pago, parte de pago) — sin esto, confirmar algo ahí abajo no se
+  // veía reflejado arriba hasta el próximo refresh completo, y parecía que
+  // "solo el checklist" reaccionaba a lo que se tildaba.
+  const updateOpLocally = (patch: Partial<SaleOperation>) => {
+    setOp((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   // Snapshot con todo el detalle de la operación (forma de pago,
   // financiación, parte de pago, checklist, entrega) — a diferencia del
   // boleto/recibo, no queda atado a ningún paso del checklist, se puede
@@ -236,7 +244,7 @@ export default function OperationDetailPage() {
           {op.assignedTo && <p className="text-xs text-muted-foreground">Vendedor: {memberName(op.assignedTo)}</p>}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground">{doneCount}/{op.checklist.length} pasos</span>
+          <span className="text-xs font-semibold text-muted-foreground">Documentación: {doneCount}/{op.checklist.length}</span>
           <button
             onClick={downloadRecord}
             disabled={downloadingRecord}
@@ -294,7 +302,7 @@ export default function OperationDetailPage() {
 
       <SaleJourney op={op} />
 
-      <PaymentStructureSection op={op} onChanged={refresh} patch={patch} />
+      <PaymentStructureSection op={op} onChanged={refresh} patch={patch} onOptimisticUpdate={updateOpLocally} />
 
       {op.status === "en_curso" && (
         <div
@@ -319,6 +327,12 @@ export default function OperationDetailPage() {
       {error && <p className="text-sm text-error">{error}</p>}
 
       <div id="checklist" className="scroll-mt-4">
+        <div className="mb-2">
+          <p className="text-sm font-semibold">Documentación y trámites</p>
+          <p className="text-xs text-muted-foreground">
+            Los pasos puntuales de esta venta — forma de pago y parte de pago se gestionan aparte, más abajo.
+          </p>
+        </div>
         <ChecklistSection
           op={op}
           agency={agency}
@@ -342,7 +356,7 @@ export default function OperationDetailPage() {
           initialPrecioTotal={restanteACubrir}
         />
         <div id="parte-de-pago" className="scroll-mt-4">
-          <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} />
+          <TradeInSection op={op} agency={agency} onChanged={refresh} patch={patch} userId={user?.uid ?? ""} onOptimisticUpdate={updateOpLocally} />
         </div>
       </div>
     </div>
@@ -484,6 +498,11 @@ function ChecklistSection({
   const [senaPrompt, setSenaPrompt] = useState(false);
   const [senaMonto, setSenaMonto] = useState("");
   const [senaCurrency, setSenaCurrency] = useState<"ARS" | "USD">((op.vehicleSnapshot?.currency as "ARS" | "USD") || "ARS");
+  // Flujo secuencial a propósito: primero se genera el recibo, y recién ahí
+  // aparece la opción de enviarlo a firmar — no dos botones en paralelo sin
+  // orden claro. Se resetea si cambia el monto (ya no sería el mismo
+  // documento que se generó).
+  const [senaReadyToSend, setSenaReadyToSend] = useState(false);
   const { getIdToken } = useAuth();
 
   // Fase activa = la primera que tiene algún ítem pendiente — se expande
@@ -505,14 +524,14 @@ function ChecklistSection({
       onError(null);
       onChanged();
       window.open(data.url, "_blank");
+      if (tipo === "recibo_sena") setSenaReadyToSend(true);
     } catch (e) {
       onError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setGeneratingKey(null);
       // A propósito NO se cierra el prompt de seña ni se borra el monto acá
-      // — generar el PDF plano no significa que la agencia terminó con este
-      // paso, puede querer además "Enviar a firmar" con el mismo monto sin
-      // tener que volver a escribirlo.
+      // — recién generado es cuando tiene sentido "Enviar a firmar" (ver
+      // senaReadyToSend), no antes.
     }
   };
 
@@ -569,6 +588,16 @@ function ChecklistSection({
     } finally {
       setUploadingKey(null);
     }
+  };
+
+  // El backend ya soportaba esto (action "remove_attachment") pero no había
+  // ningún botón para usarlo — un PDF generado con un monto equivocado se
+  // quedaba pegado ahí para siempre, sin forma de sacarlo antes de generar
+  // uno nuevo.
+  const removeAttachment = async (item: ChecklistItem, url: string) => {
+    if (!confirm("¿Sacar este archivo del paso? No se puede deshacer.")) return;
+    await patch({ action: "remove_attachment", key: item.key, url });
+    onChanged();
   };
 
   const renderItem = (item: ChecklistItem) => {
@@ -648,7 +677,10 @@ function ChecklistSection({
               )}
               {item.key === "sena" && (
                 <button
-                  onClick={() => setSenaPrompt(true)}
+                  onClick={() => {
+                    setSenaPrompt(true);
+                    setSenaReadyToSend(false);
+                  }}
                   disabled={generatingKey === item.key}
                   className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
                 >
@@ -658,42 +690,54 @@ function ChecklistSection({
             </div>
 
             {item.key === "sena" && senaPrompt && (
-              <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background p-2">
-                <input
-                  type="number"
-                  autoFocus
-                  placeholder="Monto de la seña"
-                  value={senaMonto}
-                  onChange={(e) => setSenaMonto(e.target.value)}
-                  className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
-                />
-                <select
-                  value={senaCurrency}
-                  onChange={(e) => setSenaCurrency(e.target.value as "ARS" | "USD")}
-                  className="rounded-md border border-border bg-card px-2 py-1 text-xs"
-                >
-                  <option value="ARS">ARS</option>
-                  <option value="USD">USD</option>
-                </select>
-                <button
-                  onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
-                  disabled={!senaMonto || Number(senaMonto) <= 0}
-                  title="Descarga el PDF para imprimir/firmar en persona — no le manda nada al comprador"
-                  className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
-                >
-                  {generatingKey === item.key ? "Generando…" : "Descargar PDF"}
-                </button>
-                <button
-                  onClick={() => sendForSignature("sena", Number(senaMonto), senaCurrency)}
-                  disabled={!senaMonto || Number(senaMonto) <= 0 || sendingKey === item.key || !op.buyerContactEmail}
-                  title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : "Le manda el documento al comprador para que lo firme desde su portal"}
-                  className="rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
-                >
-                  {sendingKey === item.key ? "Enviando…" : "✍️ Enviar a firmar"}
-                </button>
-                <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
-                  Cancelar
-                </button>
+              <div className="mt-2 flex flex-col gap-2 rounded-md border border-border bg-background p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="number"
+                    autoFocus
+                    placeholder="Monto de la seña"
+                    value={senaMonto}
+                    onChange={(e) => {
+                      setSenaMonto(e.target.value);
+                      setSenaReadyToSend(false);
+                    }}
+                    className="w-28 rounded-md border border-border bg-card px-2 py-1 text-xs"
+                  />
+                  <select
+                    value={senaCurrency}
+                    onChange={(e) => {
+                      setSenaCurrency(e.target.value as "ARS" | "USD");
+                      setSenaReadyToSend(false);
+                    }}
+                    className="rounded-md border border-border bg-card px-2 py-1 text-xs"
+                  >
+                    <option value="ARS">ARS</option>
+                    <option value="USD">USD</option>
+                  </select>
+                  <button
+                    onClick={() => generateDocument("recibo_sena", item.key, Number(senaMonto), senaCurrency)}
+                    disabled={!senaMonto || Number(senaMonto) <= 0}
+                    title="Descarga el PDF para imprimir/firmar en persona — no le manda nada al comprador"
+                    className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-accent-foreground disabled:opacity-50"
+                  >
+                    {generatingKey === item.key ? "Generando…" : "1. Generar recibo"}
+                  </button>
+                  <button onClick={() => setSenaPrompt(false)} className="text-xs text-muted-foreground">
+                    Cancelar
+                  </button>
+                </div>
+                {senaReadyToSend ? (
+                  <button
+                    onClick={() => sendForSignature("sena", Number(senaMonto), senaCurrency)}
+                    disabled={sendingKey === item.key || !op.buyerContactEmail}
+                    title={!op.buyerContactEmail ? "Cargá un email de contacto del comprador para poder enviarlo a firmar" : "Le manda el documento al comprador para que lo firme desde su portal"}
+                    className="self-start rounded-md border border-success/40 bg-success/5 px-2 py-1 text-xs font-semibold text-success disabled:opacity-50"
+                  >
+                    {sendingKey === item.key ? "Enviando…" : "2. ✍️ Enviar a firmar"}
+                  </button>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">Generá el recibo primero — recién ahí se puede enviar a firmar.</p>
+                )}
               </div>
             )}
 
@@ -710,9 +754,14 @@ function ChecklistSection({
             {item.adjuntos.length > 0 && (
               <div className="mt-2 flex flex-col gap-1">
                 {item.adjuntos.map((a, i) => (
-                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">
-                    📎 {a.nombre}
-                  </a>
+                  <div key={i} className="flex items-center gap-2">
+                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-xs text-accent hover:underline">
+                      📎 {a.nombre}
+                    </a>
+                    <button onClick={() => removeAttachment(item, a.url)} className="text-xs text-error hover:underline">
+                      Sacar
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -772,10 +821,12 @@ function PaymentStructureSection({
   op,
   onChanged,
   patch,
+  onOptimisticUpdate,
 }: {
   op: SaleOperation;
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
+  onOptimisticUpdate: (patch: Partial<SaleOperation>) => void;
 }) {
   const [financieraNombre, setFinancieraNombre] = useState(op.financieraNombre ?? "");
   const [confirming, setConfirming] = useState(false);
@@ -785,13 +836,22 @@ function PaymentStructureSection({
   const resto = Math.max(0, vehiclePrice - tradeInValue);
 
   const setIncluyeUsado = async (incluye: boolean) => {
-    await patch({ action: "update_trade_in", incluye });
-    onChanged();
+    onOptimisticUpdate({ parteDePago: { ...op.parteDePago, incluye } });
+    try {
+      await patch({ action: "update_trade_in", incluye });
+    } catch {
+      onChanged();
+    }
   };
 
   const setMetodoPago = async (metodoPago: string) => {
-    await patch({ action: "update_metodo_pago", metodoPago, financieraNombre });
-    onChanged();
+    const metodoPagoChanged = metodoPago !== (op.metodoPago ?? null);
+    onOptimisticUpdate({ metodoPago: metodoPago as SaleOperation["metodoPago"], financieraNombre, metodoPagoConfirmado: metodoPagoChanged ? false : op.metodoPagoConfirmado });
+    try {
+      await patch({ action: "update_metodo_pago", metodoPago, financieraNombre });
+    } catch {
+      onChanged();
+    }
   };
 
   const confirmMetodoPago = async () => {
@@ -801,8 +861,10 @@ function PaymentStructureSection({
     }
     if (!confirm("¿Confirmar la forma de pago? Queda cerrada hasta que toques \"Editar\".")) return;
     setConfirming(true);
+    onOptimisticUpdate({ metodoPagoConfirmado: true });
     try {
       await patch({ action: "confirm_metodo_pago" });
+    } catch {
       onChanged();
     } finally {
       setConfirming(false);
@@ -810,8 +872,12 @@ function PaymentStructureSection({
   };
 
   const editMetodoPago = async () => {
-    await patch({ action: "update_metodo_pago", metodoPago: op.metodoPago, financieraNombre: op.financieraNombre, metodoPagoConfirmado: false });
-    onChanged();
+    onOptimisticUpdate({ metodoPagoConfirmado: false });
+    try {
+      await patch({ action: "update_metodo_pago", metodoPago: op.metodoPago, financieraNombre: op.financieraNombre, metodoPagoConfirmado: false });
+    } catch {
+      onChanged();
+    }
   };
 
   if (op.metodoPagoConfirmado) {
@@ -1075,12 +1141,14 @@ function TradeInSection({
   onChanged,
   patch,
   userId,
+  onOptimisticUpdate,
 }: {
   op: SaleOperation;
   agency: ReturnType<typeof useAgencyMe>["data"];
   onChanged: () => void;
   patch: (body: Record<string, unknown>) => Promise<void>;
   userId: string;
+  onOptimisticUpdate: (patch: Partial<SaleOperation>) => void;
 }) {
   const tradeIn = op.parteDePago;
   const [marca, setMarca] = useState(tradeIn.marca);
@@ -1141,8 +1209,12 @@ function TradeInSection({
         <p className="mb-3 text-xs text-muted-foreground">¿El comprador entrega un auto como parte del pago?</p>
         <button
           onClick={async () => {
-            await patch({ action: "update_trade_in", incluye: true });
-            onChanged();
+            onOptimisticUpdate({ parteDePago: { ...op.parteDePago, incluye: true } });
+            try {
+              await patch({ action: "update_trade_in", incluye: true });
+            } catch {
+              onChanged();
+            }
           }}
           className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-accent"
         >
@@ -1238,6 +1310,8 @@ function TradeInSection({
         tasadoPor: tasadoPor || null,
       });
       await patch({ action: "confirm_trade_in_price" });
+      onOptimisticUpdate({ parteDePago: { ...op.parteDePago, marca, modelo, version, anio: Number(anio) || null, km: Number(km) || null, estado, precioTomaFinal: val, tasadoPor: tasadoPor || null, precioTomaConfirmado: true } });
+    } catch {
       onChanged();
     } finally {
       setConfirmingPrice(false);
@@ -1245,8 +1319,12 @@ function TradeInSection({
   };
 
   const editPrice = async () => {
-    await patch({ action: "update_trade_in", incluye: true, precioTomaConfirmado: false });
-    onChanged();
+    onOptimisticUpdate({ parteDePago: { ...op.parteDePago, precioTomaConfirmado: false } });
+    try {
+      await patch({ action: "update_trade_in", incluye: true, precioTomaConfirmado: false });
+    } catch {
+      onChanged();
+    }
   };
 
   const addPhoto = async (file: File) => {
@@ -1298,8 +1376,12 @@ function TradeInSection({
         {!tradeIn.precioTomaConfirmado && (
           <button
             onClick={async () => {
-              await patch({ action: "update_trade_in", incluye: false });
-              onChanged();
+              onOptimisticUpdate({ parteDePago: { ...op.parteDePago, incluye: false } });
+              try {
+                await patch({ action: "update_trade_in", incluye: false });
+              } catch {
+                onChanged();
+              }
             }}
             className="text-xs text-error"
           >

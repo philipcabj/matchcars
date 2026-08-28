@@ -45,8 +45,8 @@ function buildSteps(op: SaleOperation): Step[] {
     },
     {
       key: "checklist",
-      label: "Checklist de trámites",
-      sub: `${checklistDone}/${checklistTotal}`,
+      label: "Documentación",
+      sub: `${checklistDone}/${checklistTotal} trámites`,
       state: checklistComplete ? "done" : "current",
       href: "#checklist",
     },
@@ -105,7 +105,10 @@ export function SaleJourney({ op }: { op: SaleOperation }) {
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="mb-3 text-sm font-semibold">Camino de esta venta</p>
+      <p className="text-sm font-semibold">Resumen general de la venta</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Los hitos de todo el negocio (acuerdo, pago, entrega) — la documentación puntual está más abajo.
+      </p>
       <div className="flex flex-wrap items-center gap-1.5">
         {steps.map((step, i) => {
           const chip = (
