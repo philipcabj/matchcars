@@ -3,6 +3,7 @@ import {
   Animated,
   Easing,
   Image,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -290,6 +291,11 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
     fontStyle: 'italic',
     fontWeight: '900',
+    // Android recorta el borde derecho de texto itálico con letterSpacing
+    // negativo (mide el ancho con métricas rectas y no deja lugar para el
+    // trazo que el itálico "empuja" hacia la derecha) — la última letra
+    // (la "H" de MATCH) quedaba cortada. iOS no tiene este problema.
+    paddingRight: Platform.OS === 'android' ? 10 : 0,
   },
   chainRow: {
     flexDirection: 'row',
