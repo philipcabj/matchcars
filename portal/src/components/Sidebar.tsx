@@ -22,6 +22,7 @@ const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; 
   { label: "Leads", href: "/dashboard/leads", icon: "📞", enabled: true, gate: "crm", sectionKey: "leads" },
   { label: "Operaciones", href: "/dashboard/operaciones", icon: "📋", enabled: true, gate: "crm", sectionKey: "operaciones" },
   { label: "Postventa", href: "/dashboard/postventa", icon: "🔄", enabled: true, gate: "crm", sectionKey: "postventa" },
+  { label: "Entre agencias", href: "/dashboard/entre-agencias", icon: "🤝", enabled: true, gate: "crm", sectionKey: "entreAgencias" },
   // Comisiones ya es universal (canManageCommissions = cualquier plan pago,
   // ver plans.ts) -- mismo gate "crm" que el resto del CRM, no "dealer"
   // (ese gate quedaba mostrando "🔒 Dealer" a Pro/Pro Plus aunque la

@@ -7,7 +7,7 @@
 // manageTeam (rol), no por esto.
 import { AgencyRole } from "@/lib/plans";
 
-export type SectionKey = "stock" | "leads" | "operaciones" | "postventa" | "comisiones" | "costos" | "reportes";
+export type SectionKey = "stock" | "leads" | "operaciones" | "postventa" | "comisiones" | "costos" | "reportes" | "entreAgencias";
 
 export const SECTION_LABELS: Record<SectionKey, string> = {
   stock: "Stock",
@@ -17,9 +17,19 @@ export const SECTION_LABELS: Record<SectionKey, string> = {
   comisiones: "Comisiones",
   costos: "Costos",
   reportes: "Reportes",
+  entreAgencias: "Entre agencias",
 };
 
-export const ALL_SECTIONS: SectionKey[] = ["stock", "leads", "operaciones", "postventa", "comisiones", "costos", "reportes"];
+export const ALL_SECTIONS: SectionKey[] = [
+  "stock",
+  "leads",
+  "operaciones",
+  "postventa",
+  "comisiones",
+  "costos",
+  "reportes",
+  "entreAgencias",
+];
 
 // Default para invitaciones NUEVAS de rol "sales" ("los deals" — pipeline
 // de negociación y seguimiento de la venta ya acordada, nada financiero
@@ -31,7 +41,7 @@ export const DEFAULT_SALES_SECTIONS: SectionKey[] = ["leads", "operaciones"];
 // "manager") — se usa solo cuando el miembro no tiene `sections` guardado
 // todavía, para que nadie pierda acceso al desplegar esto.
 export function legacySectionsForRole(role: AgencyRole): SectionKey[] {
-  if (role === "sales") return ["stock", "leads", "operaciones", "postventa"];
+  if (role === "sales") return ["stock", "leads", "operaciones", "postventa", "entreAgencias"];
   return ALL_SECTIONS;
 }
 

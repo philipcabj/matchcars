@@ -22,7 +22,11 @@ export type PortalEmailType =
   | "signature_requested"
   | "signature_otp"
   | "signature_completed"
-  | "document_requested";
+  | "document_requested"
+  // Entre Agencias — bolsa de pedidos entre agencias, ver
+  // portal/src/app/api/agency/agency-requests/**.
+  | "agency_request_response"
+  | "agency_thread_message";
 
 interface EmailData {
   // Uno de los dos: recipientUid (busca el email en users/{uid}, para
@@ -303,6 +307,32 @@ export async function sendNotificationEmail(type: PortalEmailType, data: EmailDa
           "Te piden un documento",
           `<strong>${agency}</strong> necesita que subas <strong>${doc}</strong> para seguir con tu operación.`,
           "Subir documento",
+          ctaLink
+        );
+        break;
+      }
+      case "agency_request_response": {
+        const sender = escapeHtml(data.senderName);
+        const car = escapeHtml(data.carModel || "tu pedido");
+        subject = subject || `${data.senderName} tiene un auto para tu pedido de ${data.carModel || ""}`.trim();
+        html = buildTemplate(
+          "🤝",
+          "Te respondieron un pedido",
+          `<strong>${sender}</strong> tiene un auto que podría servir para tu pedido de <strong>${car}</strong> — se abrió un hilo privado en el portal para coordinar.`,
+          "Ver conversación",
+          ctaLink
+        );
+        break;
+      }
+      case "agency_thread_message": {
+        const sender = escapeHtml(data.senderName);
+        const preview = data.messagePreview ? escapeHtml(data.messagePreview) : "";
+        subject = subject || `${data.senderName} te mandó un mensaje en Entre Agencias`;
+        html = buildTemplate(
+          "💬",
+          "Nuevo mensaje",
+          `<strong>${sender}</strong> te escribió${preview ? `:<br/><em>"${preview}"</em>` : "."}`,
+          "Ver conversación",
           ctaLink
         );
         break;
