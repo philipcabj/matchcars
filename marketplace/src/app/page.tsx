@@ -5,6 +5,7 @@ import { FilterBar } from "@/components/FilterBar";
 import { VehicleCard } from "@/components/VehicleCard";
 import { getFeaturedAgencies } from "@/lib/agencies";
 import { getUsdToArsRate } from "@/lib/pricing-admin";
+import { logSearchEvent } from "@/lib/search-analytics";
 import { getFeaturedVehicles, getFilterOptions, getPopularBrands, listVehicles, VehicleFilters } from "@/lib/vehicles";
 import type { Metadata } from "next";
 import Image from "next/image";
@@ -35,6 +36,7 @@ function asFlag(v: string | string[] | undefined): boolean {
 export default async function HomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filters: VehicleFilters = {
+    q: asString(sp.q),
     brand: asString(sp.brand),
     province: asString(sp.province),
     city: asString(sp.city),
@@ -58,8 +60,15 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       getUsdToArsRate(),
     ]);
 
+  // Solo se registra cuando la persona realmente buscó/filtró algo — no en
+  // cada visita a la home sin parámetros.
+  if (filters.q || filters.brand || filters.province || filters.city || filters.fuelType || filters.minPrice || filters.maxPrice || filters.minYear || filters.maxYear || filters.financing || filters.tradeIn) {
+    logSearchEvent(filters.q, filters, total);
+  }
+
   const buildPageHref = (targetPage: number) => {
     const params = new URLSearchParams();
+    if (filters.q) params.set("q", filters.q);
     if (filters.brand) params.set("brand", filters.brand);
     if (filters.province) params.set("province", filters.province);
     if (filters.city) params.set("city", filters.city);
@@ -76,6 +85,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   };
 
   const currentFilters = {
+    q: filters.q,
     brand: filters.brand,
     province: filters.province,
     city: filters.city,

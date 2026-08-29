@@ -150,6 +150,10 @@ function mapVehicleDoc(id: string, data: FirebaseFirestore.DocumentData): Public
 }
 
 export interface VehicleFilters {
+  // Texto libre — se busca por substring en marca/modelo/versión/
+  // descripción, además de (no en reemplazo de) los filtros estructurados
+  // de abajo.
+  q?: string;
   brand?: string;
   model?: string;
   province?: string;
@@ -212,6 +216,16 @@ async function enrichWithSellerInfo(vehicles: PublicVehicle[]): Promise<PublicVe
 export async function listVehicles(filters: VehicleFilters = {}): Promise<VehicleListResult> {
   let vehicles = await fetchPublishedVehicles();
 
+  if (filters.q) {
+    const q = filters.q.trim().toLowerCase();
+    vehicles = vehicles.filter(
+      (v) =>
+        v.brand.toLowerCase().includes(q) ||
+        v.model.toLowerCase().includes(q) ||
+        v.version.toLowerCase().includes(q) ||
+        v.description.toLowerCase().includes(q)
+    );
+  }
   if (filters.brand) vehicles = vehicles.filter((v) => v.brand === filters.brand);
   if (filters.model) vehicles = vehicles.filter((v) => v.model === filters.model);
   if (filters.province) vehicles = vehicles.filter((v) => v.province === filters.province);

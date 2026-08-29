@@ -16,6 +16,7 @@ import { calcMatchScore } from "@/lib/matchScore";
 import { sendNotificationEmail } from "@/lib/mail";
 import { getBoostScoreMultiplier, hasUnlimitedFeatured, hasWeekendBoost, isDealerPlan } from "@/lib/planChecks";
 import { getListingYears } from "@/lib/pricing";
+import { logSearchEvent } from "@/lib/search-analytics";
 import type { BuyerPreferences } from "@/types/user";
 import type { Vehicle } from "@/types/vehicle";
 import { safeDate } from "@/utils/dateUtils";
@@ -49,6 +50,13 @@ export default function AutosPublicTab() {
   const [userNamesCache, setUserNamesCache] = useState<Record<string, string>>({}); // New Cache State
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [likesRemaining, setLikesRemaining] = useState<number>(10);
+  // Buscador de texto libre — separado de los filtros por dropdown de abajo,
+  // siempre visible arriba de la lista. Delay más largo que el de los
+  // dropdowns (300ms) porque acá cada disparo también escribe a Firestore
+  // (ver logSearchEvent), no solo filtra en memoria.
+  const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebounce(searchQuery, 800);
+  const lastLoggedSearchRef = React.useRef<string>("");
   const [provinceFilter, setProvinceFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
   const [modelFilter, setModelFilter] = useState("");
@@ -429,14 +437,48 @@ export default function AutosPublicTab() {
     const finMatch = financingFilter === "all" ? true : financingFilter === "financed" ? v.acceptsFinancing === true : v.acceptsFinancing !== true;
     const fuelMatch = !fuelFilter || (v.fuelType || (v as any).fuel || "").toLowerCase() === fuelFilter.toLowerCase();
     const currencyListMatch = !filterCurrency || v.currency === filterCurrency;
-    
+    // Buscador de texto libre — mismo criterio de substring que ya usan
+    // brandMatch/modelMatch arriba, pero contra varios campos a la vez.
+    const sq = debouncedSearchQuery.trim().toLowerCase();
+    const searchMatch =
+      !sq ||
+      (v.brand || "").toLowerCase().includes(sq) ||
+      (v.model || "").toLowerCase().includes(sq) ||
+      (v.version || "").toLowerCase().includes(sq) ||
+      (v.description || "").toLowerCase().includes(sq);
+
     // Exclude sold and unpublished vehicles from the public index
-    // Note: If 'owner' or 'favOf' params are present, we might want different behavior, 
+    // Note: If 'owner' or 'favOf' params are present, we might want different behavior,
     // but generally sold cars shouldn't appear in the main feed.
     const statusMatch = v.status !== 'sold' && v.status !== 'deleted' && v.status !== 'blocked' && v.status !== 'rejected' && v.published !== false;
 
-    return favMatch && ownerMatch && notMineMatch && brandMatch && modelMatch && provinceMatch && yearMatch && currencyListMatch && priceMatch && kmMatch && finMatch && fuelMatch && statusMatch;
+    return favMatch && ownerMatch && notMineMatch && brandMatch && modelMatch && provinceMatch && yearMatch && currencyListMatch && priceMatch && kmMatch && finMatch && fuelMatch && searchMatch && statusMatch;
   });
+
+  // Captura de búsquedas (texto + filtros) para el futuro widget de "lo más
+  // buscado" en el dashboard de agencias — ver lib/search-analytics.ts.
+  // Se dispara solo cuando la combinación búsqueda+filtros realmente
+  // cambió (no en cada render ni cuando lo único que cambió fue la
+  // cantidad de resultados por paginación).
+  React.useEffect(() => {
+    const filters = {
+      brand: brandFilter || undefined,
+      model: modelFilter || undefined,
+      province: provinceFilter || undefined,
+      fuelType: fuelFilter || undefined,
+      minPrice: priceMin ? Number(priceMin) : undefined,
+      maxPrice: priceMax ? Number(priceMax) : undefined,
+      minYear: yearMin ? Number(yearMin) : undefined,
+      maxYear: yearMax ? Number(yearMax) : undefined,
+      financing: financingFilter !== "all" ? true : undefined,
+      currency: filterCurrency,
+    };
+    const signature = JSON.stringify({ q: debouncedSearchQuery.trim(), filters });
+    if (signature === lastLoggedSearchRef.current) return;
+    lastLoggedSearchRef.current = signature;
+    logSearchEvent(debouncedSearchQuery, filters, filteredVehicles.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchQuery, brandFilter, modelFilter, provinceFilter, fuelFilter, priceMin, priceMax, yearMin, yearMax, financingFilter, filterCurrency]);
 
   // Auto-load more pages when active filters produce fewer than PAGE_SIZE results
   const PAGE_SIZE_CONST = 20;
@@ -908,6 +950,21 @@ export default function AutosPublicTab() {
             </TouchableOpacity>
           </View>
         )}
+        <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.inputBackground, borderRadius: 10, paddingHorizontal: 10, marginBottom: 10, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+          <Ionicons name="search" size={16} color={theme.textMuted} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Buscar marca, modelo…"
+            placeholderTextColor={theme.textMuted}
+            style={{ flex: 1, color: theme.text, paddingVertical: 8, paddingHorizontal: 8, fontSize: 13 }}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Ionicons name="close-circle" size={16} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <Text style={{ color: theme.text, fontSize: 16, fontWeight: "700" }}>Publicaciones</Text>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>

@@ -81,6 +81,19 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    // Captura de búsquedas (texto libre + filtros) de la app, para un futuro
+    // widget de "lo más buscado" en el dashboard de agencias — ver
+    // lib/search-analytics.ts. El lado web escribe server-side con el Admin
+    // SDK (marketplace/src/lib/search-analytics.ts) y no pasa por acá.
+    // Se permite anónimo (browsear sin cuenta) a propósito, con solo
+    // validación básica de forma para frenar basura.
+    match /searchEvents/{eventId} {
+      allow create: if request.resource.data.source == "app"
+        && request.resource.data.query is string
+        && request.resource.data.query.size() <= 100;
+      allow read, update, delete: if false;
+    }
+
     // Progreso de carga masiva (bulk-import.tsx). Solo la Cloud Function
     // startBulkImport escribe, vía Admin SDK, que ignora estas reglas.
     match /bulkImportJobs/{jobId} {

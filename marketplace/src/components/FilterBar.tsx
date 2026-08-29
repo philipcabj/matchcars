@@ -24,6 +24,7 @@ export function FilterBar({
   // auto publicado, sin importar la provincia.
   cities: string[];
   current: {
+    q?: string;
     brand?: string;
     province?: string;
     city?: string;
@@ -38,6 +39,17 @@ export function FilterBar({
 }) {
   return (
     <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4">
+      <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground">
+        Buscar
+        <input
+          type="text"
+          name="q"
+          defaultValue={current.q ?? ""}
+          placeholder="Marca, modelo, versión…"
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+        />
+      </label>
+
       <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground sm:w-auto">
         Marca
         <select
@@ -158,7 +170,8 @@ export function FilterBar({
       <button type="submit" className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground sm:w-auto">
         Buscar
       </button>
-      {(current.brand ||
+      {(current.q ||
+        current.brand ||
         current.province ||
         current.city ||
         current.fuelType ||
