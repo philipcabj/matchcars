@@ -5,6 +5,7 @@
 // (/api/agency/vehicles) en vez de escribir directo a Firestore desde acá.
 "use client";
 
+import { DatalistField } from "@/components/DatalistField";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
@@ -21,7 +22,7 @@ import {
   TOGGLE_FIELDS,
   VehicleFormValues,
 } from "@/lib/vehicle";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const STATIC_MAKES = Array.from(new Set(CAR_MODELS_AR.map((x) => x.make))).sort();
 const STATIC_MODELS_BY_MAKE: Record<string, string[]> = CAR_MODELS_AR.reduce((acc, item) => {
@@ -45,67 +46,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputClass =
   "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
-// Marca/Modelo/Versión: input libre con sugerencias (datalist), en vez de un
-// <select> que solo permite elegir entre un catálogo estático — así no bloquea
-// cargar un auto cuyo modelo todavía no está catalogado. Ver Field "Marca"/
-// "Modelo"/"Versión" más abajo.
-//
-// Con <input list>, una vez que el campo ya tiene un valor el navegador no
-// siempre reabre el desplegable de sugerencias al volver a clickear (a
-// diferencia de un <select>) — da la sensación de que "no deja cambiar".
-// Por eso hay una × explícita: limpia el campo y lo enfoca, dejando escribir
-// de cero o abrir las sugerencias de nuevo.
-function DatalistField({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
-}) {
-  const listId = `dl-${label.replace(/\s+/g, "-").toLowerCase()}`;
-  const inputRef = useRef<HTMLInputElement>(null);
-  return (
-    <Field label={label}>
-      <div className="relative">
-        <input
-          ref={inputRef}
-          list={listId}
-          className={`${inputClass} w-full ${value ? "pr-8" : ""}`}
-          value={value}
-          disabled={disabled}
-          placeholder={disabled ? placeholder : "Escribir o elegir…"}
-          onChange={(e) => onChange(e.target.value)}
-        />
-        {value && !disabled && (
-          <button
-            type="button"
-            onClick={() => {
-              onChange("");
-              inputRef.current?.focus();
-            }}
-            title="Cambiar"
-            className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
-          >
-            ×
-          </button>
-        )}
-      </div>
-      <datalist id={listId}>
-        {options.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
-    </Field>
-  );
-}
+// Marca/Modelo/Versión usan DatalistField (components/DatalistField.tsx,
+// compartido con "Entre agencias") — input libre con sugerencias, en vez
+// de un <select> que solo permite elegir entre un catálogo estático, así
+// no bloquea cargar un auto cuyo modelo todavía no está catalogado.
 
 export function VehicleForm({
   initialValues = EMPTY_VEHICLE_FORM,

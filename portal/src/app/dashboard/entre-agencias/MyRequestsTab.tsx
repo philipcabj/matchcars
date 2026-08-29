@@ -4,11 +4,26 @@
 // podrían servir (matches, calculado server-side).
 "use client";
 
+import { DatalistField } from "@/components/DatalistField";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
-import { useState } from "react";
+import { CAR_MODELS_AR } from "@/lib/carModelsAr";
+import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
+import { useEffect, useMemo, useState } from "react";
 import type { AgencyRequestItem } from "./types";
+
+// Mismo catálogo (estático + dinámico) que usa VehicleForm.tsx al publicar
+// un auto — así "Toyota"/"Corolla" acá es el mismo texto exacto que el
+// stock, y el matching cross-agencia (computeMatches, agency-requests/route.ts)
+// realmente encuentra coincidencias en vez de comparar strings distintos.
+const STATIC_MAKES = Array.from(new Set(CAR_MODELS_AR.map((x) => x.make))).sort();
+const STATIC_MODELS_BY_MAKE: Record<string, string[]> = CAR_MODELS_AR.reduce((acc, item) => {
+  const list = acc[item.make] || [];
+  if (!list.includes(item.model)) list.push(item.model);
+  acc[item.make] = list;
+  return acc;
+}, {} as Record<string, string[]>);
 
 const inputClass = "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
@@ -29,6 +44,34 @@ export function MyRequestsTab({ requests, onChanged }: { requests: AgencyRequest
   const [priceMax, setPriceMax] = useState("");
   const [currency, setCurrency] = useState<"ARS" | "USD">("ARS");
   const [notes, setNotes] = useState("");
+  const [catalogMakes, setCatalogMakes] = useState<string[]>([]);
+  const [catalogModels, setCatalogModels] = useState<{ name: string; versions: string[] }[]>([]);
+
+  useEffect(() => {
+    loadCatalogMakes().then(setCatalogMakes);
+  }, []);
+
+  useEffect(() => {
+    if (!brand) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset síncrono cuando falta la marca, no dispara un fetch
+      setCatalogModels([]);
+      return;
+    }
+    let cancelled = false;
+    loadCatalogModels(brand).then((models) => {
+      if (!cancelled) setCatalogModels(models);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [brand]);
+
+  const makeOptions = useMemo(() => Array.from(new Set([...STATIC_MAKES, ...catalogMakes])).sort(), [catalogMakes]);
+  const modelOptions = useMemo(() => {
+    const fromStatic = STATIC_MODELS_BY_MAKE[brand] || [];
+    const fromCatalog = catalogModels.map((m) => m.name);
+    return Array.from(new Set([...fromStatic, ...fromCatalog])).sort();
+  }, [brand, catalogModels]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -98,8 +141,16 @@ export function MyRequestsTab({ requests, onChanged }: { requests: AgencyRequest
       ) : (
         <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
           <div className="grid grid-cols-2 gap-2">
-            <input placeholder="Marca *" value={brand} onChange={(e) => setBrand(e.target.value)} className={inputClass} />
-            <input placeholder="Modelo *" value={model} onChange={(e) => setModel(e.target.value)} className={inputClass} />
+            <DatalistField
+              label="Marca *"
+              value={brand}
+              options={makeOptions}
+              onChange={(v) => {
+                setBrand(v);
+                setModel("");
+              }}
+            />
+            <DatalistField label="Modelo *" value={model} options={modelOptions} disabled={!brand} placeholder="Elegí una marca primero" onChange={setModel} />
             <input placeholder="Año desde" value={yearMin} onChange={(e) => setYearMin(e.target.value.replace(/\D/g, ""))} className={inputClass} />
             <input placeholder="Año hasta" value={yearMax} onChange={(e) => setYearMax(e.target.value.replace(/\D/g, ""))} className={inputClass} />
             <div className="flex gap-1">
