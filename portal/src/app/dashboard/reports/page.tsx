@@ -149,6 +149,53 @@ export default function ReportsPage() {
       )}
 
       <div className="rounded-2xl border border-border bg-card p-5">
+        <p className="mb-1 text-sm font-semibold">🔎 Lo más buscado</p>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Búsquedas de toda la plataforma (app y web), últimos {data.mostSearched.windowDays} días — te sirve para
+          decidir qué conviene tener en stock, no es exclusivo de tu agencia.
+        </p>
+        {data.mostSearched.totalSearches === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Todavía no hay búsquedas registradas — esto recién se activó, va a empezar a llenarse solo con el uso normal
+            de la app y la web.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Marcas más buscadas</p>
+              {data.mostSearched.topBrands.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sin datos todavía.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {data.mostSearched.topBrands.map((b) => (
+                    <div key={b.label} className="flex items-center justify-between text-sm">
+                      <span>{b.label}</span>
+                      <span className="font-semibold text-muted-foreground">{b.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Términos más buscados</p>
+              {data.mostSearched.topQueries.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sin datos todavía.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {data.mostSearched.topQueries.map((q) => (
+                    <div key={q.label} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{q.label}</span>
+                      <span className="shrink-0 font-semibold text-muted-foreground">{q.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-5">
         <p className="mb-3 text-sm font-semibold">Más vistos</p>
         {data.topVehicles.length === 0 ? (
           <p className="text-sm text-muted-foreground">Todavía no hay vistas registradas.</p>

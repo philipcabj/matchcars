@@ -44,6 +44,23 @@ export interface PeerComparison {
   avgAvgDaysInStock: number | null;
 }
 
+// Demanda de TODA la plataforma (no de esta agencia en particular) — qué
+// están buscando los compradores en la app y la web, últimos
+// `windowDays` días. Va a estar vacío/chico hasta que se acumulen unas
+// semanas de searchEvents (ver lib/search-analytics.ts) — se muestra
+// igual desde ya y va a ir sumando datos solo.
+export interface MostSearchedItem {
+  label: string;
+  count: number;
+}
+
+export interface MostSearched {
+  windowDays: number;
+  totalSearches: number;
+  topQueries: MostSearchedItem[];
+  topBrands: MostSearchedItem[];
+}
+
 export interface AgencyReports {
   activeCount: number;
   totalViews: number;
@@ -55,4 +72,5 @@ export interface AgencyReports {
   // renderizarlas (hasAdvancedReports/hasPeerComparison gatean la UI).
   needsAttention: AttentionItem[] | null;
   peerComparison: PeerComparison | null;
+  mostSearched: MostSearched;
 }

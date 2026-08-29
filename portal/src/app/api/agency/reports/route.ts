@@ -15,7 +15,7 @@ import { requireUid } from "@/lib/api-auth";
 import { withApiErrors } from "@/lib/api-handler";
 import { resolveMembership } from "@/lib/agency-server";
 import { adminDb } from "@/lib/firebase-admin";
-import { AttentionItem, PeerComparison } from "@/lib/reports";
+import { AttentionItem, MostSearched, PeerComparison } from "@/lib/reports";
 import { hasAdvancedReports, hasPeerComparison } from "@/lib/plans";
 import { hasSection } from "@/lib/sections";
 import { STATUS_LABELS } from "@/lib/vehicle";
@@ -25,6 +25,8 @@ const HIGH_VIEWS_THRESHOLD = 15;
 const STALE_DAYS_THRESHOLD = 30;
 const MAX_ATTENTION_ITEMS = 6;
 const MIN_PEERS_FOR_COMPARISON = 3;
+const SEARCH_WINDOW_DAYS = 30;
+const MAX_MOST_SEARCHED_ITEMS = 10;
 // Pool del panel comparativo (peerComparison) — cualquier plan pago, no solo
 // Dealer, desde que el portal se vende entero desde Pro.
 const PAID_PLAN_VALUES = [
@@ -49,9 +51,13 @@ export const GET = withApiErrors(async (request) => {
   const ownerSnap = await adminDb.doc(`users/${agencyId}`).get();
   const plan: string = ownerSnap.data()?.plan || "free";
 
-  const [snap, leadsSnap] = await Promise.all([
+  const searchWindowStart = new Date(Date.now() - SEARCH_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [snap, leadsSnap, searchEventsSnap] = await Promise.all([
     adminDb.collection("vehicles").where("userId", "==", agencyId).get(),
     hasAdvancedReports(plan) ? adminDb.collection("leads").where("sellerId", "==", agencyId).get() : Promise.resolve(null),
+    // Demanda de TODA la plataforma, no de esta agencia — mismo criterio
+    // "traer un lote y agregar en memoria" que el resto de este endpoint.
+    adminDb.collection("searchEvents").where("createdAt", ">=", searchWindowStart).get(),
   ]);
   const vehicles: (FirebaseFirestore.DocumentData & { id: string })[] = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const vehicleIdsWithLeads = new Set((leadsSnap?.docs ?? []).map((d) => d.data().vehicleId).filter(Boolean));
@@ -154,6 +160,27 @@ export const GET = withApiErrors(async (request) => {
     }
   }
 
+  const queryCounts = new Map<string, number>();
+  const brandCounts = new Map<string, number>();
+  for (const d of searchEventsSnap.docs) {
+    const data = d.data();
+    const q = typeof data.query === "string" ? data.query.trim().toLowerCase() : "";
+    if (q) queryCounts.set(q, (queryCounts.get(q) || 0) + 1);
+    const brand = typeof data.filters?.brand === "string" ? data.filters.brand.trim() : "";
+    if (brand) brandCounts.set(brand, (brandCounts.get(brand) || 0) + 1);
+  }
+  const toRanked = (counts: Map<string, number>) =>
+    Array.from(counts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, MAX_MOST_SEARCHED_ITEMS);
+  const mostSearched: MostSearched = {
+    windowDays: SEARCH_WINDOW_DAYS,
+    totalSearches: searchEventsSnap.size,
+    topQueries: toRanked(queryCounts),
+    topBrands: toRanked(brandCounts),
+  };
+
   const statusBreakdown = Array.from(statusCounts.entries())
     .map(([status, count]) => ({ status, label: STATUS_LABELS[status]?.label || status, count }))
     .sort((a, b) => b.count - a.count);
@@ -182,5 +209,6 @@ export const GET = withApiErrors(async (request) => {
     topVehicles,
     needsAttention,
     peerComparison,
+    mostSearched,
   });
 });
