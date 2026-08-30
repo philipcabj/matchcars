@@ -16,6 +16,7 @@ import { parseJsonResponse } from "@/lib/api-client";
 import { CAR_MODELS_AR } from "@/lib/carModelsAr";
 import { loadCatalogMakes, loadCatalogModels } from "@/lib/catalog";
 import { analyzeMarketPrice } from "@/lib/pricing";
+import { TRAMITE_FORMULARIO_08_URL, TRAMITE_INFORME_DOMINIO_URL, TRAMITE_VERIFICACION_POLICIAL_URL } from "@/lib/tramites-oficiales";
 import {
   ChecklistItem,
   MetodoPagoResto,
@@ -613,6 +614,57 @@ function ChecklistSection({
     onChanged();
   };
 
+  const [copyingF08, setCopyingF08] = useState(false);
+
+  // Arma un texto listo para pegar en la precarga oficial del Formulario 08
+  // (DNRPA) con lo que MatchCars ya tiene cargado — nada de esto pasa por
+  // ninguna API paga, solo junta datos que ya existen en la operación y el
+  // auto (la patente no está denormalizada en vehicleSnapshot, así que se
+  // pide aparte con el mismo GET que ya usa la ficha de Stock).
+  const copyF08Summary = async () => {
+    setCopyingF08(true);
+    try {
+      const token = await getIdToken();
+      let licensePlate = "";
+      if (op.vehicleId) {
+        try {
+          const res = await fetch(`/api/agency/vehicles/${op.vehicleId}`, { headers: { Authorization: `Bearer ${token}` } });
+          const vehicle = await parseJsonResponse<{ licensePlate?: string }>(res);
+          licensePlate = vehicle.licensePlate || "";
+        } catch {
+          // Si falla, se arma el resumen igual sin la patente.
+        }
+      }
+      const veh = op.vehicleSnapshot;
+      const carLabel = `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim() || "—";
+      const precio = veh?.price ? `${veh?.currency ?? "ARS"} ${veh.price.toLocaleString("es-AR")}` : "—";
+      const text = [
+        "DATOS PARA LA PRECARGA DEL FORMULARIO 08 (DNRPA)",
+        "",
+        "AUTO",
+        `Marca/Modelo/Año: ${carLabel}`,
+        `Patente: ${licensePlate || "—"}`,
+        "",
+        "VENDEDOR",
+        `Agencia: ${agency?.agencyName || "—"}`,
+        "",
+        "COMPRADOR",
+        `Nombre: ${op.buyerLabel || "—"}`,
+        `Email: ${op.buyerContactEmail || "—"}`,
+        "",
+        `Precio de venta: ${precio}`,
+        "",
+        "⚠️ Faltan completar en la precarga: DNI y domicilio de comprador y vendedor, N° de motor/chasis — esos datos no están cargados en MatchCars.",
+      ].join("\n");
+      await navigator.clipboard.writeText(text);
+      alert("Copiado — pegalo en la precarga oficial de DNRPA.");
+    } catch {
+      alert("No se pudo copiar. Probá de nuevo.");
+    } finally {
+      setCopyingF08(false);
+    }
+  };
+
   const renderItem = (item: ChecklistItem) => {
     const remaining = daysUntil(item.dueAt);
     const overdue = remaining !== null && remaining < 0 && item.status !== "hecho";
@@ -699,6 +751,45 @@ function ChecklistSection({
                 >
                   {generatingKey === item.key ? "Generando…" : "📄 Generar recibo"}
                 </button>
+              )}
+              {item.key === "informe_dominio" && (
+                <a
+                  href={TRAMITE_INFORME_DOMINIO_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
+                >
+                  🔗 Pedir informe (DNRPA)
+                </a>
+              )}
+              {item.key === "formulario_08" && (
+                <>
+                  <button
+                    onClick={copyF08Summary}
+                    disabled={copyingF08}
+                    className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent disabled:opacity-50"
+                  >
+                    {copyingF08 ? "Copiando…" : "📋 Copiar resumen para la precarga"}
+                  </button>
+                  <a
+                    href={TRAMITE_FORMULARIO_08_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
+                  >
+                    🔗 Precarga oficial (DNRPA)
+                  </a>
+                </>
+              )}
+              {item.key === "verificacion_policial" && (
+                <a
+                  href={TRAMITE_VERIFICACION_POLICIAL_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
+                >
+                  🔗 Cómo hacerla / sacar turno
+                </a>
               )}
             </div>
 
