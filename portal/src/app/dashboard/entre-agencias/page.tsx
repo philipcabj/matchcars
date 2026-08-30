@@ -7,7 +7,8 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { parseJsonResponse } from "@/lib/api-client";
-import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { BoardTab } from "./BoardTab";
 import { MyRequestsTab } from "./MyRequestsTab";
 import { ThreadsTab } from "./ThreadsTab";
@@ -15,9 +16,22 @@ import type { AgencyRequestItem, AgencyThreadItem } from "./types";
 
 type Tab = "board" | "mine" | "threads";
 
+// useSearchParams() exige un límite de Suspense en el App Router — la
+// campanita de notificaciones linkea acá con ?tab=threads para llevar
+// directo a "Mis conversaciones" en vez de a la pestaña por defecto.
 export default function EntreAgenciasPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Cargando…</p>}>
+      <EntreAgenciasContent />
+    </Suspense>
+  );
+}
+
+function EntreAgenciasContent() {
   const { getIdToken } = useAuth();
-  const [tab, setTab] = useState<Tab>("board");
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "threads" ? "threads" : "board";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [board, setBoard] = useState<AgencyRequestItem[] | null>(null);
   const [mine, setMine] = useState<AgencyRequestItem[] | null>(null);
   const [threads, setThreads] = useState<AgencyThreadItem[] | null>(null);

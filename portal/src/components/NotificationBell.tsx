@@ -10,6 +10,7 @@ const TYPE_ICON: Record<string, string> = {
   pending_offer: "💰",
   pending_sale_confirmation: "⏳",
   checklist_due: "📅",
+  agency_thread_message: "🤝",
 };
 
 function fmtRelative(iso: string | null): string {

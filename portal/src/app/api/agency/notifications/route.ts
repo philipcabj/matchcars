@@ -37,6 +37,7 @@ export const GET = withApiErrors(async (request) => {
   const hasLeads = hasSection(membership, "leads");
   const hasStock = hasSection(membership, "stock");
   const hasOperaciones = hasSection(membership, "operaciones");
+  const hasEntreAgencias = hasSection(membership, "entreAgencias");
   // Silencioso a propósito (a diferencia de requireCRMAccess, que tira
   // error): esto es un poll de fondo para la campanita, no una página — un
   // plan sin CRM simplemente no tiene nada de leads/ofertas que mostrar acá.
@@ -45,11 +46,16 @@ export const GET = withApiErrors(async (request) => {
     return Response.json({ items: [] });
   }
 
-  const [newLeadsSnap, pendingOfferSnap, pendingSalesSnap, activeOperationsSnap] = await Promise.all([
+  const [newLeadsSnap, pendingOfferSnap, pendingSalesSnap, activeOperationsSnap, unreadAsRequesterSnap, unreadAsResponderSnap] = await Promise.all([
     adminDb.collection("leads").where("sellerId", "==", agencyId).where("status", "==", "new").get(),
     adminDb.collection("leads").where("sellerId", "==", agencyId).where("offer.status", "==", "pending").get(),
     adminDb.collection("sales").where("sellerId", "==", agencyId).where("confirmedByBuyer", "==", null).get(),
     adminDb.collection("saleOperations").where("sellerId", "==", agencyId).where("status", "==", "en_curso").get(),
+    // Un solo where() por query (igual criterio que el resto de este
+    // endpoint) — filtrar "unread > 0" en memoria evita tener que crear un
+    // índice compuesto nuevo solo para esto.
+    hasEntreAgencias ? adminDb.collection("agencyThreads").where("requesterAgencyId", "==", agencyId).get() : Promise.resolve(null),
+    hasEntreAgencias ? adminDb.collection("agencyThreads").where("responderAgencyId", "==", agencyId).get() : Promise.resolve(null),
   ]);
 
   const items: NotificationItem[] = [];
@@ -128,6 +134,35 @@ export const GET = withApiErrors(async (request) => {
         at: new Date(dueMillis).toISOString(),
       });
     }
+  }
+
+  // Mensajes sin leer de "Entre agencias" — el mismo GET de mensajes del
+  // hilo (agency-threads/[id]/messages/route.ts) ya pone unreadByX en 0 al
+  // abrirlo, así que apenas se lee el hilo esto deja de aparecer solo, sin
+  // necesitar un estado de "notificación leída" aparte.
+  for (const d of unreadAsRequesterSnap?.docs ?? []) {
+    const data = d.data();
+    if (!((data.unreadByRequester ?? 0) > 0)) continue;
+    items.push({
+      id: `agency_thread_${d.id}`,
+      type: "agency_thread_message",
+      title: `${data.responderAgencyName ?? "Una agencia"} te escribió`,
+      subtitle: data.lastMessage || `Sobre tu pedido de ${data.requestSummary?.brand ?? ""} ${data.requestSummary?.model ?? ""}`.trim(),
+      href: "/dashboard/entre-agencias?tab=threads",
+      at: toIso(data.lastMessageAt),
+    });
+  }
+  for (const d of unreadAsResponderSnap?.docs ?? []) {
+    const data = d.data();
+    if (!((data.unreadByResponder ?? 0) > 0)) continue;
+    items.push({
+      id: `agency_thread_${d.id}`,
+      type: "agency_thread_message",
+      title: `${data.requesterAgencyName ?? "Una agencia"} te escribió`,
+      subtitle: data.lastMessage || `Sobre el pedido de ${data.requestSummary?.brand ?? ""} ${data.requestSummary?.model ?? ""}`.trim(),
+      href: "/dashboard/entre-agencias?tab=threads",
+      at: toIso(data.lastMessageAt),
+    });
   }
 
   items.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""));
