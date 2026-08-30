@@ -788,7 +788,7 @@ function ChecklistSection({
                   rel="noopener noreferrer"
                   className="rounded-md border border-accent/40 bg-accent/5 px-2 py-1 text-xs font-semibold text-accent"
                 >
-                  🔗 Cómo hacerla / sacar turno
+                  🔗 Cómo y dónde hacerla (DNRPA)
                 </a>
               )}
             </div>
