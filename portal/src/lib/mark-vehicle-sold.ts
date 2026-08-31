@@ -124,7 +124,9 @@ export async function markVehicleSold(agencyId: string, actorUid: string, leadId
     const buyerSnap = await adminDb.doc(`users/${lead.buyerId}`).get();
     const pushToken = buyerSnap.data()?.pushToken;
     if (pushToken) {
-      sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {}).catch(() => {});
+      sendPushNotification(pushToken, "Confirmá tu compra", `El vendedor marcó ${carModel} como entregado — confirmá que lo recibiste.`, {
+        url: `matchcars://chat/${agencyId}?vehicleId=${lead.vehicleId}`,
+      }).catch(() => {});
     }
     // El email puede caer en spam y no siempre hay un chat previo con el
     // vendedor (leads del CRM cargados a mano no tienen conversación en la

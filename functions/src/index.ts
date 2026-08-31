@@ -364,7 +364,8 @@ export const runPostSaleTasks = onSchedule("every 6 hours", async () => {
       const carModel = `${task.vehicleSnapshot?.brand ?? ""} ${task.vehicleSnapshot?.model ?? ""}`.trim() || "tu auto";
       const { title, body } = postSaleMessage(task.tipo, carModel);
       if (title) {
-        await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body)]);
+        const chatDeepLink = { url: `matchcars://chat/${task.sellerId}?vehicleId=${task.vehicleId}` };
+        await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body, chatDeepLink)]);
       }
       await taskSnap.ref.update({ estado: "enviada", sentAt: admin.firestore.FieldValue.serverTimestamp() });
     } catch (e) {

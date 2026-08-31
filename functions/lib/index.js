@@ -370,7 +370,8 @@ exports.runPostSaleTasks = (0, scheduler_1.onSchedule)("every 6 hours", async ()
             const carModel = `${(_b = (_a = task.vehicleSnapshot) === null || _a === void 0 ? void 0 : _a.brand) !== null && _b !== void 0 ? _b : ""} ${(_d = (_c = task.vehicleSnapshot) === null || _c === void 0 ? void 0 : _c.model) !== null && _d !== void 0 ? _d : ""}`.trim() || "tu auto";
             const { title, body } = postSaleMessage(task.tipo, carModel);
             if (title) {
-                await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body)]);
+                const chatDeepLink = { url: `matchcars://chat/${task.sellerId}?vehicleId=${task.vehicleId}` };
+                await Promise.all([sendSimpleMail(task.buyerId, title, body), sendSimplePush(task.buyerId, title, body, chatDeepLink)]);
             }
             await taskSnap.ref.update({ estado: "enviada", sentAt: admin.firestore.FieldValue.serverTimestamp() });
         }

@@ -27,6 +27,7 @@ import {
 } from "firebase/auth";
 
 import { auth, db } from "@/lib/firebase";
+import { registerForPushNotificationsAsync } from "@/lib/notifications";
 import { getMaxCars, getMonthlyFeaturedAllowance, hasUnlimitedFeatured } from "@/lib/planChecks";
 import { getAvatarColorFromEmail } from "@/utils/avatarUtils";
 import { TrustLevel } from "@/types/commerce";
@@ -191,6 +192,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setAgencyId(firebaseUser.uid);
             setOwnerProfile(null);
           });
+
+        // Pide permiso de notificaciones y guarda/actualiza el token de push
+        // en users/{uid}.pushToken — sin esto, todo el motor de push que ya
+        // existe (ofertas, chat, ventas, Postventa, Entre Agencias) dispara
+        // en el vacío porque nunca hay token guardado para mandarle nada.
+        registerForPushNotificationsAsync(firebaseUser.uid).catch((e) => logger.log("push register error", e));
 
         // Update login count logic
         getDoc(ref).then((snap) => {

@@ -7,6 +7,7 @@ import { initializeMetaSDK } from "@/lib/metaSDK";
 import { Ionicons } from "@expo/vector-icons";
 import { useFonts } from "expo-font";
 import * as Linking from 'expo-linking';
+import * as Notifications from "expo-notifications";
 import { Redirect, Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
@@ -123,6 +124,33 @@ function RootStackContent() {
       }
     } catch {}
   }, []);
+
+  // Al tocar una push notification, navegar al deep link que mandó el
+  // remitente (mismo scheme matchcars:// que ya resuelve expo-router) en vez
+  // de simplemente abrir la app en la pantalla de siempre. Cubre tanto "app
+  // cerrada, se abre tocando la notificación" (getLastNotificationResponseAsync)
+  // como "app en foreground/background" (el listener).
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+
+    const openFromNotification = (url?: string) => {
+      if (url) {
+        Linking.openURL(url).catch(() => {});
+      } else {
+        router.push('/notifications');
+      }
+    };
+
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      openFromNotification(response.notification.request.content.data?.url as string | undefined);
+    });
+
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      openFromNotification(response.notification.request.content.data?.url as string | undefined);
+    });
+    return () => sub.remove();
+  }, [router]);
 
   if (!splashDone) {
     return <AnimatedSplash appReady={appReady} onFinish={() => setSplashDone(true)} />;

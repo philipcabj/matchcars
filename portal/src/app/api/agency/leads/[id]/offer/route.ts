@@ -62,7 +62,9 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
       counter_received: `Te contraofertaron${amount ? ` ${amount}` : ""} por ${carModel}`,
       deal_canceled: `El acuerdo por ${carModel} fue cancelado`,
     };
-    sendPushNotification(pushToken, titles[type], bodies[type], {}).catch(() => {});
+    sendPushNotification(pushToken, titles[type], bodies[type], {
+      url: `matchcars://chat/${agencyId}?vehicleId=${lead.vehicleId}`,
+    }).catch(() => {});
   };
 
   if (action === "accept") {
