@@ -1,6 +1,7 @@
 // app/_layout.tsx
 import AnimatedSplash from "@/components/AnimatedSplash";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Onboarding } from "@/components/Onboarding";
 import { trackEvent } from "@/lib/analytics";
 import { logger } from "@/lib/logger";
 import { initializeMetaSDK } from "@/lib/metaSDK";
@@ -294,6 +295,7 @@ function RootStackContent() {
         <Stack.Screen name="(admin)" options={{ headerShown: false }} />
       </Stack>
       <CompareFloatButton />
+      <Onboarding />
     </View>
   );
 }

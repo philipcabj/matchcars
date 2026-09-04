@@ -2,7 +2,7 @@
   "expo": {
     "name": "Matchcars",
     "slug": "matchcars",
-    "version": "1.8.2",
+    "version": "1.8.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "matchcars",
@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.matchcars.app",
       "associatedDomains": ["applinks:matchcars.app"],
-      "buildNumber": "1.8.2",
+      "buildNumber": "1.8.6",
       "googleServicesFile": "./GoogleService-Info.plist",
       "newArchEnabled": true,
       "infoPlist": {
@@ -28,8 +28,8 @@
       "backgroundColor": "#232327"
     },
     "notification": {
-      "icon": "./assets/images/android-icon-monochrome.png",
-      "color": "#2563EB",
+      "icon": "./assets/images/notification-icon.png",
+      "color": "#F97316",
       "iosDisplayInForeground": true
     },
     "android": {
@@ -64,7 +64,7 @@
         }
       ],
       "newArchEnabled": true,
-      "versionCode": 42,
+      "versionCode": 46,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/icon.png"
@@ -123,8 +123,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/android-icon-monochrome.png",
-          "color": "#00A3FF"
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#F97316"
         }
       ],
       [
@@ -152,7 +152,9 @@
             ]
           },
           "android": {
-            "windowSoftInputMode": "adjustResize"
+            "windowSoftInputMode": "adjustResize",
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
           }
         }
       ],

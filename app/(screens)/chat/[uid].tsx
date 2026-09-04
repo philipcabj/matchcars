@@ -563,6 +563,32 @@ export default function ChatWithUserScreen() {
     return () => { unsub1(); unsub2(); };
   }, [convId, user?.uid]);
 
+  // Si la conversación se abrió sin auto en contexto (ej. desde la pestaña
+  // Mensajes, cuyo doc de conversación puede no tener vehicleId) pero hay una
+  // oferta formal, el auto de la oferta ES el auto de la conversación: lo
+  // adoptamos para que aparezca la tarjeta del vehículo, los datos en vivo y
+  // los paneles de venta/confirmación.
+  useEffect(() => {
+    if (!currentVehicleId && activeOffer?.vehicleId) {
+      setCurrentVehicleId(activeOffer.vehicleId);
+    }
+    // Semilla desde el snapshot de la oferta — así hay tarjeta de auto aunque
+    // el listener de /vehicles todavía no respondió o la publicación se borró.
+    if (activeOffer?.vehicleSnapshot?.brand && !activeVehicleData) {
+      const vs = activeOffer.vehicleSnapshot;
+      setActiveVehicleData({
+        id: activeOffer.vehicleId,
+        brand: vs.brand ?? "",
+        model: vs.model ?? "",
+        year: vs.year ?? null,
+        price: vs.price ?? null,
+        currency: vs.currency === "USD" ? "USD" : "ARS",
+        cover: vs.coverUrl || "",
+        sellerId: activeOffer.sellerId ?? null,
+      });
+    }
+  }, [currentVehicleId, activeOffer, activeVehicleData]);
+
   // Listener del documento de venta — sigue al auto de ESTA conversación
   // (currentVehicleId), no a activeOffer: un cierre manual (portal, sin
   // oferta formal) también tiene que poder mostrar el panel de confirmar/

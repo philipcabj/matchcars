@@ -56,6 +56,7 @@ export interface Offer extends OfferSummary {
     year?: number;
     price?: number;
     currency?: "ARS" | "USD";
+    coverUrl?: string;
   };
   buyerSnapshot?: {
     firstName?: string;
@@ -65,7 +66,18 @@ export interface Offer extends OfferSummary {
   };
 }
 
-export type LeadSource = "search" | "favorite" | "share" | "alert" | "whatsapp" | "instagram" | "phone" | "in_person" | "other";
+export type LeadSource = "search" | "favorite" | "share" | "alert" | "whatsapp" | "instagram" | "phone" | "in_person" | "web" | "other";
+
+// Datos de contacto de un lead sin cuenta en la app: cargado a mano desde el
+// portal, o entrante desde el formulario "Consultar" de la web pública.
+export interface ManualContact {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  instagramHandle?: string | null;
+  notes?: string | null;
+  contactSource?: LeadSource;
+}
 
 export interface Lead {
   sellerId: string;
@@ -99,6 +111,14 @@ export interface Lead {
     initials?: string;
     avatarColor?: string;
   };
+  manualContact?: ManualContact;
+  webLead?: {
+    message?: string;
+    origin?: "car_detail" | "agency_page";
+    ipHash?: string;
+    userAgent?: string | null;
+  };
+  assignedTo?: string | null;
   contactedAt?: any;
   negotiationAt?: any;
   wonAt?: any;

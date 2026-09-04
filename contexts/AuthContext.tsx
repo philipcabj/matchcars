@@ -11,8 +11,6 @@ import React, {
 import * as Facebook from "expo-auth-session/providers/facebook";
 import * as WebBrowser from "expo-web-browser";
 
-import { ONBOARDING_KEY } from "@/components/Onboarding";
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     FacebookAuthProvider,
     GoogleAuthProvider,
@@ -610,13 +608,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, cleanEmail);
   };
 
-  // Logout
+  // Logout — el onboarding queda scopeado por uid (ver components/Onboarding.tsx),
+  // así que no hace falta limpiar nada acá: cada cuenta lo ve una sola vez.
   const logout = async () => {
-    try {
-        await AsyncStorage.removeItem(ONBOARDING_KEY);
-    } catch (e) {
-        console.error("Error clearing onboarding status:", e);
-    }
     await signOut(auth);
   };
 

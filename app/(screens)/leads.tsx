@@ -12,7 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { addDoc, collection, doc, increment, onSnapshot, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Platform, Share, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Linking, Platform, Share, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function LeadsScreen() {
@@ -386,17 +386,40 @@ export default function LeadsScreen() {
     );
   };
 
+  // Lead entrante sin cuenta en la app: cargado a mano en el portal o vía el
+  // formulario "Consultar" de la web (source "web"). No hay chat ni perfil —
+  // al tocarlo se muestran los datos de contacto para responder directo.
+  const openManualLead = (item: Lead & { id: string }) => {
+    const mc = item.manualContact;
+    if (!mc) return;
+    const bits = [mc.phone && `Tel: ${mc.phone}`, mc.email && `Email: ${mc.email}`].filter(Boolean).join("\n");
+    const body = `${mc.notes || item.lastMessage || ""}\n\n${bits}`.trim();
+    const actions: any[] = [];
+    if (mc.phone) {
+      const digits = mc.phone.replace(/\D/g, "");
+      actions.push({ text: "WhatsApp", onPress: () => Linking.openURL(`https://wa.me/${digits}`).catch(() => {}) });
+      actions.push({ text: "Llamar", onPress: () => Linking.openURL(`tel:${mc.phone}`).catch(() => {}) });
+    }
+    if (mc.email) {
+      actions.push({ text: "Email", onPress: () => Linking.openURL(`mailto:${mc.email}`).catch(() => {}) });
+    }
+    actions.push({ text: "Cerrar", style: "cancel" });
+    Alert.alert(`${mc.name}${item.source === "web" ? " · consulta web" : ""}`, body || "Sin mensaje.", actions);
+  };
+
   const renderItem = ({ item }: { item: Lead & { id: string } }) => {
     const veh = item.vehicleSnapshot;
     const title =
       veh?.brand || veh?.model
         ? `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim()
-        : "Publicación";
+        : "Consulta general";
     const buyer = item.buyerSnapshot;
+    const isManual = !item.buyerId && !!item.manualContact;
     const buyerName =
-      buyer?.firstName || buyer?.lastName
+      item.manualContact?.name ||
+      (buyer?.firstName || buyer?.lastName
         ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim()
-        : "Comprador";
+        : "Comprador");
     const buyerInitials = buyer?.initials || buyerName.slice(0, 2).toUpperCase();
     const buyerAvatarColor = buyer?.avatarColor || theme.accent;
     const hasUnread = item.unreadCount > 0;
@@ -415,10 +438,12 @@ export default function LeadsScreen() {
     return (
       <TouchableOpacity
         onPress={() =>
-          router.push({
-            pathname: "/(screens)/chat/[uid]",
-            params: { uid: item.buyerId, conversationId: item.conversationId, vehicleId: item.vehicleId },
-          })
+          isManual
+            ? openManualLead(item)
+            : router.push({
+                pathname: "/(screens)/chat/[uid]",
+                params: { uid: item.buyerId, conversationId: item.conversationId, vehicleId: item.vehicleId },
+              })
         }
         style={{
           padding: 12,
@@ -432,7 +457,7 @@ export default function LeadsScreen() {
       >
         <TouchableOpacity
           onPress={() =>
-            router.push(`/(screens)/user-profile/${item.buyerId}` as any)
+            isManual ? openManualLead(item) : router.push(`/(screens)/user-profile/${item.buyerId}` as any)
           }
           activeOpacity={0.8}
         >
@@ -469,16 +494,16 @@ export default function LeadsScreen() {
               </Text>
             )}
           </View>
-          <Text
-            style={{
-              color: theme.textMuted,
-              fontSize: 12,
-              marginBottom: 4,
-            }}
-            numberOfLines={1}
-          >
-            {buyerName}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <Text style={{ color: theme.textMuted, fontSize: 12, flexShrink: 1 }} numberOfLines={1}>
+              {buyerName}
+            </Text>
+            {item.source === "web" && (
+              <View style={{ backgroundColor: theme.accent + "22", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 }}>
+                <Text style={{ color: theme.accent, fontSize: 10, fontWeight: "700" }}>WEB</Text>
+              </View>
+            )}
+          </View>
           {item.status === "won" && dealPrice && dealCurrency && (
             <>
               <Text

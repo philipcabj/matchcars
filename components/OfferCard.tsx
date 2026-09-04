@@ -1,6 +1,7 @@
 import { useTheme } from "@/contexts/ThemeContext";
 import { Offer, OfferStatus } from "@/types/commerce";
 import { Ionicons } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
 import React, { useState } from "react";
 import { ActivityIndicator, Keyboard, Modal, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -83,6 +84,35 @@ export function OfferCard({ offer, viewerRole, onAccept, onReject, onCounter, on
           <Text style={{ color: effectiveCfg.color, fontSize: 11, fontWeight: "700" }}>{effectiveCfg.label}</Text>
         </View>
       </View>
+
+      {/* Vehicle — para que siempre se sepa de qué auto es la oferta */}
+      {offer.vehicleSnapshot?.brand ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: theme.badgeBorder ?? theme.inputBackground }}>
+          {offer.vehicleSnapshot.coverUrl ? (
+            <ExpoImage
+              source={{ uri: offer.vehicleSnapshot.coverUrl }}
+              style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: theme.inputBackground }}
+              contentFit="cover"
+              transition={150}
+            />
+          ) : (
+            <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: theme.inputBackground, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="car-sport-outline" size={20} color={theme.textMuted} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }} numberOfLines={1}>
+              {offer.vehicleSnapshot.brand} {offer.vehicleSnapshot.model}
+              {offer.vehicleSnapshot.year ? ` ${offer.vehicleSnapshot.year}` : ""}
+            </Text>
+            {offer.vehicleSnapshot.price ? (
+              <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 1 }}>
+                Publicado: {fmt(offer.vehicleSnapshot.price, offer.vehicleSnapshot.currency ?? offer.currency)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
 
       {/* Main amount — show counter amount when accepted/countered */}
       {(() => {

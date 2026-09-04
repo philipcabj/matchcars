@@ -2,6 +2,7 @@
 import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
+import { openOnboarding } from "@/components/Onboarding";
 import { PriceRecommendation } from "@/components/PriceRecommendation";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1372,6 +1373,14 @@ onPress={() => router.push("/(screens)/alerts" as any)}
         </View>
 
         <View style={{ marginTop: 20, alignItems: "center" }}>
+          <TouchableOpacity
+            onPress={() => openOnboarding()}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, padding: 12 }}
+          >
+            <Ionicons name="help-circle-outline" size={16} color={theme.textMuted} />
+            <Text style={{ color: theme.textMuted, fontSize: 14 }}>Ver tutorial de nuevo</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => {
               showAlert(

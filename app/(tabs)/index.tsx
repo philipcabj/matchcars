@@ -3,7 +3,6 @@ import { CarCard } from "@/components/cards/carcard";
 import { CustomAlert } from "@/components/CustomAlert";
 import { DownloadAppBanner } from "@/components/DownloadAppBanner";
 import { Header } from "@/components/Header";
-import { Onboarding } from "@/components/Onboarding";
 import { SkeletonList } from "@/components/SkeletonLoader";
 import { WebContainer } from "@/components/WebContainer";
 import { useAuth } from "@/contexts/AuthContext";
@@ -1408,7 +1407,6 @@ export default function AutosPublicTab() {
         />
       </View>
       </WebContainer>
-      <Onboarding />
 
       {/* FABs — fijos, no scrollean */}
       {Platform.OS !== "web" && (

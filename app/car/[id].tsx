@@ -789,11 +789,35 @@ export default function CarDetailsScreen() {
       const convId = `${uid1}_${uid2}_${vehicle.id}`;
       const leadId = `${vehicle.userId}_${user.uid}_${vehicle.id}`;
 
-      // Ensure conversation exists
+      const vehicleCover = vehicle.images?.cover ?? vehicle.coverImage ?? vehicle.cover ?? "";
+      // Sin undefined: getFirestore() no tiene ignoreUndefinedProperties, así
+      // que cualquier campo undefined haría fallar el setDoc/updateDoc.
+      const convVehicleData = {
+        id: vehicle.id,
+        brand: vehicle.brand ?? "",
+        model: vehicle.model ?? "",
+        year: Number(vehicle.year) || null,
+        price: Number(vehicle.price) || null,
+        currency: vehicle.currency === "USD" ? "USD" : "ARS",
+        status: vehicle.status ?? "available",
+        cover: vehicleCover,
+      };
+
+      // Ensure conversation exists — con el auto en contexto, así la pestaña
+      // Mensajes y el chat saben de qué vehículo es la oferta (antes esto
+      // creaba el hilo "pelado" y la agencia no sabía de qué auto le hablaban).
       const cRef = doc(db, "conversations", convId);
       const cSnap = await getDoc(cRef);
       if (!cSnap.exists()) {
-        await setDoc(cRef, { members: [user.uid, vehicle.userId], createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        await setDoc(cRef, {
+          members: [user.uid, vehicle.userId],
+          vehicleId: vehicle.id,
+          vehicleData: convVehicleData,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(cRef, { vehicleId: vehicle.id, vehicleData: convVehicleData }).catch(() => {});
       }
 
       const now = serverTimestamp();
@@ -816,7 +840,7 @@ export default function CarDetailsScreen() {
         createdAt: now,
         updatedAt: now,
         expiresAt,
-        vehicleSnapshot: { brand: vehicle.brand ?? "", model: vehicle.model ?? "", year: Number(vehicle.year) || undefined, price: vehicle.price, currency: (vehicle.currency as "ARS" | "USD") || "ARS" },
+        vehicleSnapshot: { brand: vehicle.brand ?? "", model: vehicle.model ?? "", year: Number(vehicle.year) || undefined, price: vehicle.price, currency: (vehicle.currency as "ARS" | "USD") || "ARS", ...(vehicleCover ? { coverUrl: vehicleCover } : {}) },
         buyerSnapshot: { firstName: profile?.firstName, lastName: profile?.lastName, initials: profile?.initials, avatarColor: profile?.avatarColor },
       };
 
@@ -885,7 +909,9 @@ export default function CarDetailsScreen() {
       }
 
       // System message in conversation
-      const msgText = `Oferta: ${offerCurrency} ${Number(parsed).toLocaleString("es-AR")}`;
+      const msgText = carModel
+        ? `Oferta por ${carModel}: ${offerCurrency} ${Number(parsed).toLocaleString("es-AR")}`
+        : `Oferta: ${offerCurrency} ${Number(parsed).toLocaleString("es-AR")}`;
       await addDoc(collection(db, "conversations", convId, "messages"), {
         senderId: user.uid, text: msgText, type: "offer", offerId: offerRef.id, createdAt: now,
       });
