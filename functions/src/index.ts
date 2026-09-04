@@ -17,6 +17,10 @@ admin.initializeApp();
 
 const db = admin.firestore();
 const geminiKey = defineSecret("GEMINI_API_KEY");
+
+// Resumen semanal por email para agencias (functions/src/digest.ts) — no tiene
+// side effects a nivel módulo, toma admin.firestore() dentro del handler.
+export { weeklyAgencyDigest } from "./digest";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

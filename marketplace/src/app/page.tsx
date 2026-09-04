@@ -2,7 +2,8 @@ import { AgencyCard } from "@/components/AgencyCard";
 import { AgencyPromoCard } from "@/components/AgencyPromoCard";
 import { AppDownloadCard } from "@/components/AppDownloadCard";
 import { FilterBar } from "@/components/FilterBar";
-import { VehicleCard } from "@/components/VehicleCard";
+import { VehicleFeed } from "@/components/VehicleFeed";
+import { facetPath, resolveFacet, slugify } from "@/lib/facets";
 import { getFeaturedAgencies } from "@/lib/agencies";
 import { getUsdToArsRate } from "@/lib/pricing-admin";
 import { logSearchEvent } from "@/lib/search-analytics";
@@ -11,16 +12,37 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
-export const metadata: Metadata = {
-  title: "Autos usados en venta",
-  description: "Explorá miles de autos usados de particulares y agencias verificadas en toda Argentina.",
-  alternates: { canonical: "/" },
-};
-
 type SearchParams = Record<string, string | string[] | undefined>;
 
 function asString(v: string | string[] | undefined): string | undefined {
   return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+// Cuando el único filtro es la marca, el canonical apunta a la landing bonita
+// (/autos/{marca}) para consolidar la señal SEO en una sola URL.
+export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
+  const sp = await searchParams;
+  const onlyBrand =
+    asString(sp.brand) &&
+    !asString(sp.q) &&
+    !asString(sp.province) &&
+    !asString(sp.city) &&
+    !asString(sp.fuelType) &&
+    !asString(sp.minPrice) &&
+    !asString(sp.maxPrice) &&
+    !asString(sp.minYear) &&
+    !asString(sp.maxYear) &&
+    !asString(sp.page);
+  let canonical = "/";
+  if (onlyBrand) {
+    const facet = await resolveFacet([slugify(asString(sp.brand)!)]).catch(() => null);
+    if (facet) canonical = facetPath(facet.brand);
+  }
+  return {
+    title: "Autos usados en venta",
+    description: "Explorá miles de autos usados de particulares y agencias verificadas en toda Argentina.",
+    alternates: { canonical },
+  };
 }
 
 function asNumber(v: string | string[] | undefined): number | undefined {
@@ -133,33 +155,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
         <p className="text-sm text-muted-foreground">{total.toLocaleString("es-AR")} autos encontrados</p>
 
-        {vehicles.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
-            No encontramos autos con esos filtros.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {vehicles.map((v) => (
-              <VehicleCard key={v.id} vehicle={v} />
-            ))}
-          </div>
-        )}
-
-        {totalPages > 1 && (
-          <nav className="flex items-center justify-center gap-2 pt-4">
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <Link
-                key={p}
-                href={buildPageHref(p)}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold ${
-                  p === page ? "bg-accent text-accent-foreground" : "border border-border bg-card text-foreground"
-                }`}
-              >
-                {p}
-              </Link>
-            ))}
-          </nav>
-        )}
+        <VehicleFeed vehicles={vehicles} page={page} totalPages={totalPages} pageHref={buildPageHref} />
 
         <div className="xl:hidden">
           <AgencyPromoCard source="home_mobile" />
@@ -209,7 +205,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
               {popularBrands.map((b) => (
                 <Link
                   key={b.brand}
-                  href={`/?brand=${encodeURIComponent(b.brand)}`}
+                  href={facetPath(b.brand)}
                   className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:border-accent hover:text-accent"
                 >
                   {b.brand} <span className="text-muted-foreground">({b.count})</span>

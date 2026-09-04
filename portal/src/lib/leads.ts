@@ -43,14 +43,20 @@ export interface ManualContact {
   contactSource?: ManualContactSource;
 }
 
+// "web" = entró por el formulario "Consultar" del marketplace público
+// (marketplace/src/lib/leads-server.ts). El resto son los de la app.
+export type LeadOrigin = "web" | string;
+
 export interface LeadListItem {
   id: string;
   status: LeadStatus;
   vehicleSnapshot?: { brand?: string; model?: string; year?: number; price?: number; currency?: string; coverUrl?: string };
   buyerSnapshot?: { firstName?: string; lastName?: string; initials?: string; avatarColor?: string };
   // Presente solo en leads cargados a mano desde el portal (llamada, local,
-  // WhatsApp fuera de la app) — no existen en la app hoy, es nuevo acá.
+  // WhatsApp fuera de la app) o entrantes de la web ("Consultar").
   manualContact?: ManualContact;
+  source?: LeadOrigin;
+  webLead?: { message?: string; origin?: string } | null;
   lastMessage?: string;
   lastMessageAt?: string | null;
   unreadCount?: number;
@@ -90,6 +96,8 @@ export interface LeadDetail {
   vehicleSnapshot?: LeadListItem["vehicleSnapshot"];
   buyerSnapshot?: LeadListItem["buyerSnapshot"];
   manualContact?: ManualContact;
+  source?: LeadOrigin;
+  webLead?: { message?: string; origin?: string } | null;
   lastMessage?: string | null;
   lastMessageAt?: string | null;
   dealPrice?: number | null;

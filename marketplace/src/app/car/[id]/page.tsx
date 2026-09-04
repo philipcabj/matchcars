@@ -4,6 +4,8 @@ import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareModal } from "@/components/ShareModal";
 import { TrackPageView } from "@/components/TrackPageView";
 import { VehicleCard } from "@/components/VehicleCard";
+import { LeadForm } from "@/components/LeadForm";
+import { facetPath } from "@/lib/facets";
 import { generateQrSvg } from "@/lib/qrcode";
 import { getSellerProfile, getSellerReviews, getSimilarVehicles, getVehicle } from "@/lib/vehicles";
 import type { Metadata } from "next";
@@ -37,6 +39,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const description =
     vehicle.description?.slice(0, 160) ||
     `${title} — ${vehicle.currency} ${vehicle.price.toLocaleString("es-AR")}. ${vehicle.km.toLocaleString("es-AR")} km en ${vehicle.city || vehicle.province}.`;
+  const images = vehicle.coverImage ? [vehicle.coverImage] : [];
   return {
     title,
     description,
@@ -44,8 +47,23 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     openGraph: {
       title,
       description,
-      images: vehicle.coverImage ? [vehicle.coverImage] : [],
+      url: `/car/${id}`,
+      siteName: "Matchcars",
+      locale: "es_AR",
+      images,
       type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images,
+    },
+    // OG product tags (Facebook/WhatsApp) — no están en el tipo OpenGraph de
+    // Next, van por `other`.
+    other: {
+      "product:price:amount": String(vehicle.price),
+      "product:price:currency": vehicle.currency,
     },
   };
 }
@@ -56,22 +74,6 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
   if (!data) notFound();
   const { vehicle, seller, similar, reviews, qrSvg } = data;
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "Product",
-    name: `${vehicle.brand} ${vehicle.model} ${vehicle.version}`.trim(),
-    description: vehicle.description || undefined,
-    image: vehicle.coverImage ? [vehicle.coverImage, ...vehicle.gallery] : vehicle.gallery,
-    brand: { "@type": "Brand", name: vehicle.brand },
-    offers: {
-      "@type": "Offer",
-      priceCurrency: vehicle.currency,
-      price: vehicle.price,
-      availability: "https://schema.org/InStock",
-      url: `${APP_BASE_URL}/car/${vehicle.id}`,
-    },
-  };
-
   const photos = [vehicle.coverImage, ...vehicle.gallery].filter(Boolean);
   const sellerLink = seller
     ? seller.isDealer
@@ -79,9 +81,98 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
       : `${APP_BASE_URL}/user-profile/${vehicle.userId}`
     : null;
 
+  // Vehicle listing structured data (schema.org/Car) — habilita rich results
+  // de autos en Google. El rating/reviews cuelgan del vendedor, no del auto.
+  const carName = `${vehicle.brand} ${vehicle.model} ${vehicle.version}`.replace(/\s+/g, " ").trim();
+  const sellerNode = seller
+    ? {
+        "@type": seller.isDealer ? "AutoDealer" : "Person",
+        name: seller.displayName || vehicle.userName || "Vendedor",
+        ...(sellerLink ? { url: sellerLink } : {}),
+        ...(vehicle.sellerReviewCount > 0
+          ? {
+              aggregateRating: {
+                "@type": "AggregateRating",
+                ratingValue: Number(vehicle.sellerRating.toFixed(1)),
+                reviewCount: vehicle.sellerReviewCount,
+                bestRating: 5,
+                worstRating: 1,
+              },
+            }
+          : {}),
+        ...(reviews.length > 0
+          ? {
+              review: reviews.slice(0, 5).map((r) => ({
+                "@type": "Review",
+                reviewRating: { "@type": "Rating", ratingValue: r.rating, bestRating: 5, worstRating: 1 },
+                author: { "@type": "Person", name: r.reviewerName },
+                ...(r.comment ? { reviewBody: r.comment } : {}),
+                ...(r.createdAt ? { datePublished: r.createdAt.slice(0, 10) } : {}),
+              })),
+            }
+          : {}),
+      }
+    : null;
+
+  const carNode = {
+    "@type": "Car",
+    name: carName,
+    ...(vehicle.description ? { description: vehicle.description } : {}),
+    ...(photos.length ? { image: photos } : {}),
+    brand: { "@type": "Brand", name: vehicle.brand },
+    model: vehicle.model,
+    ...(vehicle.version ? { vehicleConfiguration: vehicle.version } : {}),
+    ...(vehicle.year ? { vehicleModelDate: String(vehicle.year), productionDate: String(vehicle.year) } : {}),
+    ...(vehicle.km > 0
+      ? { mileageFromOdometer: { "@type": "QuantitativeValue", value: vehicle.km, unitCode: "KMT" } }
+      : {}),
+    ...(vehicle.fuelType ? { fuelType: vehicle.fuelType } : {}),
+    ...(vehicle.gearbox ? { vehicleTransmission: vehicle.gearbox } : {}),
+    ...(vehicle.engine ? { vehicleEngine: { "@type": "EngineSpecification", name: vehicle.engine } } : {}),
+    itemCondition: "https://schema.org/UsedCondition",
+    offers: {
+      "@type": "Offer",
+      priceCurrency: vehicle.currency,
+      price: vehicle.price,
+      availability: "https://schema.org/InStock",
+      itemCondition: "https://schema.org/UsedCondition",
+      url: `${APP_BASE_URL}/car/${vehicle.id}`,
+      ...(sellerNode ? { seller: sellerNode } : {}),
+      ...(vehicle.city || vehicle.province
+        ? { areaServed: [vehicle.city, vehicle.province].filter(Boolean).join(", ") }
+        : {}),
+    },
+  };
+
+  // Breadcrumbs → Inicio › Marca › Modelo › este auto, apuntando a las
+  // landings por faceta (/autos/{marca}/{modelo}).
+  const breadcrumbNode = {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Inicio", item: APP_BASE_URL },
+      { "@type": "ListItem", position: 2, name: vehicle.brand, item: `${APP_BASE_URL}${facetPath(vehicle.brand)}` },
+      ...(vehicle.model
+        ? [
+            {
+              "@type": "ListItem",
+              position: 3,
+              name: vehicle.model,
+              item: `${APP_BASE_URL}${facetPath(vehicle.brand, vehicle.model)}`,
+            },
+          ]
+        : []),
+      { "@type": "ListItem", position: vehicle.model ? 4 : 3, name: carName },
+    ],
+  };
+
+  const jsonLd = { "@context": "https://schema.org", "@graph": [carNode, breadcrumbNode] };
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+      />
       <TrackPageView event="web_car_view" params={{ vehicleId: vehicle.id, brand: vehicle.brand, model: vehicle.model }} />
 
       <Link href="/" className="text-sm font-semibold text-accent">
@@ -128,6 +219,12 @@ export default async function CarDetailPage({ params }: { params: Promise<{ id: 
               />
             </div>
           </div>
+
+          <LeadForm
+            vehicleId={vehicle.id}
+            sellerName={seller?.displayName}
+            carLabel={`${vehicle.brand} ${vehicle.model} ${vehicle.year ?? ""}`.replace(/\s+/g, " ").trim()}
+          />
 
           {seller && sellerLink && (
             <a href={sellerLink} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4 transition hover:border-accent">

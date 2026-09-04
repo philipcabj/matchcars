@@ -215,6 +215,7 @@ export default function LeadsPage() {
             const veh = lead.vehicleSnapshot;
             const buyer = lead.buyerSnapshot;
             const manual = lead.manualContact;
+            const isWeb = lead.source === "web";
             const title = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim() : "Consulta general";
             const buyerName = manual?.name || (buyer?.firstName || buyer?.lastName ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim() : "Comprador");
             const contactLine = manual ? [manual.phone, manual.email, manual.instagramHandle].filter(Boolean).join(" · ") : "";
@@ -234,9 +235,11 @@ export default function LeadsPage() {
                 className={`flex cursor-pointer flex-col gap-2 rounded-xl border p-3 transition hover:border-accent sm:flex-row sm:items-center ${
                   isUnread
                     ? "border-accent/50 bg-accent/5"
-                    : manual
-                      ? "border-amber-500/30 bg-amber-500/5"
-                      : "border-border bg-card"
+                    : isWeb
+                      ? "border-blue-500/30 bg-blue-500/5"
+                      : manual
+                        ? "border-amber-500/30 bg-amber-500/5"
+                        : "border-border bg-card"
                 }`}
               >
                 <div className="relative shrink-0">
@@ -257,7 +260,9 @@ export default function LeadsPage() {
                   <div className="flex items-center justify-between gap-2">
                     <p className={`truncate text-sm ${isUnread ? "font-bold" : "font-semibold"}`}>{title}</p>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      {manual ? (
+                      {isWeb ? (
+                        <span className="rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">🌐 Web</span>
+                      ) : manual ? (
                         <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">Manual</span>
                       ) : (
                         <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
@@ -278,7 +283,7 @@ export default function LeadsPage() {
                   </div>
                   <p className="truncate text-xs text-muted-foreground">
                     {buyerName}
-                    {manual?.contactSource && (
+                    {!isWeb && manual?.contactSource && MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource] && (
                       <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
                         {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
                       </span>

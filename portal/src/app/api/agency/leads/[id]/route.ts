@@ -115,6 +115,8 @@ export const GET = withApiErrors(async (request, ctx: RouteContext<"/api/agency/
     saleHasCommission,
     buyerSnapshot: data.buyerSnapshot ?? null,
     manualContact: data.manualContact ?? null,
+    source: data.source ?? null,
+    webLead: data.webLead ?? null,
     lastMessage: data.lastMessage ?? null,
     lastMessageAt: toIso(data.lastMessageAt),
     dealPrice: data.dealPrice ?? null,

@@ -288,6 +288,7 @@ export default function LeadDetailPage() {
   const manual = lead.manualContact;
   const title = veh?.brand || veh?.model ? `${veh?.brand ?? ""} ${veh?.model ?? ""} ${veh?.year ?? ""}`.trim() : "Consulta general";
   const buyerName = manual?.name || (buyer?.firstName || buyer?.lastName ? `${buyer?.firstName ?? ""} ${buyer?.lastName ?? ""}`.trim() : "Comprador");
+  const isWeb = lead.source === "web";
   const canAct = !lead.deletedAt && lead.status !== "won" && lead.status !== "lost";
   const isOrganic = !!lead.conversationId;
   const canDelete = !lead.deletedAt && !!manual && !lead.saleOperationId;
@@ -300,19 +301,21 @@ export default function LeadDetailPage() {
 
       <div
         className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl border p-4 ${
-          manual ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
+          isWeb ? "border-blue-500/30 bg-blue-500/5" : manual ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
         }`}
       >
         <div>
           <p className="text-base font-bold">{title}</p>
           <p className="text-sm text-muted-foreground">
             {buyerName}
-            {isOrganic ? (
+            {isWeb ? (
+              <span className="ml-1.5 rounded-full bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">🌐 Consulta web</span>
+            ) : isOrganic ? (
               <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">App</span>
             ) : (
               <span className="ml-1.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">Manual</span>
             )}
-            {manual?.contactSource && (
+            {!isWeb && manual?.contactSource && MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource] && (
               <span className="ml-1.5 rounded-full bg-muted/20 px-1.5 py-0.5 text-[10px] font-semibold">
                 {MANUAL_CONTACT_SOURCE_LABELS[manual.contactSource]}
               </span>

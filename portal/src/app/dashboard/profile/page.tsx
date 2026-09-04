@@ -56,6 +56,7 @@ export default function AgencyProfilePage() {
   const { user, getIdToken } = useAuth();
   const [values, setValues] = useState<AgencyProfileFields | null>(null);
   const [canWatermark, setCanWatermark] = useState(false);
+  const [weeklyDigest, setWeeklyDigest] = useState(true);
   const [logoUploading, setLogoUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -67,9 +68,10 @@ export default function AgencyProfilePage() {
       try {
         const token = await getIdToken();
         const res = await fetch("/api/agency/profile", { headers: { Authorization: `Bearer ${token}` } });
-        const data = await parseJsonResponse<{ profile: AgencyProfileFields; canUseWatermark: boolean }>(res);
+        const data = await parseJsonResponse<{ profile: AgencyProfileFields; canUseWatermark: boolean; weeklyDigestEmail: boolean }>(res);
         setValues({ ...EMPTY_AGENCY_PROFILE, ...data.profile });
         setCanWatermark(data.canUseWatermark);
+        setWeeklyDigest(data.weeklyDigestEmail ?? true);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Error desconocido");
       }
@@ -118,7 +120,7 @@ export default function AgencyProfilePage() {
       const res = await fetch("/api/agency/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, weeklyDigestEmail: weeklyDigest }),
       });
       await parseJsonResponse(res);
       setSuccess(true);
@@ -296,6 +298,18 @@ export default function AgencyProfilePage() {
               );
             })}
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <p className="mb-2 text-sm font-semibold">Notificaciones por email</p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={weeklyDigest}
+              onChange={(e) => setWeeklyDigest(e.target.checked)}
+            />
+            Recibir el resumen semanal (leads, ofertas, ventas y stock de la semana)
+          </label>
         </div>
 
         {error && <p className="text-sm text-error">{error}</p>}

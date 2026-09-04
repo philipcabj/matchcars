@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.weeklyAgencyDigest = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -54,6 +54,10 @@ const generative_ai_1 = require("@google/generative-ai");
 admin.initializeApp();
 const db = admin.firestore();
 const geminiKey = (0, params_1.defineSecret)("GEMINI_API_KEY");
+// Resumen semanal por email para agencias (functions/src/digest.ts) — no tiene
+// side effects a nivel módulo, toma admin.firestore() dentro del handler.
+var digest_1 = require("./digest");
+Object.defineProperty(exports, "weeklyAgencyDigest", { enumerable: true, get: function () { return digest_1.weeklyAgencyDigest; } });
 const metaCapiToken = (0, params_1.defineSecret)("META_CAPI_TOKEN");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const EXCLUDED_STATUSES = [

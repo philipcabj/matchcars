@@ -23,7 +23,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// metadataBase resuelve las URLs relativas (canonical, og:image, og:url) a
+// absolutas — sin esto Next.js las deja relativas o cae en localhost.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://matchcars.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "Matchcars | Compra y venta de autos usados en Argentina",
     template: "%s | Matchcars",

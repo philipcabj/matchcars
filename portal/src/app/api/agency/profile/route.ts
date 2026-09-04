@@ -75,7 +75,13 @@ export const GET = withApiErrors(async (request) => {
     businessCoordinates,
   };
 
-  return Response.json({ profile, canUseWatermark: canUseWatermark(data.plan || "free") });
+  return Response.json({
+    profile,
+    canUseWatermark: canUseWatermark(data.plan || "free"),
+    // Preferencia de email: resumen semanal (functions/src/digest.ts). Default
+    // ON — solo se apaga si el campo es explícitamente false.
+    weeklyDigestEmail: data.weeklyDigestEmail !== false,
+  });
 });
 
 export const PATCH = withApiErrors(async (request) => {
@@ -89,6 +95,9 @@ export const PATCH = withApiErrors(async (request) => {
   const update: Record<string, unknown> = {};
   for (const field of STRING_FIELDS) {
     if (typeof body[field] === "string") update[field] = body[field].trim();
+  }
+  if (typeof body.weeklyDigestEmail === "boolean") {
+    update.weeklyDigestEmail = body.weeklyDigestEmail;
   }
   if (body.businessCoordinates === null) {
     update.businessCoordinates = null;

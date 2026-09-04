@@ -97,6 +97,8 @@ export const GET = withApiErrors(async (request) => {
         vehicleSnapshot: data.vehicleSnapshot ?? null,
         buyerSnapshot: data.buyerSnapshot ?? null,
         manualContact: data.manualContact ?? null,
+        source: data.source ?? null,
+        webLead: data.webLead ?? null,
         lastMessage: data.lastMessage ?? null,
         lastMessageAt: toIso(data.lastMessageAt),
         unreadCount: data.unreadCount ?? 0,

@@ -4,12 +4,64 @@
 import { Avatar } from "@/components/Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
+import { useNotifications } from "@/hooks/useNotifications";
 import { parseJsonResponse } from "@/lib/api-client";
 import { LEAD_STAGE_BAR_COLOR, LEAD_STATUS_LABELS, LEAD_STATUS_ORDER, LeadListItem, LeadStats, LeadStatus, SalesByMonth } from "@/lib/leads";
+import { NotificationItem } from "@/lib/notifications";
 import { AgencyReports } from "@/lib/reports";
 import { STATUS_BAR_COLOR } from "@/lib/vehicle";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+
+const TODO_ICON: Record<NotificationItem["type"], string> = {
+  new_lead: "🆕",
+  lead_stale: "⏰",
+  pending_offer: "💰",
+  pending_sale_confirmation: "⏳",
+  checklist_due: "📅",
+  agency_thread_message: "🤝",
+  stock_incomplete: "📝",
+  stock_stale: "🐌",
+};
+
+function TodoToday() {
+  const { items } = useNotifications();
+  if (items.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <p className="text-sm font-semibold">Para hacer hoy</p>
+        <p className="mt-1 text-sm text-muted-foreground">Estás al día ✅</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-2xl border border-accent/40 bg-accent/5 p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-semibold">
+          Para hacer hoy <span className="text-muted-foreground">({items.length})</span>
+        </p>
+      </div>
+      <div className="flex flex-col">
+        {items.slice(0, 6).map((item) => (
+          <Link
+            key={item.id}
+            href={item.href}
+            className="flex items-start gap-2.5 border-b border-border/50 py-2.5 text-left transition last:border-0 hover:opacity-70"
+          >
+            <span className="shrink-0 text-base leading-tight">{TODO_ICON[item.type] ?? "•"}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold">{item.title}</p>
+              <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
+            </div>
+          </Link>
+        ))}
+      </div>
+      {items.length > 6 && (
+        <p className="mt-2 text-xs text-muted-foreground">y {items.length - 6} más en la campanita 🔔</p>
+      )}
+    </div>
+  );
+}
 
 function UsageBar({ used, limit }: { used: number; limit: number | null }) {
   const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
@@ -190,6 +242,8 @@ export default function DashboardPage() {
           </p>
         )}
       </div>
+
+      {data.hasCRM && data.myPermissions.manageLeads && <TodoToday />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-border bg-card p-5">

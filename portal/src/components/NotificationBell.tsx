@@ -7,10 +7,13 @@ import { createPortal } from "react-dom";
 
 const TYPE_ICON: Record<string, string> = {
   new_lead: "🆕",
+  lead_stale: "⏰",
   pending_offer: "💰",
   pending_sale_confirmation: "⏳",
   checklist_due: "📅",
   agency_thread_message: "🤝",
+  stock_incomplete: "📝",
+  stock_stale: "🐌",
 };
 
 function fmtRelative(iso: string | null): string {

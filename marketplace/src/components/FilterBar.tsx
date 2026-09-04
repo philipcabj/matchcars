@@ -16,6 +16,7 @@ export function FilterBar({
   provinces,
   cities,
   current,
+  action,
 }: {
   brands: string[];
   provinces: string[];
@@ -23,6 +24,10 @@ export function FilterBar({
   // lib/vehicles.ts) — lista plana de todas las ciudades/barrios con algún
   // auto publicado, sin importar la provincia.
   cities: string[];
+  // Adónde envía el form. Por defecto la URL actual (home). Las landings por
+  // faceta pasan "/" para que al filtrar el usuario caiga en la búsqueda
+  // completa por querystring en vez de mezclar path + query.
+  action?: string;
   current: {
     q?: string;
     brand?: string;
@@ -38,7 +43,7 @@ export function FilterBar({
   };
 }) {
   return (
-    <form method="get" className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4">
+    <form method="get" action={action} className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4">
       <label className="flex w-full flex-col gap-1 text-xs font-medium text-muted-foreground">
         Buscar
         <input

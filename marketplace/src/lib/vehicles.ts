@@ -426,6 +426,23 @@ export async function getVehicleCountsByUser(): Promise<Record<string, number>> 
   return counts;
 }
 
+// Marca -> modelos publicados, para las landings por faceta (lib/facets.ts) y
+// el sitemap. Reusa el mismo lote cacheado que el resto de este archivo.
+export async function getBrandModelMap(): Promise<Record<string, string[]>> {
+  const vehicles = await fetchPublishedVehicles();
+  const map = new Map<string, Set<string>>();
+  for (const v of vehicles) {
+    if (!v.brand || !v.model) continue;
+    if (!map.has(v.brand)) map.set(v.brand, new Set());
+    map.get(v.brand)!.add(v.model);
+  }
+  return Object.fromEntries(
+    Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([brand, models]) => [brand, Array.from(models).sort((a, b) => a.localeCompare(b))])
+  );
+}
+
 export async function getFilterOptions(): Promise<{ brands: string[]; provinces: string[]; cities: string[] }> {
   const vehicles = await fetchPublishedVehicles();
   const brands = Array.from(new Set(vehicles.map((v) => v.brand).filter(Boolean))).sort();

@@ -1,4 +1,5 @@
 import { AgencyStockTabs } from "@/components/AgencyStockTabs";
+import { LeadForm } from "@/components/LeadForm";
 import { SellerContactButtons } from "@/components/SellerContactButtons";
 import { ShareModal } from "@/components/ShareModal";
 import { StarRating } from "@/components/StarRating";
@@ -132,6 +133,8 @@ export default async function AgencyProfilePage({ params }: { params: Promise<{ 
               waMessage={`Hola! Vi tu perfil de ${agency.name} en MatchCars y quería consultarte.`}
             />
           </div>
+
+          <LeadForm agencyId={agency.id} sellerName={agency.name} />
 
           {(agency.businessAddress || agency.businessHours || agency.website || agency.instagram) && (
             <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm">
