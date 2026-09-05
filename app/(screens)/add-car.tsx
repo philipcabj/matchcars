@@ -1033,56 +1033,48 @@ export default function AddCarScreen() {
     return result.uri;
   }
 
-  // Computes a 4:3 crop centered on a detected car bounding box, with 30% padding for context.
-  function computeCarCenteredCrop(box: BoundingBox, width: number, height: number, targetRatio: number) {
-    const carW = (box.xmax - box.xmin) * width;
-    const carH = (box.ymax - box.ymin) * height;
-
-    const padding = 0.30;
-    let w = carW * (1 + padding);
-    let h = carH * (1 + padding);
-
-    w = Math.min(w, width - 2);
-    h = Math.min(h, height - 2);
-
-    const currentRatio = w / h;
-    if (currentRatio > targetRatio) {
-      h = Math.min(w / targetRatio, height - 2);
-    } else {
-      w = Math.min(h * targetRatio, width - 2);
-    }
-
-    const centerX = (box.xmin + box.xmax) / 2;
-    const centerY = (box.ymin + box.ymax) / 2;
-
-    const x = centerX * width - w / 2;
-    const y = centerY * height - h / 2;
-
-    const finalW = Math.max(1, Math.floor(w));
-    const finalH = Math.max(1, Math.floor(h));
-    const finalX = Math.max(0, Math.min(Math.floor(x), width - finalW));
-    const finalY = Math.max(0, Math.min(Math.floor(y), height - finalH));
-
-    return { originX: finalX, originY: finalY, width: finalW, height: finalH };
-  }
-
-  function naiveCenterCrop(width: number, height: number, targetRatio: number) {
+  // Reencuadra al ratio objetivo SIN acercar la imagen: siempre el rectángulo
+  // más grande del ratio pedido que entra en la foto original — solo se
+  // recorta el lado largo. La caja del auto (detección IA, normalizada 0-1)
+  // únicamente decide QUÉ franja conservar para no cortar el vehículo; nunca
+  // achica el recorte ni hace zoom. Devuelve null si la foto ya está en ratio.
+  //
+  // Antes esto recortaba a la caja detectada + 30% de margen, lo que en la
+  // práctica siempre acercaba el auto (las cajas de detección son ajustadas)
+  // — resultado: fotos publicadas con zoom inservible (varios casos
+  // reportados, publicaciones #127 y siguientes).
+  function computeReframeCrop(
+    box: BoundingBox | null,
+    width: number,
+    height: number,
+    targetRatio: number
+  ) {
     const currentRatio = width / height;
-    if (Math.abs(currentRatio - targetRatio) <= 0.05) return null;
+    if (Math.abs(currentRatio - targetRatio) <= 0.02) return null;
 
-    let originX = 0;
-    let originY = 0;
     let cropW = width;
     let cropH = height;
-
     if (currentRatio > targetRatio) {
-      cropW = height * targetRatio;
-      originX = (width - cropW) / 2;
+      cropW = Math.round(height * targetRatio);
     } else {
-      cropH = width / targetRatio;
-      originY = (height - cropH) / 2;
+      cropH = Math.round(width / targetRatio);
     }
 
+    // Centro de la franja: centrado por defecto; si hay una caja confiable
+    // (el auto ocupa al menos el 15% del ancho y del alto), sobre el auto.
+    let cx = width / 2;
+    let cy = height / 2;
+    if (box) {
+      const bw = box.xmax - box.xmin;
+      const bh = box.ymax - box.ymin;
+      if (bw >= 0.15 && bh >= 0.15) {
+        cx = ((box.xmin + box.xmax) / 2) * width;
+        cy = ((box.ymin + box.ymax) / 2) * height;
+      }
+    }
+
+    const originX = Math.max(0, Math.min(Math.round(cx - cropW / 2), width - cropW));
+    const originY = Math.max(0, Math.min(Math.round(cy - cropH / 2), height - cropH));
     return { originX, originY, width: cropW, height: cropH };
   }
 
@@ -1095,42 +1087,33 @@ export default function AddCarScreen() {
 
   async function standardizeImage(uri: string): Promise<string> {
     const { width, height } = await getImageSize(uri);
-    // Target 4:3 aspect ratio
     const targetRatio = 4 / 3;
+    // Si la foto ya está (casi) en 4:3 no se toca el encuadre — ni siquiera se
+    // llama a la IA.
+    const needsCrop = Math.abs(width / height - targetRatio) > 0.02;
 
-    let cropAction: { originX: number; originY: number; width: number; height: number } | null = null;
-
-    // Try to center the crop on the detected car so the vehicle isn't cut off.
-    // Falls back silently to a plain center crop if detection fails or times out,
-    // so a slow/unavailable AI call never blocks the upload.
-    try {
-      // Las fotos de cámara pueden pesar varios MB a resolución original: leerlas
-      // en base64 directamente hacía que la detección superara el timeout casi
-      // siempre y terminara cayendo al recorte simple. Detectamos sobre una copia
-      // liviana; el box normalizado (0-1) igual se aplica sobre el tamaño original.
-      const detectionCopy = await ImageManipulator.manipulateAsync(
-        uri,
-        [{ resize: { width: Math.min(1280, width) } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      const base64 = await FileSystem.readAsStringAsync(detectionCopy.uri, { encoding: "base64" });
-      const aiResult = await withTimeout(detectCar(base64), 8000);
-      if (aiResult?.success && aiResult.box) {
-        cropAction = computeCarCenteredCrop(aiResult.box, width, height, targetRatio);
+    let box: BoundingBox | null = null;
+    if (needsCrop) {
+      // Solo cuando hay que recortar el lado largo vale la pena detectar el
+      // auto, para elegir qué franja conservar (no para acercar). Detectamos
+      // sobre una copia liviana; el box normalizado se aplica al tamaño real.
+      try {
+        const detectionCopy = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: Math.min(1280, width) } }],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        const base64 = await FileSystem.readAsStringAsync(detectionCopy.uri, { encoding: "base64" });
+        const aiResult = await withTimeout(detectCar(base64), 8000);
+        if (aiResult?.success && aiResult.box) box = aiResult.box;
+      } catch (e) {
+        logger.log("Smart crop detection failed, usando recorte centrado", e);
       }
-    } catch (e) {
-      logger.log("Smart crop detection failed, falling back to center crop", e);
     }
 
-    if (!cropAction) {
-      cropAction = naiveCenterCrop(width, height, targetRatio);
-    }
-
+    const cropAction = computeReframeCrop(box, width, height, targetRatio);
     const actions: any[] = [];
-    if (cropAction) {
-        actions.push({ crop: cropAction });
-    }
-    // Resize to 1280x960 (standard high quality)
+    if (cropAction) actions.push({ crop: cropAction });
     actions.push({ resize: { width: 1200 } });
 
     const result = await ImageManipulator.manipulateAsync(uri, actions, {
@@ -1952,73 +1935,21 @@ export default function AddCarScreen() {
         if (aiResult.success && aiResult.box) {
              const box = aiResult.box;
 
-             // Control de sanidad: antes de esto, si Gemini devolvía una caja
-             // mal detectada (ej. un reflejo o un detalle de la carrocería en
-             // vez del auto completo), el código recortaba igual sin
-             // preguntar — resultado: fotos publicadas con un zoom
-             // inservible (ver caso reportado, publicación #127). Un auto
-             // real casi nunca ocupa menos del 15% del ancho/alto de una
-             // foto pensada para mostrarlo — si la caja detectada es más
-             // chica que eso, tratamos la detección como no confiable y
-             // dejamos la foto sin tocar en vez de arriesgarnos a arruinarla.
-             const MIN_CAR_FRACTION = 0.15;
-             const boxWidthFrac = box.xmax - box.xmin;
-             const boxHeightFrac = box.ymax - box.ymin;
-
-             if (boxWidthFrac < MIN_CAR_FRACTION || boxHeightFrac < MIN_CAR_FRACTION) {
-               logger.warn("detectCar: caja demasiado chica, se descarta el recorte", box);
-               showAlert(
-                 "No pudimos mejorar el encuadre",
-                 "No identificamos bien el auto en esta foto — la dejamos como estaba para no arruinarla.",
-                 "info"
+             // Reencuadre a 4:3 SIN acercar: solo se recorta el lado largo y
+             // se usa la caja del auto para elegir la franja (computeReframeCrop
+             // aplica su propio piso de confianza sobre el tamaño de la caja).
+             const cropAction = computeReframeCrop(box, width, height, 4 / 3);
+             if (!cropAction) {
+               showAlert("Encuadre OK", "La foto ya tiene una proporción adecuada — no hace falta recortarla.", "info");
+             } else {
+               const result = await ImageManipulator.manipulateAsync(
+                 workingUri,
+                 [{ crop: cropAction }],
+                 { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
                );
-             } else {
-             // Smart Crop Logic
-             // Calculate car dimensions in pixels
-             const carW = boxWidthFrac * width;
-             const carH = boxHeightFrac * height;
-
-             // Expand car box by 30% to give more context
-             const padding = 0.30;
-             let w = carW * (1 + padding);
-             let h = carH * (1 + padding);
-
-             // Ensure we don't exceed image bounds initially (with 2px safety margin)
-             w = Math.min(w, width - 2);
-             h = Math.min(h, height - 2);
-
-             // Try to Enforce 4:3 aspect ratio
-             const targetRatio = 4 / 3;
-             const currentRatio = w / h;
-
-             if (currentRatio > targetRatio) {
-               h = Math.min(w / targetRatio, height - 2);
-             } else {
-               w = Math.min(h * targetRatio, width - 2);
-             }
-
-             // Center and Clamp
-             const centerX = (box.xmin + box.xmax) / 2;
-             const centerY = (box.ymin + box.ymax) / 2;
-
-             let x = (centerX * width) - (w / 2);
-             let y = (centerY * height) - (h / 2);
-
-             // Final Clamping and Floor
-             const finalW = Math.max(1, Math.floor(w));
-             const finalH = Math.max(1, Math.floor(h));
-             const finalX = Math.max(0, Math.min(Math.floor(x), width - finalW));
-             const finalY = Math.max(0, Math.min(Math.floor(y), height - finalH));
-
-             const actions = [{ crop: { originX: finalX, originY: finalY, width: finalW, height: finalH } }];
-             const result = await ImageManipulator.manipulateAsync(workingUri, actions, {
-                compress: 0.9,
-                format: ImageManipulator.SaveFormat.JPEG,
-             });
-
-             setEditorWorkingUri(result.uri);
-             setImageRatio(result.width / result.height);
-             showAlert("Foto mejorada", "Se ha re-encuadrado el vehículo (4:3) automáticamente.", "success");
+               setEditorWorkingUri(result.uri);
+               setImageRatio(result.width / result.height);
+               showAlert("Foto mejorada", "Se reencuadró a 4:3 sin acercar la imagen.", "success");
              }
         } else {
              console.error("AI Error (Car):", aiResult.error);
