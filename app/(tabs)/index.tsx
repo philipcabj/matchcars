@@ -12,6 +12,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { calcMatchScore } from "@/lib/matchScore";
+import { parseSearchQuery } from "@/lib/ai";
 import { sendNotificationEmail } from "@/lib/mail";
 import { getBoostScoreMultiplier, hasUnlimitedFeatured, hasWeekendBoost, isDealerPlan } from "@/lib/planChecks";
 import { getListingYears, getUsdToArsRate } from "@/lib/pricing";
@@ -132,6 +133,8 @@ export default function AutosPublicTab() {
   const [kmMinOpen, setKmMinOpen] = useState(false);
   const [kmMaxOpen, setKmMaxOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+  const [smartSearching, setSmartSearching] = useState(false);
+  const [smartSummary, setSmartSummary] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>("relevance");
   const [usdArsRate, setUsdArsRate] = useState<number>(USD_ARS_FALLBACK);
 
@@ -200,10 +203,45 @@ export default function AutosPublicTab() {
     setFuelFilter("");
     setFilterCurrency(undefined);
     setModelsRemote([]);
+    setSmartSummary(null);
     try {
       await AsyncStorage.removeItem(STORAGE_KEY_FILTERS);
     } catch (e) {
       console.error("Error clearing filters:", e);
+    }
+  };
+
+  // Búsqueda en lenguaje natural: manda el texto a la Cloud Function parseSearch
+  // y aplica los filtros que devuelve.
+  const runSmartSearch = async () => {
+    const q = searchQuery.trim();
+    if (q.length < 3 || smartSearching) return;
+    setSmartSearching(true);
+    try {
+      const res = await parseSearchQuery(q);
+      const f = res?.filters;
+      if (!f || Object.keys(f).length === 0) {
+        setSmartSummary("No entendí bien — probá con otras palabras.");
+        return;
+      }
+      if (f.brand) { setBrandFilter(f.brand); loadModels(f.brand); }
+      if (f.model) setModelFilter(f.model);
+      if (f.province) setProvinceFilter(f.province);
+      if (f.fuelType) setFuelFilter(f.fuelType);
+      if (f.minYear) setYearMin(String(f.minYear));
+      if (f.maxYear) setYearMax(String(f.maxYear));
+      if (f.maxPrice) {
+        setFilterCurrency(f.currency === "USD" ? "USD" : "ARS");
+        setPriceMax(String(f.maxPrice));
+      }
+      if (f.financing) setFinancingFilter("financed");
+      setSmartSummary(res?.summary || null);
+      setSearchQuery("");
+      setFiltersCollapsed(false);
+    } catch {
+      setSmartSummary("No se pudo procesar la búsqueda.");
+    } finally {
+      setSmartSearching(false);
     }
   };
 
@@ -1013,16 +1051,39 @@ export default function AutosPublicTab() {
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Buscar marca, modelo…"
+            placeholder="Buscá: “toyota automático hasta 15 palos en córdoba”"
             placeholderTextColor={theme.textMuted}
+            returnKeyType="search"
+            onSubmitEditing={() => { if (searchQuery.trim().includes(" ")) runSmartSearch(); }}
             style={{ flex: 1, color: theme.text, paddingVertical: 8, paddingHorizontal: 8, fontSize: 13 }}
           />
+          {smartSearching ? (
+            <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 2 }} />
+          ) : searchQuery.trim().length > 8 && searchQuery.trim().includes(" ") ? (
+            <TouchableOpacity
+              onPress={runSmartSearch}
+              style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: `${theme.accent}18`, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, marginRight: 2 }}
+            >
+              <Ionicons name="sparkles" size={12} color={theme.accent} />
+              <Text style={{ color: theme.accent, fontSize: 11, fontWeight: "700" }}>Buscar con IA</Text>
+            </TouchableOpacity>
+          ) : null}
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery("")}>
               <Ionicons name="close-circle" size={16} color={theme.textMuted} />
             </TouchableOpacity>
           )}
         </View>
+        {smartSummary && (
+          <TouchableOpacity
+            onPress={() => setSmartSummary(null)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: `${theme.accent}12`, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: `${theme.accent}30` }}
+          >
+            <Ionicons name="sparkles" size={13} color={theme.accent} />
+            <Text style={{ color: theme.text, fontSize: 12, flex: 1 }} numberOfLines={1}>{smartSummary}</Text>
+            <Ionicons name="close" size={13} color={theme.textMuted} />
+          </TouchableOpacity>
+        )}
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <Text style={{ color: theme.text, fontSize: 16, fontWeight: "700" }}>Publicaciones</Text>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>

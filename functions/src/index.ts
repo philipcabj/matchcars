@@ -21,6 +21,10 @@ const geminiKey = defineSecret("GEMINI_API_KEY");
 // Resumen semanal por email para agencias (functions/src/digest.ts) — no tiene
 // side effects a nivel módulo, toma admin.firestore() dentro del handler.
 export { weeklyAgencyDigest } from "./digest";
+
+// Push proactivo: alertas de búsqueda al publicarse un auto + empuje a
+// vendedores con stock parado (functions/src/notify.ts).
+export { notifyOnVehiclePublished, sellerStalePush } from "./notify";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -897,6 +901,69 @@ export const generateVehicleDescription = onCall(
     const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await geminiModel.generateContent(prompt);
     return { text: result.response.text().trim() };
+  }
+);
+
+// ─── Búsqueda en lenguaje natural — parseSearch ─────────────────────────────
+// "toyota automático hasta 15 palos en córdoba" -> filtros estructurados que
+// el feed de la app aplica. Devuelve solo campos que pudo identificar.
+interface ParsedSearch {
+  brand?: string;
+  model?: string;
+  province?: string;
+  fuelType?: string;
+  gearbox?: string;
+  minYear?: number;
+  maxYear?: number;
+  maxPrice?: number;
+  currency?: "ARS" | "USD";
+  financing?: boolean;
+}
+
+export const parseSearch = onCall(
+  { secrets: [geminiKey], cors: true },
+  async (request): Promise<{ filters: ParsedSearch; summary: string }> => {
+    const query = String((request.data as { query?: string })?.query || "").trim().slice(0, 200);
+    if (query.length < 2) throw new HttpsError("invalid-argument", "Escribí qué buscás.");
+
+    const prompt = `Sos un parser de búsquedas de autos usados en Argentina. Convertí la consulta del usuario en JSON.
+Consulta: "${query}"
+
+Reglas:
+- Devolvé SOLO un objeto JSON, sin markdown ni explicación.
+- Campos posibles (incluí solo los que puedas inferir con confianza):
+  brand (string, capitalizado: "Toyota"), model (string), province (string, nombre completo: "Córdoba", "Buenos Aires", "CABA"),
+  fuelType (uno de: "Nafta","Diésel","Híbrido","Eléctrico","GNC"),
+  gearbox (uno de: "Manual","Automática"),
+  minYear (number), maxYear (number),
+  maxPrice (number, en pesos salvo que diga USD/dólares), currency ("ARS" o "USD"),
+  financing (true si menciona financiación/cuotas).
+- "palos"/"lucas"/"millones" = millones de pesos ("15 palos" = 15000000).
+- "mil" tras un número de precio = miles.
+- Si no reconocés nada, devolvé {}.`;
+
+    const genAI = new GoogleGenerativeAI(geminiKey.value());
+    const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const result = await geminiModel.generateContent(prompt);
+    const raw = result.response.text().trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+
+    let parsed: ParsedSearch = {};
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") parsed = obj as ParsedSearch;
+    } catch {
+      parsed = {};
+    }
+
+    const bits: string[] = [];
+    if (parsed.brand) bits.push(parsed.brand);
+    if (parsed.model) bits.push(parsed.model);
+    if (parsed.gearbox) bits.push(parsed.gearbox.toLowerCase());
+    if (parsed.fuelType) bits.push(parsed.fuelType.toLowerCase());
+    if (parsed.maxPrice) bits.push(`hasta ${parsed.currency === "USD" ? "US$" : "$"}${parsed.maxPrice.toLocaleString("es-AR")}`);
+    if (parsed.province) bits.push(`en ${parsed.province}`);
+
+    return { filters: parsed, summary: bits.join(" · ") || "Sin filtros reconocidos" };
   }
 );
 

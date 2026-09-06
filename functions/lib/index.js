@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.weeklyAgencyDigest = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.parseSearch = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.sellerStalePush = exports.notifyOnVehiclePublished = exports.weeklyAgencyDigest = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -58,6 +58,11 @@ const geminiKey = (0, params_1.defineSecret)("GEMINI_API_KEY");
 // side effects a nivel módulo, toma admin.firestore() dentro del handler.
 var digest_1 = require("./digest");
 Object.defineProperty(exports, "weeklyAgencyDigest", { enumerable: true, get: function () { return digest_1.weeklyAgencyDigest; } });
+// Push proactivo: alertas de búsqueda al publicarse un auto + empuje a
+// vendedores con stock parado (functions/src/notify.ts).
+var notify_1 = require("./notify");
+Object.defineProperty(exports, "notifyOnVehiclePublished", { enumerable: true, get: function () { return notify_1.notifyOnVehiclePublished; } });
+Object.defineProperty(exports, "sellerStalePush", { enumerable: true, get: function () { return notify_1.sellerStalePush; } });
 const metaCapiToken = (0, params_1.defineSecret)("META_CAPI_TOKEN");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const EXCLUDED_STATUSES = [
@@ -762,6 +767,54 @@ exports.generateVehicleDescription = (0, https_1.onCall)({ secrets: [geminiKey],
     const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await geminiModel.generateContent(prompt);
     return { text: result.response.text().trim() };
+});
+exports.parseSearch = (0, https_1.onCall)({ secrets: [geminiKey], cors: true }, async (request) => {
+    var _a;
+    const query = String(((_a = request.data) === null || _a === void 0 ? void 0 : _a.query) || "").trim().slice(0, 200);
+    if (query.length < 2)
+        throw new https_1.HttpsError("invalid-argument", "Escribí qué buscás.");
+    const prompt = `Sos un parser de búsquedas de autos usados en Argentina. Convertí la consulta del usuario en JSON.
+Consulta: "${query}"
+
+Reglas:
+- Devolvé SOLO un objeto JSON, sin markdown ni explicación.
+- Campos posibles (incluí solo los que puedas inferir con confianza):
+  brand (string, capitalizado: "Toyota"), model (string), province (string, nombre completo: "Córdoba", "Buenos Aires", "CABA"),
+  fuelType (uno de: "Nafta","Diésel","Híbrido","Eléctrico","GNC"),
+  gearbox (uno de: "Manual","Automática"),
+  minYear (number), maxYear (number),
+  maxPrice (number, en pesos salvo que diga USD/dólares), currency ("ARS" o "USD"),
+  financing (true si menciona financiación/cuotas).
+- "palos"/"lucas"/"millones" = millones de pesos ("15 palos" = 15000000).
+- "mil" tras un número de precio = miles.
+- Si no reconocés nada, devolvé {}.`;
+    const genAI = new generative_ai_1.GoogleGenerativeAI(geminiKey.value());
+    const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const result = await geminiModel.generateContent(prompt);
+    const raw = result.response.text().trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    let parsed = {};
+    try {
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === "object")
+            parsed = obj;
+    }
+    catch (_b) {
+        parsed = {};
+    }
+    const bits = [];
+    if (parsed.brand)
+        bits.push(parsed.brand);
+    if (parsed.model)
+        bits.push(parsed.model);
+    if (parsed.gearbox)
+        bits.push(parsed.gearbox.toLowerCase());
+    if (parsed.fuelType)
+        bits.push(parsed.fuelType.toLowerCase());
+    if (parsed.maxPrice)
+        bits.push(`hasta ${parsed.currency === "USD" ? "US$" : "$"}${parsed.maxPrice.toLocaleString("es-AR")}`);
+    if (parsed.province)
+        bits.push(`en ${parsed.province}`);
+    return { filters: parsed, summary: bits.join(" · ") || "Sin filtros reconocidos" };
 });
 // ─── Meta Conversions API — sendMetaConversionEvent ──────────────────────────
 // Server-side mirror of the Meta Pixel events fired on the web funnel

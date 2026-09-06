@@ -51,3 +51,32 @@ export async function detectLicensePlate(base64Image: string): Promise<AIResult>
 export async function detectCar(base64Image: string): Promise<AIResult> {
   return callDetectVehicleFeature(base64Image, "car");
 }
+
+// Búsqueda en lenguaje natural: "toyota automático hasta 15 palos en córdoba"
+// -> filtros estructurados (functions/src/index.ts parseSearch).
+export interface ParsedSearch {
+  brand?: string;
+  model?: string;
+  province?: string;
+  fuelType?: string;
+  gearbox?: string;
+  minYear?: number;
+  maxYear?: number;
+  maxPrice?: number;
+  currency?: "ARS" | "USD";
+  financing?: boolean;
+}
+
+export async function parseSearchQuery(
+  query: string
+): Promise<{ filters: ParsedSearch; summary: string } | null> {
+  try {
+    const fns = getFunctions(app);
+    const call = httpsCallable<{ query: string }, { filters: ParsedSearch; summary: string }>(fns, "parseSearch");
+    const res = await call({ query });
+    return res.data;
+  } catch (error) {
+    logger.log("parseSearchQuery error", error);
+    return null;
+  }
+}
