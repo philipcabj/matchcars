@@ -31,6 +31,11 @@ export default function ChatWithUserScreen() {
   const [peerAvatarColor, setPeerAvatarColor] = useState<string>(theme.accent);
   const [peerPhotoUrl, setPeerPhotoUrl] = useState<string | null>(null);
   const [peerPushToken, setPeerPushToken] = useState<string | null>(null);
+  const [peerTrust, setPeerTrust] = useState<{ verified: boolean; rating: number | null; reviews: number }>({
+    verified: false,
+    rating: null,
+    reviews: 0,
+  });
   const [messages, setMessages] = useState<{ id: string; senderId: string; text: string; createdAt: any }[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -736,6 +741,11 @@ export default function ChatWithUserScreen() {
         const name = pd?.firstName || pd?.lastName ? `${pd?.firstName ?? ""} ${pd?.lastName ?? ""}`.trim() : (pd?.displayName || pd?.email || "Usuario");
         setPeerName(name);
         setPeerPushToken(pd?.pushToken || null);
+        setPeerTrust({
+          verified: pd?.kycStatus === "verified",
+          rating: typeof pd?.sellerRating === "number" && pd.sellerRating > 0 ? pd.sellerRating : null,
+          reviews: Number(pd?.sellerReviewCount) || 0,
+        });
         let initials = String(pd?.initials || "");
         if (!initials) {
           const dn = String(pd?.displayName || "").trim();
@@ -1086,6 +1096,24 @@ export default function ChatWithUserScreen() {
                   <Text style={{ color: theme.textMuted, fontSize: 11 }}>
                     Escribiendo…
                   </Text>
+                ) : peerTrust.verified || peerTrust.rating ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    {peerTrust.verified && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                        <Ionicons name="shield-checkmark" size={10} color="#10B981" />
+                        <Text style={{ color: "#10B981", fontSize: 10, fontWeight: "700" }}>Verificado</Text>
+                      </View>
+                    )}
+                    {peerTrust.rating != null && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                        <Ionicons name="star" size={10} color="#F59E0B" />
+                        <Text style={{ color: theme.textMuted, fontSize: 10 }}>
+                          {peerTrust.rating.toFixed(1)}{peerTrust.reviews > 0 ? ` (${peerTrust.reviews})` : ""}
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={{ color: theme.textMuted, fontSize: 10 }}>· Ver perfil</Text>
+                  </View>
                 ) : (
                   <Text style={{ color: theme.textMuted, fontSize: 11 }}>
                     Ver perfil

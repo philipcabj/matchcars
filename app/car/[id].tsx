@@ -72,14 +72,16 @@ export default function CarDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<CarDetailsTabs>("resumen");
   const [editing, setEditing] = useState(false);
-  const [ownerProfile, setOwnerProfile] = useState<{ 
-    photoURL?: string; 
-    initials: string; 
-    avatarColor: string; 
-    plan?: string; 
+  const [ownerProfile, setOwnerProfile] = useState<{
+    photoURL?: string;
+    initials: string;
+    avatarColor: string;
+    plan?: string;
     trustLevel?: string;
     sellerRating?: number;
     sellerReviewCount?: number;
+    kycStatus?: string;
+    salesCount?: number;
   } | null>(null);
   const [editState, setEditState] = useState({
     price: "",
@@ -602,6 +604,8 @@ export default function CarDetailsScreen() {
             trustLevel,
             sellerRating: data.sellerRating,
             sellerReviewCount: data.sellerReviewCount,
+            kycStatus: data.kycStatus,
+            salesCount: typeof data.salesCount === "number" ? data.salesCount : undefined,
           });
 
           if (
@@ -2221,9 +2225,27 @@ export default function CarDetailsScreen() {
                         fontWeight: "600", 
                         marginTop: 2 
                     }}>
-                        {(ownerProfile?.trustLevel === 'verified' || vehicle.sellerTrustLevel === 'verified') ? "Vendedor Verificado" : 
+                        {(ownerProfile?.trustLevel === 'verified' || vehicle.sellerTrustLevel === 'verified') ? "Vendedor Verificado" :
                          (ownerProfile?.trustLevel === 'active' || vehicle.sellerTrustLevel === 'active') ? "Vendedor Activo" : "Usuario Nuevo"}
                     </Text>
+                )}
+                {(ownerProfile?.kycStatus === 'verified' || (ownerProfile?.salesCount ?? 0) > 0) && (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    {ownerProfile?.kycStatus === 'verified' && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "#10B98118", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Ionicons name="shield-checkmark" size={11} color="#10B981" />
+                        <Text style={{ color: "#10B981", fontSize: 10, fontWeight: "700" }}>Identidad verificada</Text>
+                      </View>
+                    )}
+                    {(ownerProfile?.salesCount ?? 0) > 0 && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: theme.inputBackground, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <Ionicons name="checkmark-done" size={11} color={theme.textMuted} />
+                        <Text style={{ color: theme.textMuted, fontSize: 10, fontWeight: "600" }}>
+                          {ownerProfile!.salesCount === 1 ? "Vendió 1 auto acá" : `Vendió ${ownerProfile!.salesCount} autos acá`}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 )}
             </View>
         </TouchableOpacity>
