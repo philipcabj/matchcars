@@ -12,6 +12,7 @@ import { Analytics } from "@/lib/analytics";
 import { app, db, storage } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { analyzeMarketPrice } from "@/lib/pricing";
+import { evaluateListing } from "@/lib/listingQuality";
 import { evaluateVehicleRisk } from "@/lib/riskScoring";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,10 +22,11 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { takeGuidedPhotos } from "@/lib/cameraHandoff";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes, uploadBytesResumable, uploadString } from "firebase/storage";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardTypeOptions } from "react-native";
 import {
     ActivityIndicator,
@@ -256,6 +258,20 @@ export default function AddCarScreen() {
   const { theme, themeName } = useTheme();
   const insets = useSafeAreaInsets();
 
+  // Al volver de la cámara guiada: la primera foto va de portada y el resto a
+  // la galería. Pasan por el mismo standardizeImage + upload que la galería.
+  useFocusEffect(
+    useCallback(() => {
+      const uris = takeGuidedPhotos();
+      if (!uris || uris.length === 0) return;
+      (async () => {
+        await uploadAssets([{ uri: uris[0] }], "cover");
+        if (uris.length > 1) await uploadAssets(uris.slice(1).map((uri) => ({ uri })), "gallery");
+      })();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
+
   if (Platform.OS === "web" && isDealerPlan(sellerProfile?.plan || "free")) {
     return <WebDealerAddCarForm />;
   }
@@ -460,6 +476,23 @@ export default function AddCarScreen() {
   const [immediateDelivery, setImmediateDelivery] = useState(false);
   const [acceptsTradeIn, setAcceptsTradeIn] = useState(true); // Default true based on previous logic
   const priceSuggestion = usePriceSuggestion(brand, model, year, currency);
+
+  const listingQuality = useMemo(
+    () =>
+      evaluateListing({
+        photoCount: (coverImage ? 1 : 0) + gallery.filter((g) => g.url).length,
+        hasCover: !!coverImage,
+        descriptionLength: details.trim().length,
+        year,
+        km,
+        version,
+        price: parseFloat(String(price).replace(/[^\d]/g, "")) || undefined,
+        marketAvg: !priceSuggestion.loading && priceSuggestion.count > 0 ? priceSuggestion.avg : null,
+        fuelType,
+        gearbox,
+      }),
+    [coverImage, gallery, details, year, km, version, price, priceSuggestion.avg, priceSuggestion.count, priceSuggestion.loading, fuelType, gearbox]
+  );
 
   // Draft System
   const DRAFT_KEY = `@add_car_draft_${user?.uid || "anon"}`;
@@ -1141,12 +1174,18 @@ export default function AddCarScreen() {
     });
     if (res.canceled) return;
     const assets = type === "gallery" ? (res.assets || []) : (res.assets || []).slice(0, 1);
+    await uploadAssets(assets, type);
+  }
+
+  // Sube un lote de imágenes (de la galería o de la cámara guiada). Cada una
+  // pasa por standardizeImage (recorte 4:3 sin zoom) antes de subir.
+  async function uploadAssets(assets: { uri?: string }[], type: "cover" | "gallery") {
     const baseIndex = gallery.length;
     let localIdx = 0;
 
     for (const asset of assets) {
       if (!asset?.uri) continue;
-      
+
       let uri = asset.uri;
       try {
           // Standardize to 4:3 and 1280x960
@@ -2883,6 +2922,30 @@ export default function AddCarScreen() {
 
             <View style={{ marginTop: 12, marginBottom: 12 }}>
               <Text style={{ color: theme.text, marginBottom: 6, fontSize: 15, fontWeight: "600" }}>Fotos</Text>
+
+              <TouchableOpacity
+                onPress={() => router.push("/(screens)/camera-guiada" as any)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  backgroundColor: `${theme.accent}15`,
+                  borderWidth: 1,
+                  borderColor: theme.accent,
+                  paddingVertical: 11,
+                  paddingHorizontal: 14,
+                  borderRadius: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <Ionicons name="camera" size={18} color={theme.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.accent, fontWeight: "700", fontSize: 13 }}>Sacar fotos con la guía</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 11 }}>8 tomas paso a paso: frente, lateral, interior, motor…</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+              </TouchableOpacity>
+
               <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
                 <TouchableOpacity
                   onPress={() => pickImageAndUpload("cover")}
@@ -2915,6 +2978,41 @@ export default function AddCarScreen() {
               <View style={{ marginTop: 8 }}>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>Galería: {gallery.length} / 8</Text>
               </View>
+
+              {/* Calidad de la publicación — ayuda no bloqueante */}
+              {(() => {
+                const q = listingQuality;
+                const barColor = q.score >= 80 ? "#22C55E" : q.score >= 50 ? "#F59E0B" : "#EF4444";
+                const pending = q.checks.filter((c) => !c.ok).slice(0, 3);
+                return (
+                  <View style={{ marginTop: 14, backgroundColor: theme.card, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: theme.likeBoxBackground }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <Text style={{ color: theme.text, fontWeight: "700", fontSize: 13 }}>Calidad de tu publicación</Text>
+                      <Text style={{ color: barColor, fontWeight: "800", fontSize: 15 }}>{q.score}%</Text>
+                    </View>
+                    <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.inputBackground, overflow: "hidden" }}>
+                      <View style={{ width: `${q.score}%`, height: 6, backgroundColor: barColor }} />
+                    </View>
+                    {pending.length > 0 ? (
+                      <View style={{ marginTop: 10, gap: 6 }}>
+                        {pending.map((c) => (
+                          <View key={c.label} style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+                            <Ionicons name="ellipse-outline" size={13} color={theme.textMuted} style={{ marginTop: 1 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: theme.text, fontSize: 12 }}>{c.label}</Text>
+                              {c.hint && <Text style={{ color: theme.textMuted, fontSize: 11 }}>{c.hint}</Text>}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={{ color: "#22C55E", fontSize: 12, marginTop: 8, fontWeight: "600" }}>
+                        ✓ Tu publicación está completa
+                      </Text>
+                    )}
+                  </View>
+                );
+              })()}
 
               {/* Tasación IA — aparece cuando hay al menos una foto */}
               {(coverImage || gallery.some((g) => g.url)) && (

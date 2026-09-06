@@ -141,6 +141,12 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Matchcars usa la cámara para que saques las fotos de tu auto con la guía paso a paso."
+        }
+      ],
+      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Matchcars to use your location."
