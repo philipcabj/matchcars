@@ -50,39 +50,47 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  // null = todavía no eligió comprar/vender (se muestra el selector primero).
+  const [intent, setIntent] = useState<'buy' | 'sell' | null>(null);
 
-  const steps: Step[] = [
-    {
+  const steps: Step[] = useMemo(() => {
+    const welcome: Step = {
       title: 'Bienvenido a MatchCars',
-      description: 'La comunidad más segura para comprar y vender tu auto. Te mostramos lo básico en 20 segundos.',
+      description:
+        intent === 'sell'
+          ? 'Te mostramos en 20 segundos cómo publicar tu auto y seguir las consultas.'
+          : 'Te mostramos en 20 segundos cómo encontrar tu próximo auto y hablar con el vendedor.',
       icon: 'car-sport',
       color: theme.accent,
-    },
-    {
+    };
+    const favoritos: Step = {
       title: 'Favoritos y Matches',
       description: 'Dale ❤️ a los autos que te gustan para guardarlos. Te vamos a avisar de bajadas de precio y de autos similares.',
       icon: 'heart',
       color: '#EF4444',
-    },
-    {
+    };
+    const chat: Step = {
       title: 'Chat y ofertas',
       description: 'Hablá con el vendedor y hacé ofertas formales desde la app, sin compartir tu teléfono.',
       icon: 'chatbubbles',
       color: '#3B82F6',
-    },
-    {
+    };
+    const gestion: Step = {
       title: 'Gestioná tu venta',
       description: 'En "Mis autos" controlás tus publicaciones, ves las visitas y quién está interesado.',
       icon: 'speedometer',
       color: '#8B5CF6',
-    },
-    {
+    };
+    const publicar: Step = {
       title: 'Publicá gratis',
       description: 'Subí tu auto en pocos pasos y suscribite a alertas de precio para cazar oportunidades.',
       icon: 'pricetags',
       color: '#F59E0B',
-    },
-  ];
+    };
+    return intent === 'sell'
+      ? [welcome, publicar, gestion, chat, favoritos]
+      : [welcome, favoritos, chat, publicar, gestion];
+  }, [theme.accent, intent]);
 
   const lastStep = steps.length - 1;
 
@@ -93,17 +101,24 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
   // useLayoutEffect: dejamos anim en 0 antes del paint para que no haya un
   // flash del contenido a opacidad plena antes de la transición.
   useLayoutEffect(() => {
-    if (!visible) return;
+    if (!visible || !intent) return;
     anim.setValue(0);
     const a = Animated.timing(anim, { toValue: 1, duration: 240, useNativeDriver: true });
     a.start();
     return () => a.stop();
-  }, [step, visible, anim]);
+  }, [step, visible, intent, anim]);
 
   const haptic = (type: 'select' | 'success' = 'select') => {
     if (Platform.OS === 'web') return;
     if (type === 'success') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     else Haptics.selectionAsync().catch(() => {});
+  };
+
+  const chooseIntent = (value: 'buy' | 'sell') => {
+    setIntent(value);
+    setStep(0);
+    haptic('select');
+    Analytics.logEvent('onboarding_intent', { intent: value });
   };
 
   // ---- Persistencia / apertura ----
@@ -117,6 +132,7 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
       const seen = await AsyncStorage.getItem(keyFor(user.uid));
       if (!seen) {
         setStep(0);
+        setIntent(null);
         setVisible(true);
         Analytics.logEvent('onboarding_started', { total_steps: steps.length });
       }
@@ -133,6 +149,7 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
   useEffect(() => {
     forceOpen = () => {
       setStep(0);
+      setIntent(null);
       setVisible(true);
       Analytics.logEvent('onboarding_reopened');
     };
@@ -186,13 +203,15 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
   );
 
   const handleNext = useCallback(() => {
+    if (!intent) return; // el selector comprar/vender no se navega con swipe
     if (step < lastStep) goToStep(step + 1);
     else handleFinish(false);
-  }, [step, lastStep, goToStep, handleFinish]);
+  }, [intent, step, lastStep, goToStep, handleFinish]);
 
   const handleBack = useCallback(() => {
+    if (!intent) return;
     if (step > 0) goToStep(step - 1);
-  }, [step, goToStep]);
+  }, [intent, step, goToStep]);
 
   // Swipe con react-native-gesture-handler (PanResponder no dispara de forma
   // confiable dentro de un <Modal> con gesture-handler activo). `activeOffsetX`
@@ -252,6 +271,32 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
             <Ionicons name="close" size={22} color={theme.textMuted} />
           </TouchableOpacity>
 
+          {!intent ? (
+            <View style={{ alignItems: 'center', paddingTop: 8 }}>
+              <View style={[styles.iconContainer, { backgroundColor: theme.accent + '1A' }]}>
+                <Ionicons name="car-sport" size={58} color={theme.accent} />
+              </View>
+              <Text style={[styles.title, { color: theme.text }]}>¿Qué te trae a MatchCars?</Text>
+              <Text style={[styles.description, { color: theme.textMuted }]}>
+                Así te mostramos primero lo que te sirve.
+              </Text>
+              <TouchableOpacity
+                onPress={() => chooseIntent('buy')}
+                style={[styles.button, { width: '100%', backgroundColor: theme.accent, marginBottom: 10 }]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.primaryButtonText}>Quiero comprar un auto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => chooseIntent('sell')}
+                style={[styles.button, styles.secondaryButton, { width: '100%', borderColor: theme.border }]}
+                accessibilityRole="button"
+              >
+                <Text style={{ color: theme.text, fontWeight: '600', fontSize: 15 }}>Quiero vender el mío</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+          <>
           <Animated.View
             style={{
               alignItems: 'center',
@@ -347,6 +392,8 @@ export const Onboarding = ({ onFinish }: OnboardingProps) => {
             </View>
             <Text style={{ color: theme.textMuted, fontSize: 12 }}>No volver a mostrar</Text>
           </TouchableOpacity>
+          </>
+          )}
         </View>
         </GestureDetector>
       </GestureHandlerRootView>

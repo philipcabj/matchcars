@@ -14,7 +14,7 @@ import { logger } from "@/lib/logger";
 import { calcMatchScore } from "@/lib/matchScore";
 import { sendNotificationEmail } from "@/lib/mail";
 import { getBoostScoreMultiplier, hasUnlimitedFeatured, hasWeekendBoost, isDealerPlan } from "@/lib/planChecks";
-import { getListingYears } from "@/lib/pricing";
+import { getListingYears, getUsdToArsRate } from "@/lib/pricing";
 import { logSearchEvent } from "@/lib/search-analytics";
 import type { BuyerPreferences } from "@/types/user";
 import type { Vehicle } from "@/types/vehicle";
@@ -28,6 +28,45 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Platform, RefreshControl, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as CarModelsAr from "../../config/carModelsAr";
+
+type SortKey = "relevance" | "price_asc" | "price_desc" | "year_desc" | "km_asc" | "newest";
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "relevance", label: "Sugeridos" },
+  { key: "newest", label: "Más nuevos" },
+  { key: "price_asc", label: "Menor precio" },
+  { key: "price_desc", label: "Mayor precio" },
+  { key: "year_desc", label: "Año ↓" },
+  { key: "km_asc", label: "Menos km" },
+];
+// Fallback aproximado del dólar solo para ordenar por precio mezclando ARS/USD
+// hasta que getUsdToArsRate() responde. No se muestra en ningún lado.
+const USD_ARS_FALLBACK = 1000;
+
+function priceInArs(v: Vehicle, rate: number): number {
+  const p = Number(v.price) || 0;
+  return v.currency === "USD" ? p * rate : p;
+}
+
+function sortVehicles(list: Vehicle[], sortBy: SortKey, rate: number): Vehicle[] {
+  if (sortBy === "relevance") return list; // ya viene por boost/recencia/match
+  const arr = [...list];
+  switch (sortBy) {
+    case "price_asc":
+      return arr.sort((a, b) => priceInArs(a, rate) - priceInArs(b, rate));
+    case "price_desc":
+      return arr.sort((a, b) => priceInArs(b, rate) - priceInArs(a, rate));
+    case "year_desc":
+      return arr.sort((a, b) => (Number(b.year) || 0) - (Number(a.year) || 0));
+    case "km_asc":
+      return arr.sort((a, b) => (Number(a.km) || Infinity) - (Number(b.km) || Infinity));
+    case "newest":
+      return arr.sort(
+        (a, b) => ((b.createdAt as any)?.toMillis?.() ?? 0) - ((a.createdAt as any)?.toMillis?.() ?? 0)
+      );
+    default:
+      return list;
+  }
+}
 import { PROVINCES } from "@/config/locations";
 
 export default function AutosPublicTab() {
@@ -93,6 +132,14 @@ export default function AutosPublicTab() {
   const [kmMinOpen, setKmMinOpen] = useState(false);
   const [kmMaxOpen, setKmMaxOpen] = useState(false);
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+  const [sortBy, setSortBy] = useState<SortKey>("relevance");
+  const [usdArsRate, setUsdArsRate] = useState<number>(USD_ARS_FALLBACK);
+
+  useEffect(() => {
+    getUsdToArsRate()
+      .then((r) => { if (r?.rate) setUsdArsRate(r.rate); })
+      .catch(() => {});
+  }, []);
   const [filterCurrency, setFilterCurrency] = useState<"ARS" | "USD" | undefined>(undefined);
   
   // Persistence for Filters
@@ -126,9 +173,12 @@ export default function AutosPublicTab() {
         if (f.financing) setFinancingFilter(f.financing);
         if (f.fuel) setFuelFilter(f.fuel);
         if (f.currency) setFilterCurrency(f.currency);
+        if (f.sort && SORT_OPTIONS.some((o) => o.key === f.sort)) setSortBy(f.sort);
         
-        // If any filter is active, expand the filter section
-        const hasFilters = Object.values(f).some(v => v !== "" && v !== "all" && v !== undefined);
+        // If any filter is active, expand the filter section (el orden no
+        // cuenta como filtro).
+        const { sort: _sort, ...filterVals } = f;
+        const hasFilters = Object.values(filterVals).some(v => v !== "" && v !== "all" && v !== undefined);
         if (hasFilters) setFiltersCollapsed(false);
       }
     } catch (e) {
@@ -201,11 +251,12 @@ export default function AutosPublicTab() {
         financing: financingFilter,
         fuel: fuelFilter,
         currency: filterCurrency,
+        sort: sortBy,
       };
       saveFilters(currentFilters);
     }, 1000); // Debounce save
     return () => clearTimeout(timer);
-  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, filterCurrency]);
+  }, [provinceFilter, brandFilter, modelFilter, yearMin, yearMax, priceMin, priceMax, kmMin, kmMax, financingFilter, fuelFilter, filterCurrency, sortBy]);
 
   // Reset onboarding cuando el usuario inicia sesión si es necesario.
 
@@ -453,6 +504,14 @@ export default function AutosPublicTab() {
 
     return favMatch && ownerMatch && notMineMatch && brandMatch && modelMatch && provinceMatch && yearMatch && currencyListMatch && priceMatch && kmMatch && finMatch && fuelMatch && searchMatch && statusMatch;
   });
+
+  // Orden elegido por el usuario. "Sugeridos" respeta el orden con el que
+  // llegan (boost / recencia / match score).
+  const displayVehicles = React.useMemo(
+    () => sortVehicles(filteredVehicles, sortBy, usdArsRate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredVehicles, sortBy, usdArsRate]
+  );
 
   // Captura de búsquedas (texto + filtros) para el futuro widget de "lo más
   // buscado" en el dashboard de agencias — ver lib/search-analytics.ts.
@@ -981,6 +1040,38 @@ export default function AutosPublicTab() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {!favOf && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 6, paddingVertical: 2 }}
+            style={{ marginBottom: 8, flexGrow: 0 }}
+          >
+            {SORT_OPTIONS.map((opt) => {
+              const active = sortBy === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  onPress={() => setSortBy(opt.key)}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: active ? theme.accent : theme.likeBoxBackground,
+                    backgroundColor: active ? `${theme.accent}15` : theme.inputBackground,
+                  }}
+                >
+                  <Text style={{ color: active ? theme.accent : theme.text, fontSize: 12, fontWeight: active ? "700" : "400" }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
         {hasActiveFilters && filtersCollapsed && (
           <View style={{ marginBottom: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: `${theme.accent}10`, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: `${theme.accent}30` }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
@@ -1316,7 +1407,7 @@ export default function AutosPublicTab() {
                     }
                     style={{ flex: 1 }}
             contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
-            data={filteredVehicles}
+            data={displayVehicles}
             keyExtractor={(item) => item.id}
             initialNumToRender={10}
             maxToRenderPerBatch={10}
@@ -1335,9 +1426,9 @@ export default function AutosPublicTab() {
                 <View style={{ paddingVertical: 16, alignItems: "center" }}>
                   <ActivityIndicator color={theme.accent} size="small" />
                 </View>
-              ) : !hasMore && filteredVehicles.length > 0 ? (
+              ) : !hasMore && displayVehicles.length > 0 ? (
                 <Text style={{ color: theme.textMuted, fontSize: 11, textAlign: "center", paddingVertical: 16 }}>
-                  — {filteredVehicles.length} vehículos —
+                  — {displayVehicles.length} vehículos —
                 </Text>
               ) : null
             }

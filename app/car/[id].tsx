@@ -341,25 +341,53 @@ export default function CarDetailsScreen() {
 
     const fetchSimilar = async () => {
       try {
+        // Misma marca (1 query, sin índice nuevo) y después se ordenan por
+        // parecido real: precio, año, mismo modelo, misma provincia. Antes
+        // era "misma marca, agarrá 5" — te mostraba una Hilux de $60M al lado
+        // de un Etios de $5M.
         const q = query(
           collection(db, "vehicles"),
           where("brand", "==", vehicle.brand),
           where("published", "==", true),
-          limit(10)
+          limit(20)
         );
         const snap = await getDocs(q);
-        const list = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
+        const thisPrice = Number(vehicle.price) || 0;
+        const thisYear = Number(vehicle.year) || 0;
+        const thisProv = (vehicle.location?.province || vehicle.province || "").toLowerCase();
+        const thisCurrency = vehicle.currency;
+
+        const scored = snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
           .filter(
             (v: any) =>
               v.id !== vehicle.id &&
               v.status !== "deleted" &&
               v.status !== "sold" &&
               v.status !== "blocked" &&
-              v.status !== "rejected"
+              v.status !== "rejected" &&
+              v.published !== false
           )
-          .slice(0, 5);
-        setSimilarVehicles(list);
+          .map((v: any) => {
+            let score = 0;
+            const p = Number(v.price) || 0;
+            if (thisPrice > 0 && p > 0 && v.currency === thisCurrency) {
+              score += (1 - Math.min(1, Math.abs(p - thisPrice) / thisPrice)) * 3;
+            } else {
+              score += 1; // moneda distinta / sin precio: parecido neutro
+            }
+            const y = Number(v.year) || 0;
+            if (thisYear && y) score += (1 - Math.min(1, Math.abs(y - thisYear) / 8)) * 1.5;
+            if (v.model && vehicle.model && v.model === vehicle.model) score += 1.2;
+            const prov = (v.location?.province || v.province || "").toLowerCase();
+            if (thisProv && prov && prov === thisProv) score += 0.6;
+            return { v, score };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 6)
+          .map((s) => s.v);
+
+        setSimilarVehicles(scored);
       } catch (e) {
         logger.log("Error fetching similar vehicles", e);
       }
