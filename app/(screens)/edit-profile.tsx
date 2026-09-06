@@ -22,6 +22,7 @@ import {
     Modal,
     Platform,
     ScrollView,
+    Switch,
     Text,
     TextInput,
     TouchableOpacity,
@@ -90,6 +91,8 @@ export default function EditProfileScreen() {
 
   // Extended dealer fields
   const [phone, setPhone] = useState(profile?.phone || "");
+  const [notifSearchAlerts, setNotifSearchAlerts] = useState((profile as any)?.notifPrefs?.searchAlerts !== false);
+  const [notifSellerTips, setNotifSellerTips] = useState((profile as any)?.notifPrefs?.sellerTips !== false);
   const [foundedYear, setFoundedYear] = useState(
     profile?.foundedYear ? String(profile.foundedYear) : ""
   );
@@ -296,6 +299,8 @@ export default function EditProfileScreen() {
         description,
         whatsapp,
         phone,
+        "notifPrefs.searchAlerts": notifSearchAlerts,
+        "notifPrefs.sellerTips": notifSellerTips,
       };
 
       if (isDealer) {
@@ -1168,6 +1173,24 @@ export default function EditProfileScreen() {
                 )}
             </View>
         )}
+
+        <View style={{ marginTop: 24, borderTopWidth: 1, borderTopColor: theme.likeBoxBackground, paddingTop: 16 }}>
+            <Text style={{ color: theme.text, fontWeight: "700", fontSize: 15, marginBottom: 4 }}>Notificaciones</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10 }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: theme.text, fontSize: 14 }}>Autos nuevos que buscás</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>Aviso cuando se publica un auto que coincide con una alerta guardada.</Text>
+                </View>
+                <Switch value={notifSearchAlerts} onValueChange={setNotifSearchAlerts} trackColor={{ true: theme.accent }} />
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10 }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: theme.text, fontSize: 14 }}>Consejos para vender</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>Recordatorios sobre tus publicaciones (precio, fotos, autos parados).</Text>
+                </View>
+                <Switch value={notifSellerTips} onValueChange={setNotifSellerTips} trackColor={{ true: theme.accent }} />
+            </View>
+        </View>
 
         <TouchableOpacity
             onPress={handleSave}

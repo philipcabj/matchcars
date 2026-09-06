@@ -22,9 +22,8 @@ const geminiKey = defineSecret("GEMINI_API_KEY");
 // side effects a nivel módulo, toma admin.firestore() dentro del handler.
 export { weeklyAgencyDigest } from "./digest";
 
-// Push proactivo: alertas de búsqueda al publicarse un auto + empuje a
-// vendedores con stock parado (functions/src/notify.ts).
-export { notifyOnVehiclePublished, sellerStalePush } from "./notify";
+// Push proactivo + contador de favoritos (functions/src/notify.ts).
+export { notifyOnVehiclePublished, sellerStalePush, maintainLikesCount } from "./notify";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

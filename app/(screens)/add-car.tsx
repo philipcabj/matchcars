@@ -475,6 +475,7 @@ export default function AddCarScreen() {
   const [negotiablePrice, setNegotiablePrice] = useState(false);
   const [immediateDelivery, setImmediateDelivery] = useState(false);
   const [acceptsTradeIn, setAcceptsTradeIn] = useState(true); // Default true based on previous logic
+  const [tradeInWanted, setTradeInWanted] = useState("");
   const priceSuggestion = usePriceSuggestion(brand, model, year, currency);
 
   const listingQuality = useMemo(
@@ -549,6 +550,7 @@ export default function AddCarScreen() {
                             setNegotiablePrice(draft.negotiablePrice || false);
                             setImmediateDelivery(draft.immediateDelivery || false);
                             setAcceptsTradeIn(draft.acceptsTradeIn ?? true);
+                            setTradeInWanted(draft.tradeInWanted || "");
                             setVideoUri(draft.videoUri || "");
                             
                             // Load dependent lists if needed
@@ -593,7 +595,7 @@ export default function AddCarScreen() {
             coverImage, coverLocalUri, gallery, fuelType, gearbox,
             acceptsFinancing,
             singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
-            details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
+            details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn, tradeInWanted,
             videoUri
         };
         try {
@@ -610,7 +612,7 @@ export default function AddCarScreen() {
     coverImage, coverLocalUri, gallery, fuelType, gearbox,
     acceptsFinancing,
     singleOwner, serviceRecords, vtvValid, papersUpToDate, warranty,
-    details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn,
+    details, sellingReason, negotiablePrice, immediateDelivery, acceptsTradeIn, tradeInWanted,
     videoUri
   ]);
 
@@ -2233,6 +2235,8 @@ export default function AddCarScreen() {
         },
         video: videoUri || null,
         acceptsFinancing,
+        acceptsTradeIn,
+        tradeInWanted: acceptsTradeIn ? (tradeInWanted.trim() || null) : null,
         negotiablePrice,
         immediateDelivery,
         sellingReason: sellingReason || null,
@@ -2853,6 +2857,20 @@ export default function AddCarScreen() {
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {acceptsTradeIn && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 4 }}>¿Qué buscás a cambio? (opcional)</Text>
+                <TextInput
+                  value={tradeInWanted}
+                  onChangeText={setTradeInWanted}
+                  placeholder="Ej: SUV más nuevo, hasta 3M de diferencia"
+                  placeholderTextColor={theme.textMuted}
+                  maxLength={120}
+                  style={{ backgroundColor: theme.inputBackground, color: theme.inputText, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, borderWidth: 1, borderColor: theme.likeBoxBackground }}
+                />
+              </View>
+            )}
 
             {acceptsFinancing && (
               <View style={{ marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: theme.accent + "15", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: theme.accent + "40" }}>

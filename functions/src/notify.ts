@@ -7,7 +7,7 @@
 //
 // Respeta un opt-out suave: users/{uid}.notifPrefs.searchAlerts / .sellerTips
 // (ausente o true = activado).
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 
@@ -111,6 +111,28 @@ export const notifyOnVehiclePublished = onDocumentUpdated("vehicles/{vehicleId}"
 
   if (notified.size > 0) {
     console.log(`[notifyOnVehiclePublished] ${vehicleId}: ${notified.size} alertas notificadas`);
+  }
+});
+
+// ─── Contador de favoritos por auto ────────────────────────────────────────
+// vehicles/{id}.likesCount se inicializaba en 0 y nadie lo mantenía. Lo
+// necesita el panel de estadísticas del auto (app/(screens)/car-stats).
+
+export const maintainLikesCount = onDocumentWritten("users/{userId}/favorites/{vehicleId}", async (event) => {
+  const existedBefore = event.data?.before.exists;
+  const existsAfter = event.data?.after.exists;
+  if (existedBefore === existsAfter) return; // update sin cambio de existencia
+
+  const delta = existsAfter ? 1 : -1;
+  const vehicleId = event.params.vehicleId;
+  try {
+    await admin
+      .firestore()
+      .doc(`vehicles/${vehicleId}`)
+      .update({ likesCount: admin.firestore.FieldValue.increment(delta) });
+  } catch (e) {
+    // el auto puede haber sido borrado — no es un error real
+    console.log(`[maintainLikesCount] ${vehicleId} (${delta}):`, (e as Error).message);
   }
 });
 

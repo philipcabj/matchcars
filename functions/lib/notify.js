@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sellerStalePush = exports.notifyOnVehiclePublished = void 0;
+exports.sellerStalePush = exports.maintainLikesCount = exports.notifyOnVehiclePublished = void 0;
 // functions/src/notify.ts
 // Notificaciones push proactivas:
 //  - notifyOnVehiclePublished: cuando un auto pasa a publicado, avisa a quienes
@@ -133,6 +133,28 @@ exports.notifyOnVehiclePublished = (0, firestore_1.onDocumentUpdated)("vehicles/
     }
     if (notified.size > 0) {
         console.log(`[notifyOnVehiclePublished] ${vehicleId}: ${notified.size} alertas notificadas`);
+    }
+});
+// ─── Contador de favoritos por auto ────────────────────────────────────────
+// vehicles/{id}.likesCount se inicializaba en 0 y nadie lo mantenía. Lo
+// necesita el panel de estadísticas del auto (app/(screens)/car-stats).
+exports.maintainLikesCount = (0, firestore_1.onDocumentWritten)("users/{userId}/favorites/{vehicleId}", async (event) => {
+    var _a, _b;
+    const existedBefore = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before.exists;
+    const existsAfter = (_b = event.data) === null || _b === void 0 ? void 0 : _b.after.exists;
+    if (existedBefore === existsAfter)
+        return; // update sin cambio de existencia
+    const delta = existsAfter ? 1 : -1;
+    const vehicleId = event.params.vehicleId;
+    try {
+        await admin
+            .firestore()
+            .doc(`vehicles/${vehicleId}`)
+            .update({ likesCount: admin.firestore.FieldValue.increment(delta) });
+    }
+    catch (e) {
+        // el auto puede haber sido borrado — no es un error real
+        console.log(`[maintainLikesCount] ${vehicleId} (${delta}):`, e.message);
     }
 });
 // ─── Empuje a vendedores con stock parado ───────────────────────────────────

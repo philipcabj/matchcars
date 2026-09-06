@@ -874,6 +874,32 @@ export default function MyCarsTab() {
                   </TouchableOpacity>
                 )}
 
+                {/* Estadísticas del auto */}
+                {item.published && item.status !== "sold" && item.status !== "reserved" && (
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: "/(screens)/car-stats/[id]" as any, params: { id: item.id } })}
+                    style={{
+                      marginTop: 4,
+                      marginBottom: 4,
+                      backgroundColor: theme.inputBackground,
+                      padding: 10,
+                      borderRadius: 12,
+                      alignItems: "center",
+                      flexDirection: "row",
+                      justifyContent: "center",
+                      gap: 6,
+                      borderWidth: 1,
+                      borderColor: theme.badgeBorder,
+                    }}
+                  >
+                    <Ionicons name="stats-chart" size={16} color={theme.textMuted} />
+                    <Text style={{ color: theme.textMuted, fontWeight: "700", fontSize: 13 }}>Ver estadísticas</Text>
+                    {typeof item.views === "number" && item.views > 0 && (
+                      <Text style={{ color: theme.textMuted, fontSize: 12 }}>· {item.views} visitas</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+
                 {/* Mark as Sold Button */}
                 {item.published && item.status !== "sold" && (
                   <TouchableOpacity

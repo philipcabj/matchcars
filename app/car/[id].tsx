@@ -560,6 +560,7 @@ export default function CarDetailsScreen() {
             negotiablePrice: !!data.negotiablePrice,
             immediateDelivery: !!data.immediateDelivery,
             acceptsTradeIn: !!(data.flags?.tradeIn || data.acceptsTradeIn),
+            tradeInWanted: data.tradeInWanted || "",
             // Images
             cover: data.images?.cover ?? data.coverImage ?? data.cover ?? "",
             gallery: Array.isArray(data.images?.gallery) ? data.images.gallery : (Array.isArray(data.additionalImages) ? data.additionalImages : []),
@@ -1716,6 +1717,8 @@ export default function CarDetailsScreen() {
       negotiablePrice: !!editState.negotiablePrice,
       immediateDelivery: !!editState.immediateDelivery,
       "flags.tradeIn": !!editState.acceptsTradeIn,
+      acceptsTradeIn: !!editState.acceptsTradeIn,
+      tradeInWanted: editState.acceptsTradeIn ? (String(editState.tradeInWanted || "").trim() || null) : null,
       video: editState.video || null,
       images: {
           cover: editState.cover || null,
@@ -1977,6 +1980,16 @@ export default function CarDetailsScreen() {
           </View>
         )}
       </View>
+
+      {(vehicle.flags?.tradeIn || vehicle.acceptsTradeIn) && vehicle.tradeInWanted ? (
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: `${theme.accent}12`, borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: `${theme.accent}33` }}>
+          <Ionicons name="swap-horizontal" size={18} color={theme.accent} style={{ marginTop: 1 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: "700" }}>BUSCA A CAMBIO</Text>
+            <Text style={{ color: theme.text, fontSize: 14, marginTop: 2 }}>{vehicle.tradeInWanted}</Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Match Score breakdown — only for buyers viewing someone else's listing */}
       {profile?.buyerPreferences && user?.uid !== vehicle.userId && (() => {
@@ -2679,6 +2692,19 @@ export default function CarDetailsScreen() {
                         />
                     </View>
                 ))}
+                {editState.acceptsTradeIn && (
+                    <View style={{ marginBottom: 8 }}>
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 4 }}>¿Qué buscás a cambio?</Text>
+                        <TextInput
+                            value={editState.tradeInWanted || ""}
+                            onChangeText={(v) => setEditState({ ...editState, tradeInWanted: v })}
+                            placeholder="Ej: SUV más nuevo, hasta 3M de diferencia"
+                            placeholderTextColor={theme.textMuted}
+                            maxLength={120}
+                            style={[styles.input, { color: theme.text }]}
+                        />
+                    </View>
+                )}
 
                 <Text style={[styles.specLabel, { marginTop: 12, marginBottom: 8 }]}>Historial y Documentación</Text>
                 {[
@@ -3830,6 +3856,25 @@ export default function CarDetailsScreen() {
         url={`https://matchcars.app/car/${vehicle?.id ?? normalizedId}`}
         title={`${displayTitle} · ${priceText}`}
         theme={theme}
+        analyticsId={vehicle?.id ?? normalizedId}
+        shareCardData={{
+          agencyName: vehicle?.userName || ownerProfile?.initials || "Publicación",
+          logoUrl: ownerProfile?.photoURL || null,
+          city: vehicle?.location?.city || vehicle?.city,
+          province: vehicle?.location?.province || vehicle?.province,
+          rating: ownerProfile?.sellerRating ?? vehicle?.sellerRating ?? null,
+          reviewCount: ownerProfile?.sellerReviewCount ?? vehicle?.sellerReviewCount ?? 0,
+          vehicles: [
+            {
+              id: vehicle?.id ?? normalizedId,
+              brand: vehicle?.brand,
+              model: vehicle?.model,
+              price: vehicle?.price,
+              currency: vehicle?.currency,
+              coverImage: vehicle?.images?.cover || vehicle?.coverImage || vehicle?.cover,
+            },
+          ],
+        }}
       />
     </SafeAreaView>
     </>

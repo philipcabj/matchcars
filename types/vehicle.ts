@@ -49,6 +49,7 @@ export interface Vehicle {
   // Operación
   operationType?: "sale" | "swap"; // venta / permuta
   acceptsTradeIn?: boolean; // Acepta permuta
+  tradeInWanted?: string | null; // qué busca a cambio (texto libre)
   tradeIn?: boolean; // Alias para permuta (legacy/compatibility)
   acceptsFinancing?: boolean;
   financing?: {
