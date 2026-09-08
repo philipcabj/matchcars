@@ -6,8 +6,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
-const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || "http://localhost:3000";
-
 const LINKS = [
   { href: "/", label: "Autos" },
   { href: "/agencias", label: "Agencias" },
@@ -47,9 +45,9 @@ export function NavBar() {
               </span>
             )}
           </Link>
-          <a href={PORTAL_URL} className="rounded-full bg-accent/10 px-3 py-1.5 text-sm font-semibold text-accent hover:bg-accent/20">
+          <Link href="/para-agencias" className="rounded-full bg-accent/10 px-3 py-1.5 text-sm font-semibold text-accent hover:bg-accent/20">
             Portal de Agencias →
-          </a>
+          </Link>
           <ThemeToggle />
         </nav>
 
@@ -99,12 +97,13 @@ export function NavBar() {
               </span>
             )}
           </Link>
-          <a
-            href={PORTAL_URL}
+          <Link
+            href="/para-agencias"
+            onClick={() => setMenuOpen(false)}
             className="mt-1 rounded-lg bg-accent/10 px-2 py-2.5 text-center text-sm font-semibold text-accent"
           >
             Portal de Agencias →
-          </a>
+          </Link>
         </nav>
       )}
     </header>

@@ -40,6 +40,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     { url: SITE_URL, changeFrequency: "hourly", priority: 1 },
+    { url: `${SITE_URL}/para-agencias`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${SITE_URL}/agencias`, changeFrequency: "daily", priority: 0.6 },
     ...facetEntries,
     ...vehicleEntries,
   ];

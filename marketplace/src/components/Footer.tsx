@@ -104,6 +104,9 @@ export function Footer() {
 
         <div className="flex flex-col gap-3">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Para agencias</p>
+          <Link href="/para-agencias" className="text-sm hover:text-accent">
+            Sumá tu agencia
+          </Link>
           <a href={PORTAL_URL} className="text-sm hover:text-accent">
             Portal de Agencias
           </a>

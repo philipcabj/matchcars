@@ -3,7 +3,7 @@ import { Footer } from "@/components/Footer";
 import { NavBar } from "@/components/NavBar";
 import { CompareProvider } from "@/contexts/CompareContext";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Sora } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 
@@ -23,6 +23,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Display para landings (ej. /para-agencias) — se aplica puntual con
+// [font-family:var(--font-sora)], no cambia la tipografía global.
+const sora = Sora({
+  variable: "--font-sora",
+  weight: ["600", "700", "800"],
+  subsets: ["latin"],
+});
+
 // metadataBase resuelve las URLs relativas (canonical, og:image, og:url) a
 // absolutas — sin esto Next.js las deja relativas o cae en localhost.
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://matchcars.app";
@@ -39,7 +47,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${sora.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         {/* Corre antes del primer paint (beforeInteractive) para que no haya
             flash del tema equivocado — crema es el default, oscuro solo si
