@@ -146,6 +146,12 @@ export default async function ParaAgenciasPage() {
               Ver cómo funciona
             </a>
           </div>
+          <p className="mt-4 text-sm text-muted-foreground">
+            ¿Ya tenés cuenta?{" "}
+            <a href={PORTAL_URL} className="font-semibold text-accent underline-offset-2 hover:underline">
+              Ingresá al portal →
+            </a>
+          </p>
           {(agencyCount > 0 || vehicleCount > 0) && (
             <p className="mt-6 text-sm text-muted-foreground">
               {agencyCount > 0 && <span className="font-semibold text-foreground">{agencyCount} agencias</span>}
