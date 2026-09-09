@@ -3070,9 +3070,13 @@ export default function CarDetailsScreen() {
           }
 
           const docRef = doc(db, "vehicles", vehicle.id);
-          await updateDoc(docRef, { 
+          await updateDoc(docRef, {
             status: "deleted",
-            updatedAt: serverTimestamp() 
+            // Sin esto el auto queda con published:true y sigue apareciendo
+            // en la web (marketplace filtra por published, no por status).
+            published: false,
+            isFeatured: false,
+            updatedAt: serverTimestamp()
           });
           showAlert("Eliminado", "La publicación ha sido eliminada.", "success", () => {
             router.replace("/(tabs)/mycars");

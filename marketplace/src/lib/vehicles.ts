@@ -77,6 +77,27 @@ export interface PublicVehicle {
 const FETCH_BATCH_SIZE = 500;
 const PAGE_SIZE = 24;
 
+// Estados en los que un auto NO debe aparecer en el feed / la ficha, aunque
+// tenga `published: true` en el doc. Pasa seguido: el borrado de la app
+// (app/car/[id].tsx) solo setea `status: "deleted"` y se olvida de bajar
+// `published`, así que sin este filtro esos autos quedan visibles para
+// siempre en la web. Autos legítimos tienen `status: "available"` o el campo
+// vacío (docs viejos) — todo lo demás se oculta.
+const HIDDEN_STATUSES = new Set([
+  "deleted",
+  "sold",
+  "reserved",
+  "rejected",
+  "rejected_limit",
+  "blocked",
+  "paused",
+  "archived",
+]);
+
+function isVisible(data: FirebaseFirestore.DocumentData): boolean {
+  return !HIDDEN_STATUSES.has(data.status);
+}
+
 function toIso(ts: unknown): string | null {
   if (ts && typeof ts === "object" && "toDate" in ts) return (ts as { toDate: () => Date }).toDate().toISOString();
   return null;
@@ -179,7 +200,10 @@ export interface VehicleListResult {
 // getFilterOptions suelen pedirse juntos en la misma página (el feed).
 const fetchPublishedVehicles = cache(async (): Promise<PublicVehicle[]> => {
   const snap = await adminDb.collection("vehicles").where("published", "==", true).limit(FETCH_BATCH_SIZE).get();
-  return snap.docs.map((d) => mapVehicleDoc(d.id, d.data())).filter((v) => v.price > 0 && v.brand);
+  return snap.docs
+    .filter((d) => isVisible(d.data()))
+    .map((d) => mapVehicleDoc(d.id, d.data()))
+    .filter((v) => v.price > 0 && v.brand);
 });
 
 // isDealer/logo del vendedor no están denormalizados en el doc del vehículo
@@ -262,7 +286,7 @@ export async function getVehicle(id: string): Promise<PublicVehicle | null> {
   const snap = await adminDb.doc(`vehicles/${id}`).get();
   if (!snap.exists) return null;
   const data = snap.data()!;
-  if (!data.published || data.status === "sold" || data.status === "deleted") return null;
+  if (!data.published || !isVisible(data)) return null;
   return mapVehicleDoc(snap.id, data);
 }
 
@@ -273,7 +297,9 @@ export async function getVehiclesByIds(ids: string[]): Promise<PublicVehicle[]> 
   if (unique.length === 0) return [];
   const snaps = await Promise.all(unique.map((id) => adminDb.doc(`vehicles/${id}`).get()));
   const byId = new Map(
-    snaps.filter((s) => s.exists && s.data()?.published).map((s) => [s.id, mapVehicleDoc(s.id, s.data()!)])
+    snaps
+      .filter((s) => s.exists && s.data()?.published && isVisible(s.data()!))
+      .map((s) => [s.id, mapVehicleDoc(s.id, s.data()!)])
   );
   return unique.map((id) => byId.get(id)).filter((v): v is PublicVehicle => !!v);
 }
@@ -313,9 +339,10 @@ export async function getSimilarVehicles(vehicle: PublicVehicle, take = 4): Prom
     .collection("vehicles")
     .where("published", "==", true)
     .where("brand", "==", vehicle.brand)
-    .limit(take + 1)
+    .limit(take + 5)
     .get();
   const similar = snap.docs
+    .filter((d) => isVisible(d.data()))
     .map((d) => mapVehicleDoc(d.id, d.data()))
     .filter((v) => v.id !== vehicle.id)
     .slice(0, take);
