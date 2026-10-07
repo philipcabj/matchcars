@@ -9,7 +9,7 @@
 "use client";
 
 import { Big_Shoulders, IBM_Plex_Mono } from "next/font/google";
-import { DownloadAppQr } from "@/components/DownloadAppQr";
+import { DownloadAppQr, goToAppDownload } from "@/components/DownloadAppQr";
 import { FREE_PLAN, PLAN_PRICING, PORTAL_CAPABILITIES, PORTAL_ITEMS } from "@/lib/plan-pricing";
 
 const display = Big_Shoulders({ subsets: ["latin"], weight: ["700", "800"], variable: "--font-plan-display" });
@@ -169,14 +169,21 @@ export function PlansDisplay({
               </div>
 
               {showDownloadCta && (
-                <a
-                  href="#descargar"
-                  className={`mt-auto rounded-lg py-2.5 text-center text-[13px] font-bold ${
-                    plan.recommended ? "bg-accent text-accent-foreground" : "border border-border text-foreground"
-                  }`}
-                >
-                  Empezar con {plan.title.replace("Plan ", "")}
-                </a>
+                <div className="mt-auto flex flex-col gap-1.5">
+                  <a
+                    href="#descargar"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      goToAppDownload("descargar");
+                    }}
+                    className={`rounded-lg py-2.5 text-center text-[13px] font-bold ${
+                      plan.recommended ? "bg-accent text-accent-foreground" : "border border-border text-foreground"
+                    }`}
+                  >
+                    Empezar con {plan.title.replace("Plan ", "")}
+                  </a>
+                  <p className="text-center text-[11px] text-muted-foreground">Se contrata desde la app</p>
+                </div>
               )}
             </div>
           );

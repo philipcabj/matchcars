@@ -11,8 +11,35 @@ import QRCode from "qrcode";
 
 const display = Big_Shoulders({ subsets: ["latin"], weight: ["700", "800"], variable: "--font-download-display" });
 
-const APPLE_URL = "https://apps.apple.com/ar/app/matchcars/id6757968664";
-const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
+export const APPLE_URL = "https://apps.apple.com/ar/app/matchcars/id6757968664";
+export const PLAY_URL = "https://play.google.com/store/apps/details?id=com.matchcars.app";
+
+// Clases que se aplican un momento al bloque cuando un CTA salta hasta él,
+// para que se note el salto (en desktop el bloque suele estar ya casi a la vista).
+const HIGHLIGHT_CLASSES = ["ring-4", "ring-accent", "ring-offset-4", "ring-offset-background"];
+const HIGHLIGHT_MS = 1600;
+
+// CTA "contratar" de las páginas públicas: en un celular un QR no sirve (no
+// podés escanear tu propia pantalla), así que abre directo la tienda del
+// sistema; en desktop baja hasta el bloque de QR y lo resalta.
+export function goToAppDownload(blockId: string) {
+  const ua = navigator.userAgent;
+  const isIos = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (isIos) {
+    window.location.href = APPLE_URL;
+    return;
+  }
+  if (/Android/.test(ua)) {
+    window.location.href = PLAY_URL;
+    return;
+  }
+
+  const block = document.getElementById(blockId);
+  if (!block) return;
+  block.scrollIntoView({ behavior: "smooth", block: "center" });
+  block.classList.add(...HIGHLIGHT_CLASSES);
+  setTimeout(() => block.classList.remove(...HIGHLIGHT_CLASSES), HIGHLIGHT_MS);
+}
 
 function useQrDataUrl(url: string): string | null {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -43,7 +70,7 @@ export function DownloadAppQr({
   return (
     <div
       id={id}
-      className={`${display.variable} flex flex-col items-center gap-6 rounded-[20px] bg-foreground p-8 text-background sm:flex-row sm:justify-between`}
+      className={`${display.variable} flex flex-col items-center gap-6 rounded-[20px] bg-foreground p-8 text-background transition-shadow sm:flex-row sm:justify-between`}
     >
       <div className="max-w-sm text-center sm:text-left">
         <p className="[font-family:var(--font-download-display)] text-[11px] font-semibold tracking-widest text-accent uppercase">
