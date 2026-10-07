@@ -1,3 +1,4 @@
+import { PortalSignupLink } from "@/components/PortalSignupLink";
 import { listAgencies } from "@/lib/agencies";
 import { listAllVehicleIds } from "@/lib/vehicles";
 import type { Metadata } from "next";
@@ -133,12 +134,13 @@ export default async function ParaAgenciasPage() {
             portal, unidos en un mismo ecosistema.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
+            <PortalSignupLink
               href={`${PORTAL_URL}/planes`}
+              position="hero"
               className="rounded-full bg-accent px-7 py-3.5 text-base font-bold text-accent-foreground shadow-[5px_5px_0_rgba(37,99,235,0.15)] transition hover:-translate-y-0.5"
             >
               Sumá tu agencia →
-            </a>
+            </PortalSignupLink>
             <a
               href="#como-funciona"
               className="rounded-full border-2 border-foreground px-6 py-3.5 text-base font-bold transition hover:bg-foreground hover:text-background"
@@ -259,12 +261,13 @@ export default async function ParaAgenciasPage() {
             Creá tu cuenta, cargá tu stock y empezá a recibir consultas hoy mismo.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a
+            <PortalSignupLink
               href={`${PORTAL_URL}/planes`}
+              position="footer"
               className="rounded-full bg-accent px-7 py-3.5 text-base font-bold text-accent-foreground transition hover:opacity-90"
             >
               Ver planes y crear cuenta →
-            </a>
+            </PortalSignupLink>
             <a
               href={PORTAL_URL}
               className="rounded-full border-2 border-background/40 px-6 py-3.5 text-base font-bold transition hover:border-background"
