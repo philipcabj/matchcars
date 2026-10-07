@@ -15,6 +15,10 @@ export function useAgencyMe() {
   // invitación ni plan pago). dashboard/layout.tsx usa esto para no mostrar
   // "Token inválido o expirado" crudo como si fuera un mensaje de negocio.
   const [sessionExpired, setSessionExpired] = useState(false);
+  // 403 de resolveMembership: la cuenta existe pero no tiene plan pago ni
+  // invitación — típicamente alguien que entró con Google/Apple desde la web
+  // antes de contratar en la app. dashboard/layout.tsx le muestra cómo seguir.
+  const [noPortalAccess, setNoPortalAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -26,11 +30,16 @@ export function useAgencyMe() {
         const token = await getIdToken();
         const res = await fetch("/api/agency/me", { headers: { Authorization: `Bearer ${token}` } });
         const json = await parseJsonResponse<AgencyMe>(res);
-        if (!cancelled) setData(json);
+        if (!cancelled) {
+          setData(json);
+          setError(null);
+          setNoPortalAccess(false);
+        }
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Error desconocido");
         setSessionExpired(e instanceof ApiClientError && e.status === 401);
+        setNoPortalAccess(e instanceof ApiClientError && e.status === 403);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -42,5 +51,5 @@ export function useAgencyMe() {
 
   const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  return { data, error, sessionExpired, loading, refetch };
+  return { data, error, sessionExpired, noPortalAccess, loading, refetch };
 }

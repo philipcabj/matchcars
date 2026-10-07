@@ -24,6 +24,9 @@ export { weeklyAgencyDigest } from "./digest";
 
 // Push proactivo + contador de favoritos (functions/src/notify.ts).
 export { notifyOnVehiclePublished, sellerStalePush, maintainLikesCount } from "./notify";
+
+// Mail "tu portal está activo" al pasar de gratis a pago (functions/src/portalWelcome.ts).
+export { sendPortalWelcomeEmail } from "./portalWelcome";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 // portal/src/app/dashboard/layout.tsx
 "use client";
 
+import { NoPortalAccess } from "@/components/NoPortalAccess";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
@@ -13,7 +14,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // resolveMembership (server) rechaza cuentas sin invitación y sin plan
   // pago — acá se traduce ese 403 en una pantalla clara en vez de un
   // dashboard roto a medio cargar.
-  const { error: agencyError, sessionExpired, loading: agencyLoading } = useAgencyMe();
+  const { error: agencyError, sessionExpired, noPortalAccess, loading: agencyLoading, refetch } = useAgencyMe();
 
   useEffect(() => {
     if (!initializing && !user) router.replace("/login");
@@ -24,6 +25,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <main className="flex flex-1 items-center justify-center">
         <p className="text-sm text-muted-foreground">Cargando…</p>
       </main>
+    );
+  }
+
+  if (noPortalAccess) {
+    return (
+      <NoPortalAccess
+        email={user.email}
+        onRetry={refetch}
+        onLogout={() => {
+          logout();
+          router.replace("/login");
+        }}
+      />
     );
   }
 

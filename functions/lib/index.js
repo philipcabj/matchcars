@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.parseSearch = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.maintainLikesCount = exports.sellerStalePush = exports.notifyOnVehiclePublished = exports.weeklyAgencyDigest = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.parseSearch = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.sendPortalWelcomeEmail = exports.maintainLikesCount = exports.sellerStalePush = exports.notifyOnVehiclePublished = exports.weeklyAgencyDigest = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -63,6 +63,9 @@ var notify_1 = require("./notify");
 Object.defineProperty(exports, "notifyOnVehiclePublished", { enumerable: true, get: function () { return notify_1.notifyOnVehiclePublished; } });
 Object.defineProperty(exports, "sellerStalePush", { enumerable: true, get: function () { return notify_1.sellerStalePush; } });
 Object.defineProperty(exports, "maintainLikesCount", { enumerable: true, get: function () { return notify_1.maintainLikesCount; } });
+// Mail "tu portal está activo" al pasar de gratis a pago (functions/src/portalWelcome.ts).
+var portalWelcome_1 = require("./portalWelcome");
+Object.defineProperty(exports, "sendPortalWelcomeEmail", { enumerable: true, get: function () { return portalWelcome_1.sendPortalWelcomeEmail; } });
 const metaCapiToken = (0, params_1.defineSecret)("META_CAPI_TOKEN");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const EXCLUDED_STATUSES = [
