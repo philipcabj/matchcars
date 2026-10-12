@@ -27,6 +27,9 @@ export { notifyOnVehiclePublished, sellerStalePush, maintainLikesCount } from ".
 
 // Mail "tu portal está activo" al pasar de gratis a pago (functions/src/portalWelcome.ts).
 export { sendPortalWelcomeEmail } from "./portalWelcome";
+
+// Cobro de seña por QR — Fase 1: conexión de Mercado Pago del vendedor (functions/src/mercadoPago.ts).
+export { mpOAuthStart, mpOAuthCallback, mpDisconnect, mpRefreshTokens } from "./mercadoPago";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

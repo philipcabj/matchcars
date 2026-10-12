@@ -29,6 +29,7 @@ const NAV_ITEMS: { label: string; href: string; icon: string; enabled: boolean; 
   // pantalla ya los dejaba entrar).
   { label: "Comisiones", href: "/dashboard/comisiones", icon: "💰", enabled: true, gate: "crm", sectionKey: "comisiones" },
   { label: "Costos", href: "/dashboard/costos", icon: "💵", enabled: true, gate: "crm", sectionKey: "costos" },
+  { label: "Cobros", href: "/dashboard/cobros", icon: "💳", enabled: true, gate: "none" },
   { label: "Reportes", href: "/dashboard/reports", icon: "📊", enabled: true, gate: "none", sectionKey: "reportes" },
   { label: "Planes", href: "/dashboard/plans", icon: "💎", enabled: true, gate: "none" },
 ];

@@ -265,5 +265,15 @@ service cloud.firestore {
       allow read: if request.auth != null && (request.auth.uid == uid || isStaff());
       allow write: if false;
     }
+
+    // Cuenta de cobro (Mercado Pago) del vendedor — sellerUid es el uid del
+    // particular o el agencyId. La escriben solo las Cloud Functions de
+    // functions/src/mercadoPago.ts. Los tokens viven en private/oauth, que a
+    // propósito no tiene match acá → denegado para cualquier cliente (igual
+    // que mpOAuthStates y mpAccountIndex).
+    match /sellerPaymentAccounts/{sellerUid} {
+      allow read: if request.auth != null && (request.auth.uid == sellerUid || isAgencyMember(sellerUid) || isStaff());
+      allow write: if false;
+    }
   }
 }
