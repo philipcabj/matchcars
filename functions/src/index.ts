@@ -30,6 +30,8 @@ export { sendPortalWelcomeEmail } from "./portalWelcome";
 
 // Cobro de seña por QR — Fase 1: conexión de Mercado Pago del vendedor (functions/src/mercadoPago.ts).
 export { mpOAuthStart, mpOAuthCallback, mpDisconnect, mpRefreshTokens } from "./mercadoPago";
+// Fase 2: generar el cobro de seña, webhook de MP y devolución (functions/src/senaPayments.ts).
+export { createSenaPayment, cancelSenaPayment, mpWebhook, refundSenaPayment } from "./senaPayments";
 const metaCapiToken = defineSecret("META_CAPI_TOKEN");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

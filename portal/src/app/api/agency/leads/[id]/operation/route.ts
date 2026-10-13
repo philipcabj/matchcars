@@ -48,8 +48,17 @@ export const POST = withApiErrors(async (request, ctx: RouteContext<"/api/agency
 
   const buyerAccessToken = randomUUID();
   const opRef = adminDb.collection("saleOperations").doc();
+  // Número corto correlativo por agencia ("OP-1042") — el que se usa para
+  // hablar con el comprador y el que figura en el cobro de Mercado Pago. Mismo
+  // contador que ensureOperationNumber en functions/src/senaPayments.ts (que
+  // se lo asigna a las operaciones creadas antes de que existiera).
+  const counterRef = adminDb.doc(`agencies/${agencyId}/counters/saleOperations`);
   await adminDb.runTransaction(async (t) => {
+    const counterSnap = await t.get(counterRef);
+    const number = (counterSnap.data()?.last ?? 1000) + 1;
+    t.set(counterRef, { last: number }, { merge: true });
     t.set(opRef, {
+      number,
       leadId: id,
       vehicleId: lead.vehicleId || null,
       sellerId: agencyId,

@@ -9,6 +9,7 @@
 "use client";
 
 import { SaleJourney } from "@/components/SaleJourney";
+import { SenaQrPayment } from "@/components/SenaQrPayment";
 import { ThousandsInput } from "@/components/ThousandsInput";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
@@ -232,6 +233,15 @@ export default function OperationDetailPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
         <div>
+          {op.number && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-mono font-semibold text-foreground">OP-{op.number}</span>
+              {" · "}
+              <Link href={`/dashboard/leads/${op.leadId}`} className="text-accent hover:underline">
+                ver lead
+              </Link>
+            </p>
+          )}
           <p className="text-base font-bold">
             {op.vehicleSnapshot?.brand} {op.vehicleSnapshot?.model} {op.vehicleSnapshot?.year}
           </p>
@@ -751,6 +761,16 @@ function ChecklistSection({
                 >
                   {generatingKey === item.key ? "Generando…" : "📄 Generar recibo"}
                 </button>
+              )}
+              {item.key === "sena" && op.status === "en_curso" && (
+                <SenaQrPayment
+                  saleOperationId={op.id}
+                  agencyId={op.sellerId}
+                  vehicleLabel={[op.vehicleSnapshot?.brand, op.vehicleSnapshot?.model, op.vehicleSnapshot?.year].filter(Boolean).join(" ") || "Auto"}
+                  buyerLabel={op.buyerLabel}
+                  operationNumber={op.number}
+                  onChanged={onChanged}
+                />
               )}
               {item.key === "informe_dominio" && (
                 <a

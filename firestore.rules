@@ -275,5 +275,12 @@ service cloud.firestore {
       allow read: if request.auth != null && (request.auth.uid == sellerUid || isAgencyMember(sellerUid) || isStaff());
       allow write: if false;
     }
+
+    // Cobros de seña (functions/src/senaPayments.ts) — solo lectura para la
+    // agencia dueña; los crea/actualiza únicamente el backend.
+    match /senaPayments/{paymentId} {
+      allow read: if request.auth != null && (request.auth.uid == resource.data.sellerUid || isAgencyMember(resource.data.sellerUid) || isStaff());
+      allow write: if false;
+    }
   }
 }

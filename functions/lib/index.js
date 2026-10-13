@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.parseSearch = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.mpRefreshTokens = exports.mpDisconnect = exports.mpOAuthCallback = exports.mpOAuthStart = exports.sendPortalWelcomeEmail = exports.maintainLikesCount = exports.sellerStalePush = exports.notifyOnVehiclePublished = exports.weeklyAgencyDigest = void 0;
+exports.ogPreview = exports.startBulkImport = exports.autoEnhancePhoto = exports.sendMetaConversionEvent = exports.parseSearch = exports.generateVehicleDescription = exports.detectVehicleFeature = exports.analyzeCarPhotos = exports.chatWithAdvisor = exports.runPostSaleTasks = exports.onSaleConfirmed = exports.resolvePendingSaleConfirmations = exports.expireFeaturedListings = exports.logVehicleCreatedActivity = exports.assignPublicationCode = exports.enforceVehicleLimit = exports.refundSenaPayment = exports.mpWebhook = exports.cancelSenaPayment = exports.createSenaPayment = exports.mpRefreshTokens = exports.mpDisconnect = exports.mpOAuthCallback = exports.mpOAuthStart = exports.sendPortalWelcomeEmail = exports.maintainLikesCount = exports.sellerStalePush = exports.notifyOnVehiclePublished = exports.weeklyAgencyDigest = void 0;
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -72,6 +72,12 @@ Object.defineProperty(exports, "mpOAuthStart", { enumerable: true, get: function
 Object.defineProperty(exports, "mpOAuthCallback", { enumerable: true, get: function () { return mercadoPago_1.mpOAuthCallback; } });
 Object.defineProperty(exports, "mpDisconnect", { enumerable: true, get: function () { return mercadoPago_1.mpDisconnect; } });
 Object.defineProperty(exports, "mpRefreshTokens", { enumerable: true, get: function () { return mercadoPago_1.mpRefreshTokens; } });
+// Fase 2: generar el cobro de seña, webhook de MP y devolución (functions/src/senaPayments.ts).
+var senaPayments_1 = require("./senaPayments");
+Object.defineProperty(exports, "createSenaPayment", { enumerable: true, get: function () { return senaPayments_1.createSenaPayment; } });
+Object.defineProperty(exports, "cancelSenaPayment", { enumerable: true, get: function () { return senaPayments_1.cancelSenaPayment; } });
+Object.defineProperty(exports, "mpWebhook", { enumerable: true, get: function () { return senaPayments_1.mpWebhook; } });
+Object.defineProperty(exports, "refundSenaPayment", { enumerable: true, get: function () { return senaPayments_1.refundSenaPayment; } });
 const metaCapiToken = (0, params_1.defineSecret)("META_CAPI_TOKEN");
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const EXCLUDED_STATUSES = [

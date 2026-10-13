@@ -216,6 +216,9 @@ export type MetodoPagoResto = "efectivo" | "financiado_propio" | "financiado_ext
 
 export interface SaleOperation {
   id: string;
+  // "OP-1042" — correlativo por agencia. null en operaciones viejas hasta que
+  // se les cobra una seña (ver ensureOperationNumber en functions/src/senaPayments.ts).
+  number: number | null;
   leadId: string;
   vehicleId: string | null;
   sellerId: string;

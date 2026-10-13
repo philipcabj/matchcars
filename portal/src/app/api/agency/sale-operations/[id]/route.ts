@@ -51,6 +51,7 @@ function serialize(
 
   return {
     id,
+    number: typeof data.number === "number" ? data.number : null,
     leadId: data.leadId,
     vehicleId: data.vehicleId ?? null,
     sellerId: data.sellerId,
@@ -460,8 +461,20 @@ export const PATCH = withApiErrors(async (request, ctx: RouteContext<"/api/agenc
       }
     }
 
+    // Una seña cobrada por QR saca el auto de la web sin tocar su status (ver
+    // senaHold en functions/src/senaPayments.ts). Si la operación se cancela,
+    // el auto vuelve a como estaba — la devolución de la plata es aparte
+    // (Cobros → Devolver), no se hace sola.
+    if (status === "cancelada" && op.vehicleId) {
+      const vehicleRef = adminDb.doc(`vehicles/${op.vehicleId}`);
+      const v = (await vehicleRef.get()).data();
+      if (v?.senaHold?.saleOperationId === id && v.status === "available") {
+        await vehicleRef.update({ published: v.senaHold.wasPublished === true, senaHold: FieldValue.delete() });
+      }
+    }
+
     await ref.update({ status, updatedAt: FieldValue.serverTimestamp() });
-    const carLabel = `${op.vehicleSnapshot?.brand ?? ""} ${op.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
+    const carLabel =`${op.vehicleSnapshot?.brand ?? ""} ${op.vehicleSnapshot?.model ?? ""}`.trim() || "un auto";
     await logActivity({
       agencyId,
       actorUid: uid,

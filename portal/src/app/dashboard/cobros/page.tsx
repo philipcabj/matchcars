@@ -6,6 +6,7 @@
 // firestore.rules). Solo el dueño puede conectar/desconectar.
 "use client";
 
+import { SenaPaymentsHistory } from "@/components/SenaPaymentsHistory";
 import { useAgencyMe } from "@/hooks/useAgencyMe";
 import { app, db } from "@/lib/firebase-client";
 import { doc, onSnapshot, Timestamp } from "firebase/firestore";
@@ -325,15 +326,9 @@ function Cobros() {
         )}
       </section>
 
-      <section className="flex flex-col gap-1 rounded-xl border border-border bg-card p-5 opacity-60">
-        <p className="font-semibold">
-          Señas cobradas
-          <span className="ml-2 rounded bg-muted/20 px-1.5 py-0.5 align-[2px] text-[11px] font-semibold text-muted-foreground">
-            Próximamente
-          </span>
-        </p>
-        <p className="text-sm text-muted-foreground">Acá vas a ver cada seña: auto, comprador, monto y estado del pago.</p>
-      </section>
+      {agencyId && (
+        <SenaPaymentsHistory agencyId={agencyId} canRefund={agency?.myRole === "owner" || agency?.myRole === "manager"} />
+      )}
 
       <p className="border-l-[3px] border-border pl-3 text-xs text-muted-foreground">
         Mercado Pago cobra su comisión habitual sobre cada pago. Si la venta no se concreta, la devolución de la seña se
